@@ -213,17 +213,17 @@ internal long WriteTable(DbDataReader reader, MssqlTableDefinition table, TextWr
     Action<long, long> onRowsAndSourceBytes, CancellationToken cancellation);
 ```
 
-- [ ] **1. 寫失敗測試，group `values`。** decimal 38 不走 CLR decimal、offset與7位小數、GUID、money、float roundtrip、NULL/empty、Unicode／換行／NUL／`GO`／`$(name)`。以 `SqlDecimal` fixture、InvariantCulture、受限 DbDataReader 測：
+- [x] **1. 寫失敗測試，group `values`。** decimal 38 不走 CLR decimal、offset與7位小數、GUID、money、float roundtrip、NULL/empty、Unicode／換行／NUL／`GO`／`$(name)`。以 `SqlDecimal` fixture、InvariantCulture、受限 DbDataReader 測：
   ```csharp
   AssertEquals("[a]]b]", MssqlValueCodec.QuoteIdentifier("a]b"), "Quote each identifier");
   AssertContains(decimalSql, "1234567890123456789012345678.1234567890", "Keep all 38 digits");
   Assert(maxObservedStatementBytes <= 262144, "Bound statement bytes");
   Assert(maxObservedBatchBytes <= 4194304, "Bound data batch bytes");
   ```
-- [ ] **2. 跑 values group 為紅。** fake reader 對大值 GetString/GetValue、回頭讀 ordinal 立即 throw；偵測 row buffer 最大占用。不只測輸出相等，也測讀取方式。
-- [ ] **3. 實作 scalar codec 與串流 projection。** LOB 用 GetBytes／GetChars 小段；對 varchar/text 投影原始 varbinary 保留 code-page bytes，回復時指定來源 collation；Unicode 使用不丟失 UTF-16 code units 的編碼。文字／binary資料 literal使用typed hex expression，避免行首 GO／sqlcmd directive／控制字元穿透；text chunk 不切 surrogate pair。decimal 使用 SqlDecimal；不依當前文化格式化日期／數字。untyped XML 需串流投影及明確 XML 轉型／還原驗證，不能不小心 GetValue 整欄。
-- [ ] **4. 實作有限小列 INSERT 與計量。** 使用 source metadata 排除 computed／rowversion，identity 適當 ON/OFF。整列緩衝／encoded statement 接近預算時移交 Task 5，不回查來源。Task 5 完成前大列入口只能明確標為尚未實作並保持 UI 未接線，不能把暫時行為當正式支援上限。空表產生零筆INSERT；若無可插入欄位，以每來源列一個常數投影讀取並逐列INSERT DEFAULT VALUES，不把rowversion當持久值。
-- [ ] **5. 跑 values group 為綠，完成小資料 reader cases 後提交。** 建議訊息 `feat(mssql-export): stream typed row values within batch budgets`。
+- [x] **2. 跑 values group 為紅。** fake reader 對大值 GetString/GetValue、回頭讀 ordinal 立即 throw；偵測 row buffer 最大占用。不只測輸出相等，也測讀取方式。
+- [x] **3. 實作 scalar codec 與串流 projection。** LOB 用 GetBytes／GetChars 小段；對 varchar/text 投影原始 varbinary 保留 code-page bytes，回復時指定來源 collation；Unicode 使用不丟失 UTF-16 code units 的編碼。文字／binary資料 literal使用typed hex expression，避免行首 GO／sqlcmd directive／控制字元穿透；text chunk 不切 surrogate pair。decimal 使用 SqlDecimal；不依當前文化格式化日期／數字。untyped XML 需串流投影及明確 XML 轉型／還原驗證，不能不小心 GetValue 整欄。
+- [x] **4. 實作有限小列 INSERT 與計量。** 使用 source metadata 排除 computed／rowversion，identity 適當 ON/OFF。整列緩衝／encoded statement 接近預算時移交 Task 5，不回查來源。Task 5 完成前大列入口只能明確標為尚未實作並保持 UI 未接線，不能把暫時行為當正式支援上限。空表產生零筆INSERT；若無可插入欄位，以每來源列一個常數投影讀取並逐列INSERT DEFAULT VALUES，不把rowversion當持久值。
+- [x] **5. 跑 values group 為綠，完成小資料 reader cases 後提交。** 建議訊息 `feat(mssql-export): stream typed row values within batch budgets`。
 
 ## Task 5：大欄位 staging、分段與失敗保護
 
@@ -275,7 +275,7 @@ internal string CopyVerified(string publishedPath, MssqlArtifactReceipt receipt,
 
 `MssqlArtifactReceipt` 定義 job ID、temp/published identity、long bytes、SHA-256、table/row totals、完成標記。完成標記不包含自己的 hash；receipt 保存包含標記在內的最終 hash。
 
-- [ ] **1. 寫失敗測試，group `artifact`。** 以全新 fixture 建「舊版」與「他人暫存檔」，注入 truncate／disk-full／rename失敗／cancel／同意後換檔：
+- [x] **1. 寫失敗測試，group `artifact`。** 以全新 fixture 建「舊版」與「他人暫存檔」，注入 truncate／disk-full／rename失敗／cancel／同意後換檔：
   ```csharp
   Assert(File.ReadAllText(oldFixturePath) == "old fixture", "Failed publish keeps existing file");
   Assert(File.Exists(otherJobTemp), "Cleanup owns only this job temp");
@@ -283,11 +283,11 @@ internal string CopyVerified(string publishedPath, MssqlArtifactReceipt receipt,
   Assert(streamReadMax <= 81920, "Verification uses fixed buffers");
   ```
   ReadAllText 只可用於這幾個 bytes 的測試哨兵檔；產品 verifier 及大檔測試禁用。
-- [ ] **2. 跑 artifact group 為紅。** 增加同目錄mirror no-op、mirror target已存在不覆蓋、cleanup失敗殘留路徑、發布後cancel結果仍有PublishedPath。
-- [ ] **3. 實作 temp／hash／驗證。** 目標同目錄 CreateNew，名稱為隨機 `.mysqlpunk-export-<job>.partial`，不帶 `_backup_` 等 retention分類片段；UTF-8無BOM writer、incremental SHA-256與long計量、80KiB重讀。完成標記只在所有來源／DDL寫出成功才寫；關閉flush成功後才能verify。
-- [ ] **4. 實作發布邊界。** 正規路徑同一工作／process互斥，最後取消與destination stamp核對後進短不可取消區；不存在用不可覆寫Move，存在用File.Replace，保留可恢復位置。目標變更、鎖定、FS不支援replace均fail closed，不退回delete-then-move。以 Windows 實測核對外部競態；不得把process內互斥宣稱成所有程序的檔案鎖。清理只刪本工作明確owned暫存；已發布／可恢復檔不誤刪。
-- [ ] **5. 實作鏡像。** 串流copy到目的地獨有partial，驗證同receipt hash與長度，發布唯一正式名後才呼叫 `BackupRemoteMirrorService.PruneRemoteBackups(directory, retainCount)`。保留原分類規則，同時不可讓其他活躍工作partial被分類清掉；不呼叫舊MirrorBackup。錯誤／取消回worker以LocalCompletedMirrorIncomplete呈現。
-- [ ] **6. 跑 artifact group 為綠並提交。** 建議訊息 `feat(mssql-export): verify and publish exports and mirrors safely`。真UNC/權限/磁碟滿與發布競態仍列Task10。
+- [x] **2. 跑 artifact group 為紅。** 增加同目錄mirror no-op、mirror target已存在不覆蓋、cleanup失敗殘留路徑、發布後cancel結果仍有PublishedPath。
+- [x] **3. 實作 temp／hash／驗證。** 目標同目錄 CreateNew，名稱為隨機 `.mysqlpunk-export-<job>.partial`，不帶 `_backup_` 等 retention分類片段；UTF-8無BOM writer、incremental SHA-256與long計量、80KiB重讀。完成標記只在所有來源／DDL寫出成功才寫；關閉flush成功後才能verify。
+- [x] **4. 實作發布邊界。** 正規路徑同一工作／process互斥，最後取消與destination stamp核對後進短不可取消區；不存在用不可覆寫Move，存在用File.Replace，保留可恢復位置。目標變更、鎖定、FS不支援replace均fail closed，不退回delete-then-move。以 Windows 實測核對外部競態；不得把process內互斥宣稱成所有程序的檔案鎖。清理只刪本工作明確owned暫存；已發布／可恢復檔不誤刪。
+- [x] **5. 實作鏡像。** 串流copy到目的地獨有partial，驗證同receipt hash與長度，發布唯一正式名後才呼叫 `BackupRemoteMirrorService.PruneRemoteBackups(directory, retainCount)`。保留原分類規則，同時不可讓其他活躍工作partial被分類清掉；不呼叫舊MirrorBackup。錯誤／取消回worker以LocalCompletedMirrorIncomplete呈現。
+- [x] **6. 跑 artifact group 為綠並提交。** 建議訊息 `feat(mssql-export): verify and publish exports and mirrors safely`。真UNC/權限/磁碟滿與發布競態仍列Task10。
 
 ## Task 7：worker、進度／ETA 與取消 orchestration
 
