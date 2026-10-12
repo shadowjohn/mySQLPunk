@@ -77,7 +77,7 @@ namespace mySQLPunk.lib.MssqlExport
                 string projection = columns.Count == 0 ? "CAST(1 AS bit) AS [__mysqlpunk_row]" : string.Join(",", columns.Select(c => MssqlExportMetadataReader.Quote(c.Name)));
                 var command = new SqlCommand("SELECT " + projection + " FROM " + MssqlExportMetadataReader.Qualified(table.Key), session.Connection, transaction) { CommandTimeout = 0 };
                 var owner = new MssqlCommandOwner(command, cancellation);
-                try { activeReader = new MssqlRowReader(command.ExecuteReader(CommandBehavior.SequentialAccess), owner); return activeReader; }
+                try { activeReader = new MssqlRowReader(owner.ExecuteReader(CommandBehavior.SequentialAccess), owner); return activeReader; }
                 catch { owner.Dispose(); throw; }
             }
             catch { Dispose(); throw; }
@@ -117,10 +117,19 @@ namespace mySQLPunk.lib.MssqlExport
     {
         private DbCommand command;
         private CancellationTokenRegistration registration;
+        private readonly CancellationToken cancellation;
         internal MssqlCommandOwner(DbCommand command, CancellationToken cancellation)
         {
             this.command = command;
+            this.cancellation = cancellation;
             registration = cancellation.Register(() => { try { command.Cancel(); } catch (ObjectDisposedException) { } });
+        }
+        internal DbDataReader ExecuteReader(CommandBehavior behavior)
+        {
+            // The provider must observe cancellation during startup, not just receive
+            // an idle Cancel() before synchronous execution starts. Keep our separate
+            // registration alive for subsequent synchronous reads of the returned reader.
+            return command.ExecuteReaderAsync(behavior, cancellation).GetAwaiter().GetResult();
         }
         public void Dispose()
         {

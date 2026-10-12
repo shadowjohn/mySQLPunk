@@ -175,9 +175,8 @@ WHERE t.is_ms_shipped=0 ORDER BY t.object_id";
         {
             token.ThrowIfCancellationRequested();
             var result = new List<Dictionary<string, object>>();
-            using (var command = new SqlCommand(sql, connection, transaction) { CommandTimeout = 0 })
-            using (token.Register(() => { try { command.Cancel(); } catch (ObjectDisposedException) { } }))
-            using (var reader = command.ExecuteReader())
+            using (var owner = new MssqlCommandOwner(new SqlCommand(sql, connection, transaction) { CommandTimeout = 0 }, token))
+            using (var reader = owner.ExecuteReader(CommandBehavior.Default))
             {
                 while (reader.Read())
                 { token.ThrowIfCancellationRequested(); var row = new Dictionary<string, object>(StringComparer.Ordinal); for (int i = 0; i < reader.FieldCount; i++) row.Add(reader.GetName(i), reader.IsDBNull(i) ? null : reader.GetValue(i)); result.Add(row); }

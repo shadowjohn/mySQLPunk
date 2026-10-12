@@ -49,6 +49,21 @@ public static partial class SmokeTests
         Assert(schema.Fingerprint == estimated.Fingerprint, "Changing row estimate is not schema drift");
     }
 
+    private static void Metadata_CancelsBeforeAndDuringReaderStartup()
+    {
+        foreach (bool cancelBefore in new[] { true, false })
+        {
+            using (var cancellation = new System.Threading.CancellationTokenSource())
+            {
+                var command = new MetadataCommand(new List<string>(), null);
+                command.CancelAtStartup = cancelBefore ? null : cancellation;
+                if (cancelBefore) cancellation.Cancel();
+                using (var owner = new MssqlCommandOwner(command, cancellation.Token))
+                    AssertThrows<OperationCanceledException>(() => owner.ExecuteReader(CommandBehavior.SequentialAccess), "Startup cancellation must reach the provider even after idle Cancel was consumed");
+            }
+        }
+    }
+
     private static void Metadata_DisposesReaderAndCancellationBeforeCommand()
     {
         var events = new List<string>();
@@ -75,6 +90,7 @@ public static partial class SmokeTests
         private readonly List<string> events;
         private readonly System.Threading.CancellationTokenSource cancellation;
         public System.Data.Common.DbDataReader Reader;
+        public System.Threading.CancellationTokenSource CancelAtStartup;
         public MetadataCommand(List<string> events, System.Threading.CancellationTokenSource cancellation) { this.events = events; this.cancellation = cancellation; }
         public override void Cancel() { events.Add("cancel"); }
         protected override void Dispose(bool disposing) { if (disposing) { Assert(Reader == null || Reader.IsClosed, "Reader must close before command"); cancellation?.Cancel(); events.Add("command"); } base.Dispose(disposing); }
@@ -90,7 +106,15 @@ public static partial class SmokeTests
         public override object ExecuteScalar() { throw new NotSupportedException(); }
         public override void Prepare() { throw new NotSupportedException(); }
         protected override System.Data.Common.DbParameter CreateDbParameter() { throw new NotSupportedException(); }
-        protected override System.Data.Common.DbDataReader ExecuteDbDataReader(CommandBehavior behavior) { throw new NotSupportedException(); }
+        protected override System.Data.Common.DbDataReader ExecuteDbDataReader(CommandBehavior behavior) { return new DataTable().CreateDataReader(); }
+        protected override System.Threading.Tasks.Task<System.Data.Common.DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior, System.Threading.CancellationToken token)
+        {
+            // Cancel() while idle intentionally has no effect on a later execution.
+            // A provider that receives the token can reject cancellation during startup.
+            CancelAtStartup?.Cancel();
+            token.ThrowIfCancellationRequested();
+            return System.Threading.Tasks.Task.FromResult<System.Data.Common.DbDataReader>(new DataTable().CreateDataReader());
+        }
     }
 
     private static void Session_DisposesOwnerOnce()
