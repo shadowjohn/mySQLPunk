@@ -122,3 +122,15 @@ Reproduction command (the output directory must be fresh):
 ```
 
 Both client outcomes are retained: the tested classic version is unsuitable above this boundary; the tested official Go version meets the complete-file restore gate. This does not establish performance or compatibility for every sqlcmd/SQL Server version. Remaining SSH/native UI/older-engine/optional stress boundaries above are unchanged.
+
+## Combined branch and native fixture evidence
+
+Controller integration commit `bb38aa3` combines reviewed engine, native wizard, routing and acceptance harness. The only merge conflicts were additive smoke registrations; Wizard, Routing and Integration are all retained exactly once.
+
+- PASS Windows PowerShell `tests/Run-SmokeTests.ps1 -Configuration Release`, exit 0: runner reports 146 groups, including the live integration opt-in group intentionally SKIP without explicit `-Run`. This does not repeat or replace the separate Core/Large/Concurrency evidence above. All existing MYSQLPUNK process-environment filters/opt-ins were saved, cleared and restored.
+- PASS AutoReleasePolicy, explicit `build.bat Debug`, explicit `build.bat Release`, and `git diff --check`. Existing `nuget.exe not found, packages directory detected` fallback warning remains; successful builds are not warning-free. No packaging/release or AV change occurred. Logs: `.superpowers/sdd/implementation-plan/final-combined-smoke.log`, `final-combined-build-debug.log`, `final-combined-build-release.log`.
+- Native Computer Use observation, after explicit user retry: light/dark 1102x762 four-step fixture, schema/comments, large animated Punky on the right, one mute control, dual measured fixture bars, stale ETA becoming unknown, and delayed close awaiting cancellation cleanup. Terminal canceled state and Close/Reset accessible names were observed. Preview windows were closed through UI before builds.
+- A real `ShowDialog` fake-service regression caught and verified the WinForms CancelButton modal-exit fix: cancel export keeps the result visible after cleanup; titlebar close waits and then exits. Root-column layout was exercised at 640x480 with 1/1.5/2 simulated control scaling. These are control tests, not physical monitor DPI observations.
+- Still PENDING: actual audible playback, physical 100/150/200% DPI, native wizard driving a long real database job, SSH endpoint lifecycle, GUI import and production acceptance. No user saved connection or production database was accessed.
+
+Final whole-branch review is in progress; its verdict and any amended-code checks will be recorded below. The original master checkout and its pre-existing untracked files remain untouched; no master merge, push, tag or release has occurred.

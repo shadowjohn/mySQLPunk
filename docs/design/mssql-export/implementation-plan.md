@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，2026-10-12 修訂版；使用者已回覆「照修訂版進入實作計畫（建議）」。
 
-**Status:** 使用者於 2026-10-12 核准計畫並選擇「分工實作並逐項覆核」；實作已開始，checkbox 依驗證進度更新。畫面原型及規格核准不表示 SQL 還原、效能或正式程式已完成。
+**Status:** 使用者於 2026-10-12 核准計畫並選擇「分工實作並逐項覆核」；十個工作單元已整合；合併後完整 smoke、Debug／Release 通過，最終整體覆核進行中。checkbox 依各項實際證據更新。畫面原型及規格核准不表示 SQL 還原、效能或正式程式已完成。
 
 ## Global Constraints
 
@@ -382,17 +382,19 @@ param([switch]$Run, [string]$Server,
 
 runner要求明確server及全新／空output目錄，Integrated Security為第一版fixture認證。若測試環境只有其他認證，執行時補非command-line秘密輸入方式；不讀使用者已存連線或把密碼寫入args/log。不自動下載容器、安裝／啟動DB。明確記錄server與sqlcmd版本／architecture／資料庫collation與profile，敏感資訊不輸出。
 
-- [ ] **1. 寫與執行Core restore失敗測試。** 真實產物由新service生成，透過一次 `sqlcmd -S <explicit-fixture-server> -d <generated-target-db> -E -b -x -f 65001 -i <sql-path>` 還原；不使用mySQLPunk舊script splitter。來源／目標DB名必須是此次runner產生的 `mysqlpunk_export_<guid>_src/_dst`，清理前核對server、完整名稱及ownership token，絕不DROP傳入任意DB。runner預設只介紹用法、不建庫；-Run後只操作自己建的fixture。
-- [ ] **2. Core矩陣。** 兩個schema同名表、Unicode／`]`識別字；SQL型別精度／offset／collation／NULL／empty／tailspaces；keys/constraints/indexes/views/comment/identity正負increment／空表與新增；computed/rowversion預期；geometry／geography和其他unsupported預檢拒絕。對reader不可見definition／snapshot off／版本缺欄位也保留案例。使用catalog比較及streaming value hash，不只比行數。
-- [ ] **3. 大欄位restore矩陣。** 至少64MiBbinary、超過16MiBUnicode、多LOB/無PK/legacy text/ntext/image/untyped XML、不同tempdb/source collation及長WKT普通文字。assert還原DATALENGTH／streamingSHA-256相同；`GO`、`:r`、`$(name)`、NUL／surrogate不被工具展開。對fixture產物副本移除／重複／調換chunk，故意conversion error與錯誤後繼續的client，assert失敗列沒有新增／沒有NULL替代。測重複最後batch不再插入；成功先前列可存在，不把整份還原稱all-or-nothing。
-- [ ] **4. Large profile。** 持續產生而非一次配置大buffer，輸出檔實際 `Length > 2147483648`；10倍來源對照記錄peak working set/private bytes、rows、source/export bytes、elapsed與versions。出口／verify／mirror各自sampling，確認無隨總量線性成長；若峰值差異異常需分析，不只用含糊「跑完」。>1GiB單欄／接近型別理論上限另列optional stress，未跑保留pending，不能阻擋使用者已同意的v1範圍。
-- [ ] **5. Concurrency profile。** 第二連線以一個transaction同步修改父子表，驗證export同一快照；途中DDL變更須失敗；等待command取消／連線斷線、IO中斷／磁碟滿或受控故障stream、verify/mirror取消、Windows覆寫競態均核對舊檔與結果。來源交易必須在file verify前已釋放。設定snapshot只限自有fixture。
+- [x] **1. 寫與執行Core restore失敗測試。** 真實產物由新service生成，透過一次 `sqlcmd -S <explicit-fixture-server> -d <generated-target-db> -E -b -x -f 65001 -i <sql-path>` 還原；不使用mySQLPunk舊script splitter。來源／目標DB名必須是此次runner產生的 `mysqlpunk_export_<guid>_src/_dst`，清理前核對server、完整名稱及ownership token，絕不DROP傳入任意DB。runner預設只介紹用法、不建庫；-Run後只操作自己建的fixture。
+- [x] **2. Core矩陣。** 兩個schema同名表、Unicode／`]`識別字；SQL型別精度／offset／collation／NULL／empty／tailspaces；keys/constraints/indexes/views/comment/identity正負increment／空表與新增；computed/rowversion預期；geometry／geography和其他unsupported預檢拒絕。對reader不可見definition／snapshot off／版本缺欄位也保留案例。使用catalog比較及streaming value hash，不只比行數。
+- [x] **3. 大欄位restore矩陣。** 至少64MiBbinary、超過16MiBUnicode、多LOB/無PK/legacy text/ntext/image/untyped XML、不同tempdb/source collation及長WKT普通文字。assert還原DATALENGTH／streamingSHA-256相同；`GO`、`:r`、`$(name)`、NUL／surrogate不被工具展開。對fixture產物副本移除／重複／調換chunk，故意conversion error與錯誤後繼續的client，assert失敗列沒有新增／沒有NULL替代。測重複最後batch不再插入；成功先前列可存在，不把整份還原稱all-or-nothing。
+- [x] **4. Large profile。** 持續產生而非一次配置大buffer，輸出檔實際 `Length > 2147483648`；10倍來源對照記錄peak working set/private bytes、rows、source/export bytes、elapsed與versions。出口／verify／mirror各自sampling，確認無隨總量線性成長；若峰值差異異常需分析，不只用含糊「跑完」。>1GiB單欄／接近型別理論上限另列optional stress，未跑保留pending，不能阻擋使用者已同意的v1範圍。
+- [x] **5. Concurrency profile。** 第二連線以一個transaction同步修改父子表，驗證export同一快照；途中DDL變更須失敗；等待command取消／連線斷線、IO中斷／磁碟滿或受控故障stream、verify/mirror取消、Windows覆寫競態均核對舊檔與結果。來源交易必須在file verify前已釋放。設定snapshot只限自有fixture。
 - [ ] **6. Ssh與人工UI。** 明確測試SSH端點提供後驗證同job tunnel成功／取消／失敗釋放且main connection仍可用；缺環境保持pending。Native UI實際大資料作業、聲音一次／mute、長時間回應性另外列結果，不用HTML模擬截圖替代。
-- [ ] **7. 正式本機檢查。** 所有定向cases通過後，保存／清除既有filter跑一次完整既有smoke、`build.bat Debug`、`build.bat Release`、`git diff --check`。檢查release既有CodexVerify／test EXE排除，fixture只在ignored全新目錄；必要時增filename正反案例，不為本功能執行packaging／release。任何AV攔截均停止該測試管道並記pending。
-- [ ] **8. 文件與證據。** 操作文件寫實際已測sqlcmd命令、SNAPSHOT前提、支援／不支援能力、部分restore語意／資源成本、GUI匯入未驗證範圍、結果與取消文案。verification逐項填PASS/FAIL/PENDING、命令、版本、產物hash、記憶體記錄與未驗證理由；保留大檔local-only。history追加精準結果。
+- [x] **7. 正式本機檢查。** 所有定向cases通過後，保存／清除既有filter跑一次完整既有smoke、`build.bat Debug`、`build.bat Release`、`git diff --check`。檢查release既有CodexVerify／test EXE排除，fixture只在ignored全新目錄；必要時增filename正反案例，不為本功能執行packaging／release。任何AV攔截均停止該測試管道並記pending。
+- [x] **8. 文件與證據。** 操作文件寫實際已測sqlcmd命令、SNAPSHOT前提、支援／不支援能力、部分restore語意／資源成本、GUI匯入未驗證範圍、結果與取消文案。verification逐項填PASS/FAIL/PENDING、命令、版本、產物hash、記憶體記錄與未驗證理由；保留大檔local-only。history追加精準結果。
 - [ ] **9. 最終review及提交。** 依選定執行方式進行一次整體review，修正實質問題後只重跑受影響檢查；不循環產生無實質發現的review。建議訊息 `test(mssql-export): verify isolated restore and large export behavior`。未完成的DB／SSH／UI驗收保持明列，不宣稱功能全數驗收；merge/push/tag/release需另外授權。
 
-### 預定驗收命令（本文件尚未執行）
+已完成的隔離還原與合併後檢查見 [verification.md](verification.md)。第 6 項的 SSH、實際長作業 UI／聲音及實體 DPI 仍待環境／人工驗收；第 9 項整體覆核進行中。
+
+### 驗收命令（實際執行結果見 verification.md）
 
 ```powershell
 .\build.bat Debug
