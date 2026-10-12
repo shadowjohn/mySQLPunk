@@ -28,6 +28,7 @@ public static partial class SmokeTests
     public static int Main()
     {
         int passed = 0;
+        Run("MSSQL export integration opt-in", Integration_Run, ref passed);
         Run("MSSQL export worker progress", Worker_Progress, ref passed);
         Run("MSSQL export worker lifecycle", Worker_Lifecycle, ref passed);
         Run("MSSQL export worker failures", Worker_Failures, ref passed);

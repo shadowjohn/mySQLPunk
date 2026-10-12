@@ -85,7 +85,7 @@ public static partial class SmokeTests
             if(sql=="GO") { MaxBatch=Math.Max(MaxBatch,batch+bytes);Assert(batch+bytes<=4194304,"GO budget");batch=0;return; }
             bool metadata=sql.Contains("CREATE TABLE") || sql.Contains("INSERT INTO [dbo].[t]");
             if(!metadata)MaxStatement=Math.Max(MaxStatement,bytes);
-            batch+=bytes;Assert(bytes<=(metadata ? 4194300 : 262144),"Statement byte budget");
+            batch+=bytes;Assert(bytes<=(metadata ? 2097152 : 262144),"Statement byte budget");
             if(sql.Contains("INSERT INTO [dbo].[t]")) Inserts++;
             int at=sql.IndexOf(".WRITE(",StringComparison.Ordinal);
             if(at<0)return;
