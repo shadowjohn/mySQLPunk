@@ -83,6 +83,7 @@ namespace mySQLPunk.lib.MssqlExport
 
     internal static class MssqlExportLimits
     {
+        public const int ProgressLogLimit = 200;
         public const int SmallRowBytes = 262144;
         public const int StatementBytes = 262144;
         public const int BatchBytes = 4194304;
@@ -254,6 +255,61 @@ namespace mySQLPunk.lib.MssqlExport
             JobId = jobId; TemporaryPath = temporaryPath; IntendedTargetPath = publishedPath; Bytes = bytes; Sha256 = sha256;
             Tables = new List<MssqlTableRowCount>(tables).AsReadOnly(); CompletionMarker = marker;
             long total = 0; foreach (var table in Tables) total = checked(total + table.Rows); TotalRows = total;
+        }
+    }
+
+    internal enum MssqlExportStage { Preflight, Schema, Data, Verifying, Publishing, Mirroring, CancelRequested, Completed, Canceled, Failed, LocalCompletedMirrorIncomplete }
+    internal enum MssqlExportEstimationState { Estimating, Measuring, Waiting, Unreliable, Complete }
+    internal sealed class MssqlExportProgress
+    {
+        public Guid JobId { get; }
+        public MssqlExportStage Stage { get; }
+        public MssqlObjectKey CurrentTable { get; }
+        public long CurrentTableRows { get; }
+        public long CurrentTableSourceBytes { get; }
+        public long Rows { get; }
+        public long SourceBytes { get; }
+        public long WrittenBytes { get; }
+        public long? EstimatedRows { get; }
+        public long? EstimatedBytes { get; }
+        public int CompletedTables { get; }
+        public int TotalTables { get; }
+        public TimeSpan Elapsed { get; }
+        public TimeSpan LastProgressElapsed { get; }
+        // Source bytes/s during Data; processed local phase bytes/s during verification/mirroring.
+        public double? BytesPerSecond { get; }
+        public TimeSpan? Eta { get; }
+        public double? Percent { get; }
+        public MssqlExportEstimationState EstimationState { get; }
+        public long PhaseProcessedBytes { get; }
+        public long? PhaseTotalBytes { get; }
+        public string Message { get; }
+        internal MssqlExportProgress(Guid jobId, MssqlExportStage stage, MssqlObjectKey table, long tableRows, long tableBytes,
+            long rows, long sourceBytes, long writtenBytes, long? estimatedRows, long? estimatedBytes, int completed, int total,
+            TimeSpan elapsed, TimeSpan lastProgressElapsed, double? bytesPerSecond, TimeSpan? eta, double? percent, MssqlExportEstimationState estimation, long phaseBytes, long? phaseTotal, string message)
+        {
+            JobId = jobId; Stage = stage; CurrentTable = table; CurrentTableRows = tableRows; CurrentTableSourceBytes = tableBytes;
+            Rows = rows; SourceBytes = sourceBytes; WrittenBytes = writtenBytes; EstimatedRows = estimatedRows; EstimatedBytes = estimatedBytes;
+            CompletedTables = completed; TotalTables = total; Elapsed = elapsed; LastProgressElapsed = lastProgressElapsed; BytesPerSecond = bytesPerSecond; Eta = eta; Percent = percent; EstimationState = estimation;
+            PhaseProcessedBytes = phaseBytes; PhaseTotalBytes = phaseTotal; Message = (message ?? string.Empty).Substring(0, Math.Min(512, (message ?? string.Empty).Length));
+        }
+    }
+    internal sealed class MssqlExportResult
+    {
+        public Guid JobId { get; }
+        public MssqlExportStage Stage { get; }
+        public string PublishedPath { get; }
+        public string MirrorPath { get; }
+        public IReadOnlyList<MssqlTableRowCount> RowCounts { get; }
+        public TimeSpan Elapsed { get; }
+        public IReadOnlyList<string> Warnings { get; }
+        public IReadOnlyList<string> ResidualPaths { get; }
+        public string ErrorMessage { get; }
+        internal MssqlExportResult(Guid jobId, MssqlExportStage stage, string publishedPath, string mirrorPath,
+            IEnumerable<MssqlTableRowCount> rows, TimeSpan elapsed, IEnumerable<string> warnings, IEnumerable<string> residuals, string errorMessage)
+        {
+            JobId = jobId; Stage = stage; PublishedPath = publishedPath; MirrorPath = mirrorPath; RowCounts = MssqlNativeFacts.Copy(rows);
+            Elapsed = elapsed; Warnings = MssqlNativeFacts.Copy(warnings); ResidualPaths = MssqlNativeFacts.Copy(residuals); ErrorMessage = errorMessage;
         }
     }
 

@@ -28,6 +28,10 @@ public static partial class SmokeTests
     public static int Main()
     {
         int passed = 0;
+        Run("MSSQL export worker progress", Worker_Progress, ref passed);
+        Run("MSSQL export worker lifecycle", Worker_Lifecycle, ref passed);
+        Run("MSSQL export worker failures", Worker_Failures, ref passed);
+        Run("MSSQL export worker service", Worker_RequiresService, ref passed);
         Run("MSSQL export schema view headers", Schema_NormalizesOnlyViewHeader, ref passed);
         Run("MSSQL export schema index option gate", Schema_RejectsUndocumentedIndexOption, ref passed);
         Run("MSSQL export schema legacy ANSI gates", Schema_RejectsLegacyAnsiSemantics, ref passed);
