@@ -28,6 +28,12 @@ public static partial class SmokeTests
     public static int Main()
     {
         int passed = 0;
+        Run("MSSQL export schema view headers", Schema_NormalizesOnlyViewHeader, ref passed);
+        Run("MSSQL export schema index option gate", Schema_RejectsUndocumentedIndexOption, ref passed);
+        Run("MSSQL export schema legacy ANSI gates", Schema_RejectsLegacyAnsiSemantics, ref passed);
+        Run("MSSQL export schema native stages", Schema_WritesNativeBeforeAndAfter, ref passed);
+        Run("MSSQL export schema modes and failures", Schema_ModesCancellationAndFailures, ref passed);
+        Run("MSSQL export schema native writer", Schema_RequiresWriter, ref passed);
         Run("MSSQL export metadata mapping and validation", Metadata_MapsNativeFactsAndValidates, ref passed);
         Run("MSSQL export metadata startup cancellation", Metadata_CancelsBeforeAndDuringReaderStartup, ref passed);
         Run("MSSQL export metadata reader ownership", Metadata_DisposesReaderAndCancellationBeforeCommand, ref passed);

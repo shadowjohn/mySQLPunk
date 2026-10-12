@@ -98,8 +98,10 @@ FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.refer
                 if (t.Text("can_select") != null && !t.Flag("can_select")) add("UnreadableTable", null, "SELECT permission is required.");
                 foreach (var flag in new[] { "temporal_type", "ledger_type", "is_memory_optimized", "is_filetable", "is_node", "is_edge", "is_external", "is_remote_data_archive_enabled", "trigger_count", "fulltext_count", "security_policy_count", "unsupported_properties" })
                     if (t.Number(flag) != 0) add("UnsupportedTableFeature", null, "Unsupported table feature: " + flag);
+                if (request.Mode != MssqlExportMode.DataOnly && t.Text("uses_ansi_nulls") != null && !t.Flag("uses_ansi_nulls")) add("UnsupportedAnsiNulls", null, "Legacy ANSI_NULLS OFF cannot be recreated on modern SQL Server.");
                 foreach (var c in t.Columns)
                 {
+                    if (request.Mode != MssqlExportMode.DataOnly && c.Text("is_ansi_padded") != null && !c.Flag("is_ansi_padded") && new[] { "char", "varchar", "binary", "varbinary" }.Contains(c.NativeType)) add("UnsupportedAnsiPadding", c.Name, "Legacy ANSI_PADDING OFF cannot be recreated on modern SQL Server.");
                     if (c.NativeType == "geometry" || c.NativeType == "geography") add("UnsupportedSpatial", c.Name, "Native spatial values require a future codec.");
                     else if (c.Flag("is_user_defined") || c.Flag("is_assembly_type")) add("UnsupportedUdt", c.Name, "Alias and CLR user types are not supported.");
                     if (c.Number("xml_collection_id") != 0) add("UnsupportedTypedXml", c.Name, "Typed XML schema collections are not exported.");
@@ -111,7 +113,7 @@ FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.refer
                 }
                 foreach (var i in t.Indexes)
                 {
-                    if (i.Number("type") > 2 || i.Text("data_space_type") == "PS" || i.Number("data_compression") != 0 || i.Flag("is_hypothetical")) add("UnsupportedIndex", null, "Unsupported index/partition/compression: " + i.Name);
+                    if (i.Number("type") > 2 || i.Text("data_space_type") == "PS" || i.Number("data_compression") != 0 || i.Flag("is_hypothetical") || i.Flag("suppress_dup_key_messages")) add("UnsupportedIndex", null, "Unsupported index/partition/compression: " + i.Name);
                     if (i.Flag("has_filter") && i.Text("filter_definition") == null) add("UnreadableDefinition", null, "Index filter unavailable: " + i.Name);
                 }
                 foreach (var c in t.Constraints)
@@ -122,6 +124,7 @@ FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.refer
             }
             foreach (var v in schema.Views)
             {
+                if (v.Text("uses_ansi_nulls") != null && !v.AnsiNulls) issues.Add(new MssqlExportIssue("UnsupportedAnsiNulls", v.Key, null, "Legacy view ANSI_NULLS OFF cannot be recreated on modern SQL Server."));
                 if (string.IsNullOrEmpty(v.Definition)) issues.Add(new MssqlExportIssue("UnreadableDefinition", v.Key, null, "View definition is encrypted or unreadable."));
                 if (v.Number("index_count") != 0 || v.Number("trigger_count") != 0 || v.Number("unsupported_properties") != 0) issues.Add(new MssqlExportIssue("UnsupportedViewFeature", v.Key, null, "Indexed views, view triggers and view extended properties are unsupported."));
             }
