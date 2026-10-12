@@ -38,6 +38,9 @@ public static partial class SmokeTests
         Run("MSSQL export metadata startup cancellation", Metadata_CancelsBeforeAndDuringReaderStartup, ref passed);
         Run("MSSQL export metadata reader ownership", Metadata_DisposesReaderAndCancellationBeforeCommand, ref passed);
         Run("MSSQL export metadata native reader", Metadata_RequiresNativeReader, ref passed);
+        Run("MSSQL export lob continuation branches", Lob_ContinuationBranches, ref passed);
+        Run("MSSQL export lob lazy large row", Lob_LazyLargeRow, ref passed);
+        Run("MSSQL export lob UTF16 and cancellation", Lob_Utf16AndCancel, ref passed);
         Run("MSSQL export values scalars", Values_Scalars, ref passed);
         Run("MSSQL export values projection and streaming", Values_ProjectionAndStreaming, ref passed);
         Run("MSSQL export values budgets and handoff", Values_BudgetsAndHandoff, ref passed);

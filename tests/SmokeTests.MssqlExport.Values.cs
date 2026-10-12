@@ -74,7 +74,7 @@ public static partial class SmokeTests
             Assert(sink.Bytes==300000 && sink.PrefixValue=="5" && sink.Tail==9,"Handoff consumes retained prefix and forward-only remainder");
         }
         using(var reader=new ValueReader(new[]{new object[]{new byte[300000]}})) using(var output=new StringWriter())
-            AssertThrows<NotImplementedException>(()=>new MssqlDataScriptWriter().WriteTable(reader,ValueTable(ValueColumn("varbinary")),output,null,CancellationToken.None),"Task5 absent explicitly");
+            Assert(new MssqlDataScriptWriter().WriteTable(reader,ValueTable(ValueColumn("varbinary")),output,null,CancellationToken.None)==1,"Default large support");
     }
     private static void Values_DefaultAndCancel()
     {
@@ -93,7 +93,7 @@ public static partial class SmokeTests
     private sealed class ValueContinuationSink : IMssqlLargeRowWriter
     {
         internal long Bytes; internal string PrefixValue; internal int Tail;
-        public long WriteRow(DbDataReader reader, MssqlTableDefinition table, IReadOnlyList<MssqlColumnDefinition> columns, MssqlRowContinuation row, MssqlScriptBatchWriter output, CancellationToken cancellation) {
+        public long WriteRow(DbDataReader reader, MssqlTableDefinition table, IReadOnlyList<MssqlColumnDefinition> columns, MssqlRowContinuation row, MssqlScriptBatchWriter output, CancellationToken cancellation, Action<long> onAdditionalBytes) {
             var prefix=new char[row.ValueLength(0)]; row.CopyValueChars(0,0,prefix,0,prefix.Length); PrefixValue=new string(prefix); Bytes=row.CurrentByteOffset;
             Assert(row.BufferBytes<=262144,"Bounded retained row buffer");
             var bytes=new byte[4096]; int n;

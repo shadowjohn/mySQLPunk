@@ -368,6 +368,7 @@
     <Compile Include="lib\MssqlExport\MssqlSchemaScriptWriter.cs" />
     <Compile Include="lib\MssqlExport\MssqlValueCodec.cs" />
     <Compile Include="lib\MssqlExport\MssqlDataScriptWriter.cs" />
+    <Compile Include="lib\MssqlExport\MssqlLobScriptWriter.cs" />
     <Compile Include="lib\ConnectionConfigurationService.cs" />
     <Compile Include="lib\ConnectionBatchPropertiesService.cs" />
     <Compile Include="lib\ConnectionUriImportService.cs" />
