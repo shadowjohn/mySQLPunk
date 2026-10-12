@@ -57,6 +57,18 @@ public static partial class SmokeTests
                 AssertThrows<OperationCanceledException>(() => new MssqlExportMirror().CopyVerified(target, receipt, new MssqlMirrorOptions(remote, 1), null, canceled.Token), "Canceled mirror must not prune");
                 Assert(File.Exists(mirrorPath), "Canceled mirror preserves old backups");
             }
+            string consentPath = Path.Combine(root,"consent.sql");
+            File.WriteAllText(consentPath,"approved fixture A");
+            var approved = MssqlExportArtifact.CaptureDestination(consentPath,CancellationToken.None);
+            var approvedRequest = ArtifactRequest(consentPath,approved);
+            File.WriteAllText(consentPath,"changed fixture B");
+            var refreshed = MssqlExportArtifact.CaptureDestination(consentPath,CancellationToken.None);
+            using(var artifact=MssqlExportArtifact.Create(approvedRequest))
+            {
+                var receipt=FinishArtifact(artifact);artifact.Verify(receipt,null,CancellationToken.None);
+                AssertThrows<ArgumentException>(()=>artifact.Publish(refreshed,CancellationToken.None),"Recaptured stamp cannot refresh immutable request consent");
+                Assert(File.ReadAllText(consentPath)=="changed fixture B"&&artifact.PublishedPath==null,"Rejected refreshed consent preserves newer destination");
+            }
             string corrupt = Path.Combine(root,"postverify.sql");
             var absent = MssqlExportArtifact.CaptureDestination(corrupt,CancellationToken.None);
             using(var artifact=MssqlExportArtifact.Create(ArtifactRequest(corrupt,absent)))

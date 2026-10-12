@@ -130,13 +130,14 @@ namespace mySQLPunk.lib.MssqlExport
         internal string Publish(ExportDestinationStamp expectedDestination, CancellationToken cancellation)
         {
             if (disposed || !verified || PublishedPath != null) throw new InvalidOperationException("Artifact must be verified and unpublished");
-            if (expectedDestination == null || !string.Equals(expectedDestination.FullPath, request.TargetPath, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Consent stamp does not match destination");
+            var approved = request.Destination;
+            if (approved == null || !string.Equals(approved.FullPath, request.TargetPath, StringComparison.OrdinalIgnoreCase) || !SameDestination(expectedDestination, approved)) throw new ArgumentException("Consent stamp does not match the immutable request");
             var gate = MssqlArtifactGates.Get(request.TargetPath); gate.Wait(cancellation);
             try
             {
                 VerifyFile(TemporaryPath, receipt, null, cancellation);
                 var actual = CaptureCore(request.TargetPath, cancellation);
-                if (actual.Exists != expectedDestination.Exists || actual.FileIdentity != expectedDestination.FileIdentity || actual.Length != expectedDestination.Length || actual.LastWriteTimeUtc != expectedDestination.LastWriteTimeUtc || actual.Sha256 != expectedDestination.Sha256) throw new IOException("Destination changed after overwrite consent");
+                if (!SameDestination(actual, approved)) throw new IOException("Destination changed after overwrite consent");
                 using (var commit = new MssqlPublicationCommit(cancellation))
                 {
                     commit.Enter();
@@ -154,6 +155,12 @@ namespace mySQLPunk.lib.MssqlExport
                 return PublishedPath;
             }
             finally { gate.Release(); }
+        }
+        private static bool SameDestination(ExportDestinationStamp left, ExportDestinationStamp right)
+        {
+            return left != null && right != null && string.Equals(left.FullPath, right.FullPath, StringComparison.OrdinalIgnoreCase)
+                && left.Exists == right.Exists && left.FileIdentity == right.FileIdentity && left.Length == right.Length
+                && left.LastWriteTimeUtc == right.LastWriteTimeUtc && left.Sha256 == right.Sha256;
         }
         private void ObserveCandidate(string path)
         {
