@@ -187,17 +187,17 @@ internal void WriteBeforeData(MssqlExportSchema schema, MssqlExportRequest reque
 internal void WriteAfterData(MssqlExportSchema schema, MssqlExportRequest request, TextWriter output, CancellationToken cancellation);
 ```
 
-- [ ] **1. 寫失敗測試，group `schema`。** metadata fixture 含 native varchar／decimal(38,10)／datetimeoffset(7)、identity、computed persisted、rowversion、複合降冪索引／INCLUDE／filter、FK/CHECK trust 狀態、comment、多層 views。assert：
+- [x] **1. 寫失敗測試，group `schema`。** metadata fixture 含 native varchar／decimal(38,10)／datetimeoffset(7)、identity、computed persisted、rowversion、複合降冪索引／INCLUDE／filter、FK/CHECK trust 狀態、comment、多層 views。assert：
   ```csharp
   AssertContains(sql, "decimal(38,10)", "Keep native precision");
   AssertNotContains(sql, "USE [source_db]", "Restore target is chosen by caller");
   Assert(sql.IndexOf("CREATE TABLE") < sql.IndexOf("FOREIGN KEY"), "Create referenced tables first");
   AssertContains(sql, "GO", "View DDL has its own batch");
   ```
-- [ ] **2. 跑 schema group 為紅。** 加 circular FK、未包含 view/function/sequence／trigger、不可見 definition 的失敗案例；不能生成成功卻遺漏物件。
-- [ ] **3. 實作前後兩階段 writer。** 前段 schema/table、原生欄位與 default/computed；後段 keys/indexes、FK/CHECK、comments、依賴排序 views。自參照／循环 FK 留資料後建立。資料來源不含 computed／rowversion 值，摘要說明 rowversion 重生。僅資料兩段皆不建立物件；僅結構仍產生完整兩段。型別／identifier 不經 DatabaseDumpService mapper。
-- [ ] **4. 明定 restore 語意與 identity 處理。** 結構模式預期空白／無衝突目標，存在物件應明確失敗，不產生 DROP DATABASE/TABLE；DataOnly 要求相容既有表。identity 的 seed/increment 與匯入值，以及空表、負 increment 的後續新增須能供 Task 4 資料段及 Task 10 驗證；依設計不承諾來源配號間隙或完整 last_value 歷史，避免「已插最大值」被誤當全部規則。
-- [ ] **5. 跑 schema group 為綠並提交。** SQL tokens 測試不是還原證據；native execution 留 Task 10。建議訊息 `feat(mssql-export): script native schema and ordered dependencies`。
+- [x] **2. 跑 schema group 為紅。** 加 circular FK、未包含 view/function/sequence／trigger、不可見 definition 的失敗案例；不能生成成功卻遺漏物件。
+- [x] **3. 實作前後兩階段 writer。** 前段 schema/table、原生欄位與 default/computed；後段 keys/indexes、FK/CHECK、comments、依賴排序 views。自參照／循环 FK 留資料後建立。資料來源不含 computed／rowversion 值，摘要說明 rowversion 重生。僅資料兩段皆不建立物件；僅結構仍產生完整兩段。型別／identifier 不經 DatabaseDumpService mapper。
+- [x] **4. 明定 restore 語意與 identity 處理。** 結構模式預期空白／無衝突目標，存在物件應明確失敗，不產生 DROP DATABASE/TABLE；DataOnly 要求相容既有表。identity 的 seed/increment 與匯入值，以及空表、負 increment 的後續新增須能供 Task 4 資料段及 Task 10 驗證；依設計不承諾來源配號間隙或完整 last_value 歷史，避免「已插最大值」被誤當全部規則。
+- [x] **5. 跑 schema group 為綠並提交。** SQL tokens 測試不是還原證據；native execution 留 Task 10。建議訊息 `feat(mssql-export): script native schema and ordered dependencies`。
 
 ## Task 4：一般列串流、型別及批次預算
 
