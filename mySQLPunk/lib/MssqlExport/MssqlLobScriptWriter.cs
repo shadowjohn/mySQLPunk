@@ -121,7 +121,7 @@ namespace mySQLPunk.lib.MssqlExport
             string lengths=string.Join(",",columns.Select((c,i)=>"("+N(i)+",CONVERT(bigint,DATALENGTH("+Field(i)+")))"));
             checks+="IF EXISTS(SELECT 1 FROM "+values+" CROSS APPLY(VALUES "+lengths+") AS actual([Ordinal],[Bytes]) LEFT JOIN "+fields+" AS expected ON actual.[Ordinal]=expected.[Ordinal] WHERE expected.[Ordinal] IS NULL OR COALESCE(actual.[Bytes],0)<>expected.[Bytes] OR expected.[IsNull]<>CASE WHEN actual.[Bytes] IS NULL THEN 1 ELSE 0 END) THROW 51000,'LOB final length or null mismatch',1; ";
             string target=MssqlValueCodec.QuoteIdentifier(table.Key.Schema)+"."+MssqlValueCodec.QuoteIdentifier(table.Key.Name);
-            Guarded(checks+"INSERT INTO "+target+" ("+string.Join(",",columns.Select(c=>MssqlValueCodec.QuoteIdentifier(c.Name)))+") SELECT "+string.Join(",",columns.Select((c,i)=>c.NativeType=="xml" ? "CONVERT(xml,"+Field(i)+",1)" : Field(i)))+" FROM "+values+"; "+
+            Guarded(checks+"INSERT INTO "+target+" ("+string.Join(",",columns.Select(c=>MssqlValueCodec.QuoteIdentifier(c.Name)))+") SELECT "+string.Join(",",columns.Select((c,i)=>c.NativeType=="xml" ? "CONVERT(xml,"+Field(i)+",1)" : c.NativeType=="geometry" ? "geometry::Deserialize("+Field(i)+")" : Field(i)))+" FROM "+values+"; "+
                 "UPDATE "+state+" SET [Consumed]=1,[ConsumedThrough]="+N(sequence)+"; DELETE FROM "+values+"; DELETE FROM "+fields+";",output,true,true);
         }
         private string OpenField(int ordinal)

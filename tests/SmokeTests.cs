@@ -54,6 +54,9 @@ public static partial class SmokeTests
         Run("MSSQL export schema native stages", Schema_WritesNativeBeforeAndAfter, ref passed);
         Run("MSSQL export schema modes and failures", Schema_ModesCancellationAndFailures, ref passed);
         Run("MSSQL export schema native writer", Schema_RequiresWriter, ref passed);
+        Run("MSSQL export metadata native geometry discrimination", Metadata_Geometry, ref passed);
+        Run("MSSQL export values geometry inline", Values_Geometry, ref passed);
+        Run("MSSQL export lob geometry continuation and cancellation", Lob_Geometry, ref passed);
         Run("MSSQL export metadata mapping and validation", Metadata_MapsNativeFactsAndValidates, ref passed);
         Run("MSSQL export metadata storage and capability", Metadata_StorageAndCapability, ref passed);
         Run("MSSQL export metadata startup cancellation", Metadata_CancelsBeforeAndDuringReaderStartup, ref passed);

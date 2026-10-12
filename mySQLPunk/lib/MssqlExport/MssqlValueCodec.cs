@@ -18,7 +18,7 @@ namespace mySQLPunk.lib.MssqlExport
         {
             switch (column.NativeType) {
                 case "varchar": case "char": case "text": case "nvarchar": case "nchar": case "ntext":
-                case "xml": case "binary": case "varbinary": case "image": return true;
+                case "xml": case "binary": case "varbinary": case "image": case "geometry": return true;
                 default: return false;
             }
         }
@@ -26,6 +26,7 @@ namespace mySQLPunk.lib.MssqlExport
         {
             string name = QuoteIdentifier(column.Name);
             if (!IsBinaryProjected(column)) return name;
+            if (column.NativeType == "geometry") name += ".Serialize()";
             if (column.NativeType == "text") name = "CONVERT(varchar(max)," + name + ")";
             if (column.NativeType == "ntext" || column.NativeType == "xml") name = "CONVERT(nvarchar(max)," + name + ")";
             return "CONVERT(varbinary(max)," + name + ")";
@@ -33,6 +34,7 @@ namespace mySQLPunk.lib.MssqlExport
         internal static string BinaryPrefix(MssqlColumnDefinition column)
         {
             switch (column.NativeType) {
+                case "geometry": return "geometry::Deserialize(0x";
                 case "xml": return "CONVERT(xml,CONVERT(nvarchar(max),0x";
                 case "nvarchar": case "nchar": case "ntext": return "CONVERT(nvarchar(max),0x";
                 default: return "0x"; // Direct binary assignment preserves ANSI bytes in the target collation.
@@ -41,6 +43,7 @@ namespace mySQLPunk.lib.MssqlExport
         internal static string BinarySuffix(MssqlColumnDefinition column)
         {
             switch (column.NativeType) {
+                case "geometry": return ")";
                 case "xml": return "),1)";
                 case "nvarchar": case "nchar": case "ntext": return ")";
                 default: return "";

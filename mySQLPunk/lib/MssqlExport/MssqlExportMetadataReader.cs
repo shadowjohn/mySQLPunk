@@ -102,8 +102,9 @@ FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.refer
                 foreach (var c in t.Columns)
                 {
                     if (request.Mode != MssqlExportMode.DataOnly && c.Text("is_ansi_padded") != null && !c.Flag("is_ansi_padded") && new[] { "char", "varchar", "binary", "varbinary" }.Contains(c.NativeType)) add("UnsupportedAnsiPadding", c.Name, "Legacy ANSI_PADDING OFF cannot be recreated on modern SQL Server.");
-                    if (c.NativeType == "geometry" || c.NativeType == "geography") add("UnsupportedSpatial", c.Name, "Native spatial values require a future codec.");
-                    else if (c.Flag("is_user_defined") || c.Flag("is_assembly_type")) add("UnsupportedUdt", c.Name, "Alias and CLR user types are not supported.");
+                    bool nativeGeometry = c.NativeType == "geometry" && c.TypeSchema == "sys" && !c.Flag("is_user_defined");
+                    if (c.NativeType == "geography" || (c.NativeType == "geometry" && !nativeGeometry)) add("UnsupportedSpatial", c.Name, "Only native sys.geometry has a supported spatial codec.");
+                    if (!nativeGeometry && (c.Flag("is_user_defined") || c.Flag("is_assembly_type"))) add("UnsupportedUdt", c.Name, "Alias and CLR user types are not supported.");
                     if (c.Number("xml_collection_id") != 0) add("UnsupportedTypedXml", c.Name, "Typed XML schema collections are not exported.");
                     if (c.NativeType == "sql_variant" || !SupportedTypes.Contains(c.NativeType ?? "")) add("UnsupportedType", c.Name, "Unsupported native type: " + c.NativeType);
                     foreach (var flag in new[] { "is_filestream", "is_sparse", "is_column_set", "generated_always_type", "encryption_type", "is_hidden", "is_masked", "rule_object_id", "vector_dimensions" })
@@ -143,7 +144,7 @@ FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.refer
             }
             return issues.AsReadOnly();
         }
-        private static readonly HashSet<string> SupportedTypes = new HashSet<string>("bigint int smallint tinyint bit decimal numeric money smallmoney float real date time datetime datetime2 smalldatetime datetimeoffset char varchar text nchar nvarchar ntext binary varbinary image uniqueidentifier xml timestamp rowversion".Split(' '), StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> SupportedTypes = new HashSet<string>("bigint int smallint tinyint bit decimal numeric money smallmoney float real date time datetime datetime2 smalldatetime datetimeoffset char varchar text nchar nvarchar ntext binary varbinary image uniqueidentifier xml timestamp rowversion geometry".Split(' '), StringComparer.OrdinalIgnoreCase);
         private static void EnsureVisibility(SqlConnection c, SqlTransaction t, CancellationToken token)
         {
             var row = Query(c, t, "SELECT HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') allowed", token)[0];

@@ -9,6 +9,22 @@ using mySQLPunk.lib.MssqlExport;
 
 public static partial class SmokeTests
 {
+    // A geometry name alone must never exempt an alias/user CLR type from preflight.
+    private static void Metadata_Geometry()
+    {
+        foreach (var mode in new[] { MssqlExportMode.SchemaAndData, MssqlExportMode.DataOnly, MssqlExportMode.SchemaOnly })
+        foreach (var fact in new[] { "native", "user-schema", "user-defined", "geography" }) {
+            var c = new MssqlColumnDefinition(new Dictionary<string, object> {
+                { "column_id", 1 }, { "name", "g" }, { "type_name", fact == "geography" ? "geography" : "geometry" },
+                { "type_schema", fact == "user-schema" ? "dbo" : "sys" }, { "is_user_defined", fact == "user-defined" }, { "is_assembly_type", true } });
+            var t = ValueTable(c);
+            var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] { t.Key }, mode, false, Path.Combine(Path.GetTempPath(), "geometry.sql"), null, null);
+            var issues = new MssqlExportMetadataReader().Validate(new MssqlExportSchema(new[] { t }, null, null, 1, null), request);
+            Assert((issues.Count == 0) == (fact == "native"), "Only native sys.geometry accepted in " + mode + ": " + fact);
+            if (fact != "native") Assert(issues.Any(x => x.ColumnName == "g"), "Rejected type identifies column");
+        }
+    }
+
     private static void Metadata_RequiresNativeReader()
     {
         Assert(typeof(MssqlObjectKey).Assembly.GetType("mySQLPunk.lib.MssqlExport.MssqlExportMetadataReader") != null, "Native metadata reader must exist");

@@ -16,6 +16,20 @@ public static partial class SmokeTests
     { return new MssqlColumnDefinition(new Dictionary<string, object> { { "type_name", type }, { "column_id", id }, { "name", name }, { "is_identity", identity }, { "scale", 7 }, { "max_length", -1 } }); }
     private static MssqlTableDefinition ValueTable(params MssqlColumnDefinition[] columns)
     { return new MssqlTableDefinition(new MssqlObjectKey(1, "dbo", "t"), new Dictionary<string, object>(), columns, null, null); }
+    private static void Values_Geometry()
+    {
+        var g = ValueColumn("geometry", 1, "g]x");
+        AssertEquals("CONVERT(varbinary(max),[g]]x].Serialize())", MssqlValueCodec.SourceExpression(g), "Escaped source internal binary serialization");
+        using (var reader = new ValueReader(new[] { new object[] { new byte[] { 1, 0, 255 } }, new object[] { null }, new object[] { new byte[0] } }))
+        using (var output = new StringWriter()) {
+            long bytes = -1;
+            Assert(new MssqlDataScriptWriter().WriteTable(reader, ValueTable(g), output, (r,b) => bytes=b, CancellationToken.None) == 3, "Inline geometry rows");
+            string sql = output.ToString();
+            Assert(sql.Contains("VALUES (geometry::Deserialize(0x0100FF));") && sql.Contains("VALUES (NULL);") && sql.Contains("VALUES (geometry::Deserialize(0x));"), "Deserialize bytes; SQL NULL distinct from empty byte payload");
+            Assert(bytes == 3, "Projected geometry byte progress");
+        }
+    }
+
     private static void Values_Scalars()
     {
         var previous = CultureInfo.CurrentCulture;

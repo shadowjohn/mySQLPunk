@@ -21,11 +21,12 @@ public static partial class SmokeTests
     {
         string profile = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION");
         if (string.IsNullOrEmpty(profile)) { Console.WriteLine("SKIP live integration (explicit runner -Run required)"); return; }
-        Assert(new[] { "Core", "Large", "Concurrency", "ClientProbe", "FinalFix" }.Contains(profile), "Known integration profile");
+        Assert(new[] { "Core", "Large", "Concurrency", "ClientProbe", "FinalFix", "Geometry" }.Contains(profile), "Known integration profile");
         using (var fixture = new IntegrationFixture(profile))
         {
             if (profile == "ClientProbe") IntegrationClientProbe(fixture);
             else if (profile == "FinalFix") IntegrationFinalFix(fixture);
+            else if (profile == "Geometry") IntegrationGeometry(fixture);
             else if (profile == "Core") IntegrationCore(fixture);
             else if (profile == "Large") IntegrationLarge(fixture);
             else IntegrationConcurrency(fixture);
@@ -228,6 +229,111 @@ public static partial class SmokeTests
         f.Pass("Real DataOnly service artifact restored through documented classic one-session sqlcmd -E -b -x -f 65001 -i");
     }
 
+    private static void IntegrationGeometry(IntegrationFixture f)
+    {
+        Assert(Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_CLIENT") == "Classic", "Geometry requires documented classic sqlcmd");
+        f.Setup("geometry.sql");
+        // Fixture creation is independent from exporter allocation; no large string/byte array.
+        using(var setupMemory=new IntegrationMemory()) {
+            setupMemory.Stage="FixtureGenerationAndUpload";
+            IntegrationGeometryLine(f,"large-geometry.wkb","dbo.GeometryLarge",1100001);
+            IntegrationGeometryLine(f,"guard-geometry.wkb","dbo.GeometryGuard",20001);
+            f.Evidence["geometryFixtureMemorySeparateFromExporter"]=setupMemory.Snapshot();f.Save();
+        }
+        using(var c=f.Open(f.Source)) {
+            Assert(Convert.ToInt32(IntegrationFixture.Scalar(c,"SELECT CASE WHEN geometry::Deserialize(NULL) IS NULL THEN 1 ELSE 0 END"))==1,"Real Deserialize(NULL) returns SQL NULL");
+            long length=Convert.ToInt64(IntegrationFixture.Scalar(c,"SELECT DATALENGTH(g.Serialize()) FROM dbo.GeometryLarge"));
+            Assert(length>16L*1024*1024,"Actual serialized geometry exceeds 16MiB");f.Evidence["largeGeometrySerializedBytes"]=length;
+            Assert(Convert.ToInt32(IntegrationFixture.Scalar(c,"SELECT g.STIsValid() FROM dbo.GeometryCases WHERE id=8"))==0,"Constructible invalid polygon stays invalid");
+            Assert(Convert.ToInt32(IntegrationFixture.Scalar(c,"SELECT COUNT(*) FROM dbo.GeometryCases WHERE id=3 AND g.STSrid=3826 AND g.Z=3 AND g.M=4"))==1,"Fixture has independent point SRID/Z/M");
+        }
+        var req=f.Request("geometry.sql",false);
+        Assert(f.Service().Preflight(req,CancellationToken.None).CanStart,"Native geometry actual preflight");
+        var result=f.Export(req);Assert(result.Stage==MssqlExportStage.Completed,"Geometry service artifact: "+result.ErrorMessage);
+        f.RecordArtifact(result.PublishedPath);f.Restore(result.PublishedPath);IntegrationCompare(f,req);
+        using(var a=f.Open(f.Source))using(var b=f.Open(f.Target)) {
+            string observations="SELECT id,g.STSrid AS srid,g.STGeometryType() AS kind,g.STIsEmpty() AS empty,g.STIsValid() AS valid,g.STNumPoints() AS points,g.STPointN(1).Z AS z,g.STPointN(1).M AS m,h.STSrid AS secondSrid,h.STGeometryType() AS secondKind,h.STIsEmpty() AS secondEmpty FROM dbo.GeometryCases WHERE id<>8";
+            string invalid="SELECT id,g.STSrid AS srid,g.STIsValid() AS valid FROM dbo.GeometryCases WHERE id=8";
+            string left=IntegrationCatalog(a,observations)+"\n"+IntegrationCatalog(a,invalid),right=IntegrationCatalog(b,observations)+"\n"+IntegrationCatalog(b,invalid);
+            Assert(left==right,"Independent SRID/Z/M/type/empty/validity/point observations preserved");
+            File.WriteAllText(Path.Combine(f.Root,"geometry-observations-source.txt"),left);File.WriteAllText(Path.Combine(f.Root,"geometry-observations-target.txt"),right);
+            Assert(Convert.ToInt32(IntegrationFixture.Scalar(b,"SELECT COUNT(*) FROM dbo.GeometryCases WHERE id=1 AND g IS NULL AND h.STIsEmpty()=1"))==1,"SQL NULL distinct from valid empty geometry");
+            Assert(Convert.ToInt32(IntegrationFixture.Scalar(b,"SELECT g.STIsValid() FROM dbo.GeometryCases WHERE id=8"))==0,"Invalid geometry bytes never repaired");
+        }
+        f.Pass("Geometry real service classic sqlcmd restore preserves Serialize hashes native catalog SRID Z M empty invalid and curves");
+        // All supported modes use the same native type/projection contract.
+        var schemaReq=f.Request("geometry-schema-only.sql",false,MssqlExportMode.SchemaOnly,t=>t.Key.Name=="GeometryCases");
+        result=f.Export(schemaReq);Assert(result.Stage==MssqlExportStage.Completed,"Geometry SchemaOnly service");
+        using(var c=f.Open(f.Target))IntegrationFixture.Exec(c,"DROP TABLE dbo.GeometryCases;");
+        f.RecordArtifact(result.PublishedPath);f.Restore(result.PublishedPath);
+        using(var c=f.Open(f.Target))Assert(Convert.ToInt32(IntegrationFixture.Scalar(c,"SELECT COUNT(*) FROM dbo.GeometryCases"))==0,"SchemaOnly creates empty native geometry table");
+        var dataReq=f.Request("geometry-data-only.sql",false,MssqlExportMode.DataOnly,t=>t.Key.Name=="GeometryCases");
+        result=f.Export(dataReq);Assert(result.Stage==MssqlExportStage.Completed,"Geometry DataOnly service");f.RecordArtifact(result.PublishedPath);f.Restore(result.PublishedPath);
+        IntegrationCompare(f,req);
+        IntegrationGeometryGuards(f);
+        using(var c=f.Open(f.Source))IntegrationFixture.Exec(c,"CREATE TABLE dbo.GeometryRejectedGeography(g geography); CREATE TABLE dbo.GeometryRejectedIndex(id int NOT NULL PRIMARY KEY,g geometry); CREATE SPATIAL INDEX IX_GeometryRejected ON dbo.GeometryRejectedIndex(g) USING GEOMETRY_GRID WITH (BOUNDING_BOX=(0,0,100,100));");
+        foreach(var name in new[]{"GeometryRejectedGeography","GeometryRejectedIndex"})
+        foreach(var mode in new[]{MssqlExportMode.SchemaAndData,MssqlExportMode.DataOnly,MssqlExportMode.SchemaOnly}) {
+            var rejected=f.Request("reject-"+name+"-"+mode+".sql",false,mode,t=>t.Key.Name==name);
+            var pre=f.Service().Preflight(rejected,CancellationToken.None);string code=name=="GeometryRejectedGeography"?"UnsupportedSpatial":"UnsupportedIndex";
+            Assert(!pre.CanStart && pre.Issues.Any(x=>x.Code==code),"Actual unsupported preflight "+name+" "+mode);
+            var failed=f.Export(rejected);Assert(failed.Stage==MssqlExportStage.Failed && !File.Exists(rejected.TargetPath),"Actual unsupported geometry selection publishes nothing");
+        }
+        f.Pass("Geometry all modes and retained geography spatial-index preflight rejection");
+    }
+    private static void IntegrationGeometryLine(IntegrationFixture f,string filename,string table,int points)
+    {
+        string file=Path.Combine(f.Root,filename);
+        using(var stream=new FileStream(file,FileMode.CreateNew,FileAccess.Write,FileShare.None,65536))using(var writer=new BinaryWriter(stream)) {
+            writer.Write((byte)1);writer.Write((uint)2);writer.Write((uint)points);
+            for(int i=0;i<points;i++){writer.Write((double)i);writer.Write((double)(i%2));}
+        }
+        f.RecordArtifact(file);
+        using(var c=f.Open(f.Source))using(var stream=File.OpenRead(file))
+        using(var command=new SqlCommand("INSERT "+table+"(id,g) VALUES(1,geometry::STGeomFromWKB(@wkb,4326));",c){CommandTimeout=0}) {
+            command.Parameters.Add("@wkb",SqlDbType.VarBinary,-1).Value=stream;command.ExecuteNonQuery();
+        }
+    }
+    private static void IntegrationGeometryGuards(IntegrationFixture f)
+    {
+        using(var c=f.Open(f.Target))IntegrationFixture.Exec(c,"TRUNCATE TABLE dbo.GeometryGuard;");
+        var req=f.Request("geometry-guards.sql",false,MssqlExportMode.DataOnly,t=>t.Key.Name=="GeometryGuard");
+        var result=f.Export(req);Assert(result.Stage==MssqlExportStage.Completed,"Geometry guarded service artifact");f.RecordArtifact(req.TargetPath);
+        var batches=Regex.Split(File.ReadAllText(req.TargetPath),@"(?m)^GO\r?$").Where(s=>!string.IsNullOrWhiteSpace(s)).ToArray();
+        var chunks=Enumerable.Range(0,batches.Length).Where(i=>batches[i].Contains(".WRITE(")).ToArray();
+        int final=Array.FindLastIndex(batches,s=>s.Contains("INSERT INTO [dbo].[GeometryGuard]"));
+        Assert(chunks.Length>2 && final>=0,"Actual geometry uses chunked stage");
+        foreach(var fault in new[]{"missing","duplicate","outoforder","malformed","replay"}) {
+            using(var c=f.Open(f.Target))IntegrationFixture.Exec(c,"TRUNCATE TABLE dbo.GeometryGuard;");
+            var altered=new List<string>();
+            for(int i=0;i<batches.Length;i++) {
+                if(fault=="missing" && i==chunks[0])continue;
+                string sql=batches[i];
+                if(fault=="outoforder" && i==chunks[0])sql=batches[chunks[1]];
+                if(fault=="outoforder" && i==chunks[1])sql=batches[chunks[0]];
+                if(fault=="malformed" && i==chunks[0]) {
+                    // Corrupt serialized version byte without changing chunk/length accounting.
+                    int at=sql.IndexOf(".WRITE(0x",StringComparison.Ordinal)+9+8;
+                    Assert(at>17 && Uri.IsHexDigit(sql[at]),"Serialized geometry header mutation located");
+                    sql=sql.Substring(0,at)+"FF"+sql.Substring(at+2);
+                }
+                altered.Add(sql);if(fault=="duplicate" && i==chunks[0])altered.Add(sql);
+            }
+            altered.Add(batches[final]);
+            // A second attempted row cannot revive Failed; replay cannot insert twice either.
+            altered.AddRange(batches.Where(s=>!s.Contains("CREATE TABLE #mp_") || !s.Contains("LOB job already exists")));
+            string copy=Path.Combine(f.Root,"geometry-guard-"+fault+".sql");File.WriteAllText(copy,string.Join("\r\nGO\r\n",altered)+"\r\nGO\r\n",new UTF8Encoding(false));
+            f.Restore(copy,false);
+            using(var c=f.Open(f.Target)) {
+                Assert(Convert.ToInt32(IntegrationFixture.Scalar(c,"SELECT COUNT(*) FROM dbo.GeometryGuard"))==(fault=="replay"?1:0),"Fail-fast geometry failed row absent "+fault);
+                IntegrationFixture.Exec(c,"TRUNCATE TABLE dbo.GeometryGuard;");int errors=0;
+                foreach(string batch in altered)try{IntegrationFixture.Exec(c,batch);}catch(SqlException){errors++;}
+                Assert(errors>0 && Convert.ToInt32(IntegrationFixture.Scalar(c,"SELECT COUNT(*) FROM dbo.GeometryGuard"))==(fault=="replay"?1:0),"Continuing importer cannot revive geometry protocol "+fault);
+            }
+            f.Pass("Geometry "+fault+" fail-fast and continuing importer guards");
+        }
+    }
+
     private static void IntegrationCore(IntegrationFixture f)
     {
         f.Setup("core.sql"); f.Setup("core-lob.sql");
@@ -308,11 +414,12 @@ public static partial class SmokeTests
             {
                 string qualified=IntegrationFixture.Q(table.Schema)+"."+IntegrationFixture.Q(table.Name);
                 var expressions=new List<string>();
-                using(var cmd=new SqlCommand("SELECT c.name,TYPE_NAME(c.system_type_id) FROM sys.columns c WHERE object_id=OBJECT_ID("+IntegrationFixture.Lit(qualified)+") ORDER BY column_id",a))using(var r=cmd.ExecuteReader())
+                using(var cmd=new SqlCommand("SELECT c.name,ty.name FROM sys.columns c JOIN sys.types ty ON c.user_type_id=ty.user_type_id WHERE c.object_id=OBJECT_ID("+IntegrationFixture.Lit(qualified)+") ORDER BY column_id",a))using(var r=cmd.ExecuteReader())
                     while(r.Read())
                     {
                         string name=IntegrationFixture.Q(r.GetString(0)), type=r.GetString(1);
                         if(type=="timestamp")continue;
+                        if(type=="geometry")name+=".Serialize()";
                         if(type=="text")name="CONVERT(varchar(max),"+name+")";
                         if(type=="ntext"||type=="xml")name="CONVERT(nvarchar(max),"+name+")";
                         expressions.Add("CONVERT(varbinary(max),"+name+")");

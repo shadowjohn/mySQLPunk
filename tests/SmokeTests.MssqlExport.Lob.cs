@@ -13,6 +13,33 @@ public static partial class SmokeTests
 {
     // Regressions: default missing implementation, backward handoff reads, duplicate/lost
     // prefix bytes, unbounded chunks, and premature target INSERT.
+    private static void Lob_Geometry()
+    {
+        // First geometry retained, second partial, following NULL/empty/unread geometry forward only.
+        using (var reader = new LobReader(new long[] { 30, 18L*1024*1024+3, -1, 0, 300000 }))
+        using (var sink = new LobSink(true)) {
+            long bytes=0;
+            new MssqlDataScriptWriter().WriteTable(reader, ValueTable(Enumerable.Range(0,5).Select(i=>ValueColumn("geometry",i+1,"g"+i)).ToArray()), sink, (r,b)=>bytes=b, CancellationToken.None);
+            Assert(bytes==30+18L*1024*1024+3+300000 && reader.TotalBytes==bytes, "Retained/partial/unread geometry bytes counted exactly once");
+            Assert(sink.BinaryBytes==bytes && sink.Inserts==1 && sink.GeometryInserts==1, "All geometry stage fields reconstructed in one final row");
+        }
+        // Typed text requires staging before any geometry field is read.
+        var text = new MssqlColumnDefinition(new Dictionary<string,object>{{"type_name","text"},{"column_id",1},{"name","a"},{"collation_name","Latin1_General_100_BIN2"}});
+        using(var reader=new ValueReader(new[]{new object[]{new byte[0],new byte[]{1,2}}})) using(var output=new StringWriter()) {
+            new MssqlDataScriptWriter().WriteTable(reader,ValueTable(text,ValueColumn("geometry",2,"g")),output,null,CancellationToken.None);
+            Assert(output.ToString().Contains("geometry::Deserialize([c1])"), "Untouched geometry uses binary staging");
+        }
+        // A completed small geometry must survive metadata-only handoff without reread.
+        var columns=Enumerable.Range(0,512).Select(i=>ValueColumn(i==0?"geometry":"int",i+1,new string('中',123)+i.ToString("D4"))).ToArray();
+        using(var reader=new ValueReader(new[]{Enumerable.Range(0,512).Select(i=>i==0?(object)new byte[40000]:i).ToArray()})) using(var output=new StringWriter()) {
+            var observer=new LobContinuationObserver();new MssqlDataScriptWriter(observer).WriteTable(reader,ValueTable(columns),output,null,CancellationToken.None);
+            Assert(observer.Completed && output.ToString().Contains("geometry::Deserialize([c0])"), "Completed geometry suffix stripped before staged reconstruction");
+        }
+        using(var cancel=new CancellationTokenSource()) using(var reader=new LobReader(new long[]{18L*1024*1024},cancel)) using(var sink=new LobSink()) {
+            AssertThrows<OperationCanceledException>(()=>new MssqlDataScriptWriter().WriteTable(reader,ValueTable(ValueColumn("geometry")),sink,null,cancel.Token), "Geometry cancellation during bounded read");
+            Assert(sink.Inserts==0 && reader.TotalBytes<18L*1024*1024, "Canceled geometry never inserts target");
+        }
+    }
     private static void Lob_LazyLargeRow()
     {
         var lengths = new long[] { 64L*1024*1024, 18L*1024*1024+6, 0, -1 };
@@ -75,7 +102,7 @@ public static partial class SmokeTests
         private readonly bool verifyPattern; private readonly Dictionary<string,long> offsets=new Dictionary<string,long>();
         private readonly Dictionary<string,int> lastUnit=new Dictionary<string,int>();
         internal LobSink(bool verifyPattern=false){this.verifyPattern=verifyPattern;}
-        internal long BinaryBytes,UnicodeBytes; internal int Inserts,MaxStatement,MaxBatch;
+        internal long BinaryBytes,UnicodeBytes; internal int Inserts,GeometryInserts,MaxStatement,MaxBatch;
         public override Encoding Encoding { get { return new UTF8Encoding(false,true); } }
         public override void Write(char value) { if(value=='\n') { Consume(line.ToString().TrimEnd('\r'));line.Clear(); } else line.Append(value); }
         public override void Write(string value) { foreach(char c in value) Write(c); }
@@ -86,7 +113,7 @@ public static partial class SmokeTests
             bool metadata=sql.Contains("CREATE TABLE") || sql.Contains("INSERT INTO [dbo].[t]");
             if(!metadata)MaxStatement=Math.Max(MaxStatement,bytes);
             batch+=bytes;Assert(bytes<=(metadata ? 2097152 : 262144),"Statement byte budget");
-            if(sql.Contains("INSERT INTO [dbo].[t]")) Inserts++;
+            if(sql.Contains("INSERT INTO [dbo].[t]")) { Inserts++; if(sql.Contains("geometry::Deserialize([c0])") && sql.Contains("geometry::Deserialize([c4])")) GeometryInserts++; }
             int at=sql.IndexOf(".WRITE(",StringComparison.Ordinal);
             if(at<0)return;
             bool unicode=sql.Substring(at).StartsWith(".WRITE(CONVERT(nvarchar(max),0x",StringComparison.Ordinal);
