@@ -241,7 +241,7 @@ internal void CommitRow(TextWriter output);
 
 `encodedBytes` 是 codec 指定的原生 binary／varchar bytes／UTF-16 bytes；chunk writer 不保留呼叫者 buffer。型別、collation、欄位列表由 BeginRow 固定。小型非LOB值透過codec生成的scalarExpression交WriteScalar，一個受guard的batch設定typed欄位並標記完成；不能接受UI／外部任意SQL。先前small-row buffer內的scalar與文字／binary分別移交對應方法，無第二次來源讀取。CompleteColumn用於分段欄位，核對非NULL值的chunk／bytes並標記完成；NULL狀態與空值保持區別。
 
-- [ ] **1. 寫失敗測試，group `lob`。** 單元用惰性 reader 供 64 MiB binary、超過 16 MiB Unicode 與多欄位無 PK；不在 fixture 自己先配一整塊大字串。assert：
+- [x] **1. 寫失敗測試，group `lob`。** 單元用惰性 reader 供 64 MiB binary、超過 16 MiB Unicode 與多欄位無 PK；不在 fixture 自己先配一整塊大字串。assert：
   ```csharp
   Assert(maxRawBinaryChunk <= 65536, "Bound raw binary chunk");
   Assert(maxTextCodeUnits <= 16384, "Bound UTF-16 chunk");
@@ -249,10 +249,10 @@ internal void CommitRow(TextWriter output);
   Assert(finalTargetInserts == 1, "Only insert the complete row");
   Assert(sourceReadPasses == 1, "No PK or row reread required");
   ```
-- [ ] **2. 跑 lob group 為紅。** 測 NULL 與空值、尾空白、surrogate boundary、bytes 膨脹、small→large切換、text/ntext/image、untyped XML、cancel 中途。測試生成 guard 結構；SQL engine 實際拒絕缺段由 Task 10 驗證。
-- [ ] **3. 實作同 session 私有 staging protocol。** 使用工作專屬 `#temp` 名稱；每列紀錄 job/row/column/chunk index/received bytes/expected totals/null/completed/failed/consumed。非NULL先空 max 值，`.WRITE(chunk,NULL,0)` 追加；每個 batch 驗證上一狀態，以短 transaction 原子更新值與計數，錯誤 rollback 後標記失敗再拋出。NULL 不用 `.WRITE(NULL,...)` 代替。
-- [ ] **4. 實作最後 guard 與目標插入。** 同一短 transaction 驗證所有欄位完成、DATALENGTH、chunk數、順序及未 consumed，才 INSERT 並 consumed。staging缺失、缺段、重複、錯序、轉型失敗均無目標半列；不要用 TRY_CONVERT 的 NULL 吞錯。TRY/CATCH 每個 batch 完整閉合，變數不跨 GO；清除已插列內容但保留必要的消費狀態以拒絕重送最後批次。一般多列還原不承諾全檔單一 transaction。
-- [ ] **5. 跑 lob／values groups 為綠並提交。** 檢查輸出每個 statement／batch實際UTF-8大小；不以擴高16MiB門檻充當分段。建議訊息 `feat(mssql-export): reconstruct large values with guarded SQL chunks`。
+- [x] **2. 跑 lob group 為紅。** 測 NULL 與空值、尾空白、surrogate boundary、bytes 膨脹、small→large切換、text/ntext/image、untyped XML、cancel 中途。測試生成 guard 結構；SQL engine 實際拒絕缺段由 Task 10 驗證。
+- [x] **3. 實作同 session 私有 staging protocol。** 使用工作專屬 `#temp` 名稱；每列紀錄 job/row/column/chunk index/received bytes/expected totals/null/completed/failed/consumed。非NULL先空 max 值，`.WRITE(chunk,NULL,0)` 追加；每個 batch 驗證上一狀態，以短 transaction 原子更新值與計數，錯誤 rollback 後標記失敗再拋出。NULL 不用 `.WRITE(NULL,...)` 代替。
+- [x] **4. 實作最後 guard 與目標插入。** 同一短 transaction 驗證所有欄位完成、DATALENGTH、chunk數、順序及未 consumed，才 INSERT 並 consumed。staging缺失、缺段、重複、錯序、轉型失敗均無目標半列；不要用 TRY_CONVERT 的 NULL 吞錯。TRY/CATCH 每個 batch 完整閉合，變數不跨 GO；清除已插列內容但保留必要的消費狀態以拒絕重送最後批次。一般多列還原不承諾全檔單一 transaction。
+- [x] **5. 跑 lob／values groups 為綠並提交。** 檢查輸出每個 statement／batch實際UTF-8大小；不以擴高16MiB門檻充當分段。建議訊息 `feat(mssql-export): reconstruct large values with guarded SQL chunks`。
 
 ## Task 6：有界檔案驗證、安全發布與鏡像
 

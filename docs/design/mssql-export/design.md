@@ -2,7 +2,7 @@
 
 日期：2026-10-12
 
-狀態：互動畫面及本份修訂規格已獲使用者同意；2026-10-12 使用者回覆「照修訂版進入實作計畫（建議）」。[實作計畫](implementation-plan.md) 已整理，待審閱與選擇執行方式。尚未實作產品匯出引擎。
+狀態：互動畫面、修訂規格與[實作計畫](implementation-plan.md) 已獲使用者同意；2026-10-12 使用者選擇「同意計畫，分工實作並逐項覆核（建議）」。產品實作與隔離驗證進行中；目前證據以 implementation-plan.md 的完成標記與後續 verification.md 為準。
 
 2026-10-12 修訂：使用者要求調整單筆大欄位限制，關心 geometry／長文字，並接受極端型別後續再擴充。取消原草案「單列 SQL 超過 16 MiB 就拒絕」規則；一般長文字／binary 改為可分段輸出，原生 spatial 型別仍列後續擴充。型別可容納的大小是設計目標，不代表所有理論上限已完成實機驗收。
 
@@ -127,7 +127,7 @@ SQL Server 的 batch 長度受 network packet size 影響，總檔案可達數 G
 7. 匯入工具必須全檔維持同一 session，支援 GO，錯誤時停止，且不展開來源文字中的 sqlcmd `$(...)`。驗收使用單次 `sqlcmd -i`、`-b`、`-x` 及明確 UTF-8 輸入設定；不把必須同 session 的脚本分成多次連線執行。正式交付文件列出經驗證的實際參數；GUI 匯入只有通過同樣測試後才宣稱支援。
 8. 每列 INSERT 完就清掉該列 staging，不累積整張表。匯出端維持有界記憶體；還原端仍需足夠 tempdb／交易記錄與目標儲存空間容納當前大列，不能承諾無限資源。空間不足時，該列不得以殘缺值發布。
 
-以上是設計方案，尚未執行 SQL 驗證。文件依據：[Microsoft UPDATE .WRITE](https://learn.microsoft.com/en-us/sql/t-sql/queries/update-transact-sql?view=sql-server-ver17)、[GO 與 batch 範圍](https://learn.microsoft.com/en-us/sql/t-sql/language-elements/sql-server-utilities-statements-go?view=sql-server-ver17)。
+以下為設計依據；實際 SQL 驗證結果另記於交付證據，不以本節規格取代：[Microsoft UPDATE .WRITE](https://learn.microsoft.com/en-us/sql/t-sql/queries/update-transact-sql?view=sql-server-ver17)、[GO 與 batch 範圍](https://learn.microsoft.com/en-us/sql/t-sql/language-elements/sql-server-utilities-statements-go?view=sql-server-ver17)。
 
 ### 空間資料與後續擴充
 
@@ -214,7 +214,7 @@ Idle → Preflight → Reading/Writing → Verifying → Publishing → Mirrorin
 
 ## 11. 交付與流程狀態
 
-- 本次已交付獨立互動原型；真實匯出程式與 DB 驗收未完成。
+- 已交付獨立互動原型；真實匯出程式與隔離 DB 驗證進行中，尚未完成整體交付。
 - 本文件已獲同意，具體實作步驟與測試安排見 [implementation-plan.md](implementation-plan.md)。規格核准不擴張為 merge、push 或 release 授權。
 - 舊版入口相容、metadata／SQL writer、worker／取消／發布、精靈與進度、實機 fixture 是同一功能的必要工作，不能只接好畫面就宣布完成。
 - 開發過程保留既有檔案 BOM／換行、未相關工作樹內容；重要結果追加 `history.md`。
