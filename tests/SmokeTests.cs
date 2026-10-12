@@ -42,6 +42,7 @@ public static partial class SmokeTests
         Run("MSSQL export wizard terminal accessibility", Wizard_CancelTerminal, ref passed);
         Run("MSSQL export wizard modal cancellation", Wizard_ModalCancellation, ref passed);
         Run("MSSQL export wizard interface", Wizard_RequiresForm, ref passed);
+        Run("MSSQL export integration opt-in", Integration_Run, ref passed);
         Run("MSSQL export worker progress", Worker_Progress, ref passed);
         Run("MSSQL export worker lifecycle", Worker_Lifecycle, ref passed);
         Run("MSSQL export worker failures", Worker_Failures, ref passed);

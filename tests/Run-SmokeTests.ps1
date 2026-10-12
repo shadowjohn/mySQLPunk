@@ -143,7 +143,7 @@ if (!(Test-Path -LiteralPath $mysqlConnector)) {
     /r:System.Core.dll `
     /r:System.IO.Compression.dll `
     /r:System.IO.Compression.FileSystem.dll `
-    $source $preferencesSource $schemaSyncSource $erModelSource (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Schema.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Artifact.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Values.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Lob.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Worker.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Wizard.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Routing.cs")
+    $source $preferencesSource $schemaSyncSource $erModelSource (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Schema.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Artifact.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Values.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Lob.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Worker.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Wizard.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Routing.cs") (Join-Path $PSScriptRoot "SmokeTests.MssqlExport.Integration.cs")
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
