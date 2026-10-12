@@ -298,6 +298,7 @@
     <Compile Include="lib\SchemaReportPdfWriter.cs" />
     <Compile Include="ReportExportWizardForm.cs" />
     <Compile Include="MssqlExportWizardForm.cs" />
+    <Compile Include="Form1.MssqlExport.cs" />
     <Compile Include="ReportTemplatePreviewForm.cs" />
     <Compile Include="PunkyReportLoadingControl.cs" />
     <Compile Include="Localization.cs" />

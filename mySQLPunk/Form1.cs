@@ -6662,6 +6662,12 @@ namespace mySQLPunk
             IDatabase db = (IDatabase)connInfo["pdo"];
             string dbName = pathParts[1];
             string tableName = pathParts[3];
+            TreeDatabaseTarget target = BuildTargetFromNode(node);
+            if (IsMssqlExportTarget(target))
+            {
+                OpenMssqlExportWizard(target, dataOnly ? lib.MssqlExport.MssqlExportMode.DataOnly : lib.MssqlExport.MssqlExportMode.SchemaAndData, null, tableName, false);
+                return;
+            }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
@@ -6669,7 +6675,7 @@ namespace mySQLPunk
                 dialog.DefaultExt = "sql";
                 dialog.FileName = dbName + "_" + tableName + (dataOnly ? "_data" : "_structure_data") + ".sql";
 
-                if (dialog.ShowDialog() != DialogResult.OK)
+                if (ShowSqlExportSaveDialog(dialog) != DialogResult.OK)
                 {
                     return;
                 }
@@ -6881,7 +6887,7 @@ namespace mySQLPunk
                 dialog.DefaultExt = "sql";
                 dialog.FileName = selection.DatabaseName + "_" + selection.ObjectName + "_view.sql";
 
-                if (dialog.ShowDialog() != DialogResult.OK)
+                if (ShowSqlExportSaveDialog(dialog) != DialogResult.OK)
                 {
                     return;
                 }
@@ -6909,6 +6915,13 @@ namespace mySQLPunk
             }
 
             DatabaseObjectSelection selection = GetSelectedDatabaseObject();
+            if (IsMssqlExportTarget(target) && (selection == null || selection.GroupName == "Tables"))
+            {
+                bool tableDataOnly = selection != null && dataOnlyForTable;
+                OpenMssqlExportWizard(target, tableDataOnly ? lib.MssqlExport.MssqlExportMode.DataOnly : lib.MssqlExport.MssqlExportMode.SchemaAndData,
+                    null, selection == null ? null : selection.ObjectName, false);
+                return;
+            }
             MySqlExportOptions mysqlOptions = null;
             if (!dataOnlyForTable && selection == null && IsMySqlTarget(target))
             {
@@ -6922,7 +6935,7 @@ namespace mySQLPunk
                 dialog.DefaultExt = "sql";
                 dialog.FileName = BuildCurrentSelectionDumpFileName(dataOnlyForTable);
 
-                if (dialog.ShowDialog() != DialogResult.OK)
+                if (ShowSqlExportSaveDialog(dialog) != DialogResult.OK)
                 {
                     return;
                 }
@@ -7264,13 +7277,19 @@ namespace mySQLPunk
                 return;
             }
 
+            if (IsMssqlExportTarget(target))
+            {
+                OpenMssqlExportWizard(target, lib.MssqlExport.MssqlExportMode.SchemaAndData, null, null, false);
+                return;
+            }
+
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
                 dialog.Filter = Localization.T("Common.SqlFilesFilter");
                 dialog.DefaultExt = "sql";
                 dialog.FileName = target.DatabaseName + "_dump_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".sql";
 
-                if (dialog.ShowDialog() != DialogResult.OK)
+                if (ShowSqlExportSaveDialog(dialog) != DialogResult.OK)
                 {
                     return;
                 }
@@ -8046,6 +8065,12 @@ namespace mySQLPunk
                 return;
             }
 
+            if (IsMssqlExportTarget(target))
+            {
+                OpenMssqlExportWizard(target, lib.MssqlExport.MssqlExportMode.SchemaAndData, null, null, true);
+                return;
+            }
+
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
                 bool sqlite = target.Database is my_sqlite;
@@ -8053,7 +8078,7 @@ namespace mySQLPunk
                 dialog.DefaultExt = sqlite ? "sqlite" : "sql";
                 dialog.FileName = target.DatabaseName + "_backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + (sqlite ? ".sqlite" : ".sql");
 
-                if (dialog.ShowDialog() != DialogResult.OK)
+                if (ShowSqlExportSaveDialog(dialog) != DialogResult.OK)
                 {
                     return;
                 }

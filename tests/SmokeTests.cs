@@ -29,6 +29,10 @@ public static partial class SmokeTests
     {
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL export routing handlers", Routing_FourHandlers, ref passed);
+        Run("MSSQL export routing legacy branches", Routing_LegacyBranches, ref passed);
+        Run("MSSQL export routing seed resolution", Routing_SeedResolution, ref passed);
+        Run("MSSQL export routing result status", Routing_ResultStatus, ref passed);
         Run("MSSQL export wizard selection", Wizard_Selection, ref passed);
         Run("MSSQL export wizard preflight", Wizard_Preflight, ref passed);
         Run("MSSQL export wizard lifecycle", Wizard_Lifecycle, ref passed);
