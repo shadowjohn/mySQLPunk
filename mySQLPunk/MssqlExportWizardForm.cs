@@ -172,6 +172,9 @@ namespace mySQLPunk
             ThemeManager.MarkAsPrimary(next);
             AcceptButton = next;
             CancelButton = cancel;
+            // CancelButton assigns DialogResult.Cancel automatically. Keep cancellation
+            // inside the wizard so a modal caller can inspect the terminal result.
+            cancel.DialogResult = DialogResult.None;
             Shown += async (s, e) =>
             {
                 var work = Screen.FromControl(Owner ?? this).WorkingArea;
@@ -727,6 +730,7 @@ namespace mySQLPunk
                 queue.Rows[row].Tag = t.Key.ObjectId;
             }
             stage.Text = StageText(MssqlExportStage.Preflight);
+            status.Text = stage.Text;
             current.Text = "";
             percent.Text = T("估算中", "Estimating");
             written.Text = T("已寫入 0 bytes", "Written 0 bytes");
@@ -789,6 +793,8 @@ namespace mySQLPunk
                 processed.Add(last.CurrentTable.ObjectId);
             last = p;
             stage.Text = cancelRequested ? StageText(MssqlExportStage.CancelRequested) : StageText(p.Stage);
+            if (!cancelRequested)
+                status.Text = stage.Text;
             current.Text = p.CurrentTable == null ? "" : p.CurrentTable.Schema + "." + p.CurrentTable.Name;
             percent.Text = p.Percent.HasValue ? Math.Min(99, p.Percent.Value).ToString("0") + "%" : T("估算中", "Estimating");
             overall.Style = p.Percent.HasValue ? ProgressBarStyle.Continuous : ProgressBarStyle.Marquee;

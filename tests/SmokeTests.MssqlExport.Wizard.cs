@@ -214,6 +214,7 @@ public static partial class SmokeTests
             Assert(form.Controls.Find("mssqlToggleSound", true).Length == 1, "Mute only; no play or pause");
             service.Frame(service.Seen.JobId, 1234);
             WPump(() => WControl<ProgressBar>(form, "mssqlOverallProgress").Value == 43);
+            Assert(WControl<Label>(form, "mssqlStatus").Text == WControl<Label>(form, "mssqlStage").Text, "Running footer follows actual export stage");
             Assert(WControl<ProgressBar>(form, "mssqlTableProgress").Value == 50, "True separate table progress");
             service.Frame(service.Seen.JobId, 1234, true);
             WPump(() => WControl<Label>(form, "mssqlSpeed").Text.EndsWith("—"));
@@ -344,6 +345,72 @@ public static partial class SmokeTests
             WClick(form,"mssqlCancel"); Assert(form.IsDisposed,"Terminal close remains enabled");
         }
     }
+    private static void Wizard_ModalCancellation()
+    {
+        foreach (bool titlebarClose in new[] { false, true })
+        {
+            var service = new WizardService { Block = true };
+            using (var form = WForm(service, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql")))
+            using (var driver = new System.Windows.Forms.Timer { Interval = 20 })
+            {
+                int phase = 0;
+                bool cleanupObserved = false, terminalObserved = false;
+                Exception failure = null;
+                var deadline = Stopwatch.StartNew();
+                driver.Tick += (s, e) =>
+                {
+                    try
+                    {
+                        Assert(deadline.ElapsedMilliseconds < 6000, "Modal wizard fixture timed out");
+                        if (phase == 0 && WControl<Button>(form, "mssqlStart").Enabled)
+                        {
+                            WClick(form, "mssqlStart");
+                            WClick(form, "mssqlStart");
+                            phase = 1;
+                        }
+                        else if (phase == 1 && WControl<Button>(form, "mssqlStart").Enabled)
+                        {
+                            WClick(form, "mssqlStart");
+                            phase = 2;
+                        }
+                        else if (phase == 2 && service.Exporting)
+                        {
+                            if (titlebarClose) form.Close();
+                            else WClick(form, "mssqlCancel");
+                            phase = 3;
+                        }
+                        else if (phase == 3 && service.Canceled)
+                        {
+                            cleanupObserved = form.Visible && !form.IsDisposed;
+                            service.Release.Set();
+                            phase = 4;
+                        }
+                        else if (phase == 4 && form.Result != null)
+                        {
+                            terminalObserved = form.Visible && form.Modal;
+                            driver.Stop();
+                            form.Close();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                        driver.Stop();
+                        service.Release.Set();
+                        form.Close();
+                    }
+                };
+                driver.Start();
+                form.ShowDialog();
+                driver.Stop();
+                service.Release.Set();
+                if (failure != null) throw failure;
+                Assert(cleanupObserved && form.Result != null, "Modal close waits for worker cleanup and authoritative result");
+                Assert(titlebarClose || terminalObserved, "Modal Cancel must retain terminal result until explicit Close");
+            }
+        }
+    }
+
     private static int WizardPreview()
     {
         Application.EnableVisualStyles();
