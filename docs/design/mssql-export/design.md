@@ -221,4 +221,4 @@ Idle → Preflight → Reading/Writing → Verifying → Publishing → Mirrorin
 
 ## 2026-10-12 Geometry 擴充
 
-使用者明確要求繼續推進 Geometry `Serialize → 分段 binary → Deserialize`，取代初版對 geometry 值的延後決策。範圍與驗收見 [Geometry 規格](geometry-design.md)／[實作計畫](geometry-implementation-plan.md)；實際 SQL2025 還原、完整回歸與 Debug／Release 編譯已通過，獨立覆核進行中。其餘 provider、geography、spatial index 與既有未驗證環境邊界維持不變。
+使用者明確要求繼續推進 Geometry `Serialize → 分段 binary → Deserialize`，取代初版對 geometry 值的延後決策。範圍與驗收見 [Geometry 規格](geometry-design.md)／[實作計畫](geometry-implementation-plan.md)；實際 SQL2025 還原、完整回歸與 Debug／Release 編譯已通過；針對 5edf69d..e3d4998 的獨立完整擴充覆核亦通過，沒有需修正的問題。其餘 provider、geography、spatial index 與既有未驗證環境邊界維持不變。

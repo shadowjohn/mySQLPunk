@@ -48,6 +48,6 @@
 
 ### Controller completion
 
-- [ ] Review immutable extension diff against this spec once after implementation. Resolve material findings with one coordinated fix and scoped re-review; avoid duplicate task/final reviews for the same single-task diff.
-- [ ] Update current support docs/design matrix, history, and verification with actual evidence and residual boundaries. Existing prior v1 historical failures stay recorded. Preserve the original ignored fixture manifest under ruling13.
-- [ ] Keep feature branch/worktree for user acceptance; no merge/push/release in this task.
+- [x] Review immutable extension diff against this spec once after implementation. Resolve material findings with one coordinated fix and scoped re-review; avoid duplicate task/final reviews for the same single-task diff.
+- [x] Update current support docs/design matrix, history, and verification with actual evidence and residual boundaries. Existing prior v1 historical failures stay recorded. Preserve the original ignored fixture manifest under ruling13.
+- [x] Keep feature branch/worktree for user acceptance; no merge/push/release in this task.
