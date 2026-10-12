@@ -28,6 +28,9 @@ public static partial class SmokeTests
     public static int Main()
     {
         int passed = 0;
+        Run("MSSQL export metadata mapping and validation", Metadata_MapsNativeFactsAndValidates, ref passed);
+        Run("MSSQL export metadata reader ownership", Metadata_DisposesReaderAndCancellationBeforeCommand, ref passed);
+        Run("MSSQL export metadata native reader", Metadata_RequiresNativeReader, ref passed);
         Run("MSSQL export session owner", Session_DisposesOwnerOnce, ref passed);
         Run("MSSQL export session request", Request_CopiesSelectionAndRejectsInvalidMode, ref passed);
         Run("Geometry WKB 轉 WKT", TestGeometryWktConverter, ref passed);
