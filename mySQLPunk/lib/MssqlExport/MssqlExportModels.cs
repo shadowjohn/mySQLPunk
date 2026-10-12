@@ -55,6 +55,26 @@ namespace mySQLPunk.lib.MssqlExport
         }
     }
 
+    // Null selection and null seed mean database scope. An explicit empty or unresolved
+    // selection never broadens to all tables. Raw seeds use the existing provider tree
+    // representation (dbo => name, other schemas => schema.name), not SQL parsing.
+    internal sealed class MssqlExportWizardOptions
+    {
+        public MssqlExportMode Mode { get; }
+        public IReadOnlyList<MssqlObjectKey> InitialTables { get; }
+        public string InitialObjectName { get; }
+        public bool IncludeViews { get; }
+        public string DefaultFileName { get; }
+        public MssqlMirrorOptions Mirror { get; }
+        internal MssqlExportWizardOptions(MssqlExportMode mode, IReadOnlyList<MssqlObjectKey> initialTables = null, bool includeViews = true, string defaultFileName = null, MssqlMirrorOptions mirror = null, string initialObjectName = null)
+        {
+            if (!Enum.IsDefined(typeof(MssqlExportMode), mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+            Mode = mode; InitialTables = initialTables == null ? null : new List<MssqlObjectKey>(initialTables).AsReadOnly();
+            if (InitialTables != null && InitialTables.Any(x => x == null)) throw new ArgumentException("Null initial table", nameof(initialTables));
+            InitialObjectName = initialObjectName; IncludeViews = includeViews; DefaultFileName = defaultFileName; Mirror = mirror;
+        }
+    }
+
     internal sealed class MssqlExportRequest
     {
         public Guid JobId { get; }

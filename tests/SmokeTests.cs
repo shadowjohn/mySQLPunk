@@ -27,7 +27,16 @@ public static partial class SmokeTests
     [STAThread]
     public static int Main()
     {
+        if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL export wizard selection", Wizard_Selection, ref passed);
+        Run("MSSQL export wizard preflight", Wizard_Preflight, ref passed);
+        Run("MSSQL export wizard lifecycle", Wizard_Lifecycle, ref passed);
+        Run("MSSQL export wizard raw identity and reset", Wizard_RawSelectionAndReset, ref passed);
+        Run("MSSQL export wizard inspection close", Wizard_InspectionClose, ref passed);
+        Run("MSSQL export wizard layout simulation", Wizard_Layout, ref passed);
+        Run("MSSQL export wizard terminal accessibility", Wizard_CancelTerminal, ref passed);
+        Run("MSSQL export wizard interface", Wizard_RequiresForm, ref passed);
         Run("MSSQL export worker progress", Worker_Progress, ref passed);
         Run("MSSQL export worker lifecycle", Worker_Lifecycle, ref passed);
         Run("MSSQL export worker failures", Worker_Failures, ref passed);

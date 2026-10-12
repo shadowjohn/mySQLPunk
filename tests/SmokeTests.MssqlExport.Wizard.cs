@@ -1,0 +1,364 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Windows.Forms;
+using mySQLPunk;
+using mySQLPunk.lib.MssqlExport;
+
+public static partial class SmokeTests
+{
+    private static void Wizard_RequiresForm()
+    {
+        Assert(typeof(MssqlObjectKey).Assembly.GetType("mySQLPunk.MssqlExportWizardForm") != null, "Native export wizard must exist");
+    }
+
+    private static void WClick(Form form, string name)
+    {
+        // DoEvents ends its temporary loop and may uninstall the WinForms context.
+        // Real Application.Run retains it; restore it before invoking async clicks.
+        SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+        WControl<Button>(form, name).PerformClick();
+    }
+
+    private static T WControl<T>(Control form, string name)
+        where T : Control
+    {
+        return (T)form.Controls.Find(name, true).Single();
+    }
+
+    private static void WPump(Func<bool> condition)
+    {
+        var clock = Stopwatch.StartNew();
+        while (!condition() && clock.ElapsedMilliseconds < 6000)
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+        }
+
+        Assert(condition(), "Wizard UI condition timed out");
+    }
+
+    private sealed class WizardService : MssqlSqlExportService
+    {
+        internal readonly ManualResetEventSlim Release = new ManualResetEventSlim(false);
+        internal MssqlExportRequest Seen;
+        internal IProgress<MssqlExportProgress> Progress;
+        internal bool Exporting, Canceled, Block, Deny, Preview, BlockCatalog, BlockPreflight, Inspecting;
+        internal MssqlTableDefinition[] CatalogOverride;
+        internal int UiThread, CatalogThread, PreflightThread;
+        internal WizardService() : base(() =>
+        {
+            throw new Exception("Fixture must not open DB");
+        })
+        {
+            UiThread = Thread.CurrentThread.ManagedThreadId;
+        }
+
+        internal static MssqlTableDefinition Table(int id, string schema, string comment)
+        {
+            return new MssqlTableDefinition(new MssqlObjectKey(id, schema, "orders"), new Dictionary<string, object> { { "comment", comment }, { "estimated_rows", 100L }, { "estimated_bytes", 10000L } }, null, null, null);
+        }
+
+        internal override MssqlExportCatalog LoadCatalog(string db, CancellationToken token)
+        {
+            CatalogThread = Thread.CurrentThread.ManagedThreadId;
+            if (BlockCatalog)
+                WaitInspection(token);
+            return new MssqlExportCatalog(CatalogOverride ?? new[] { Table(1, "dbo", "訂單主檔"), Table(2, "sales", "long comment searchable 測試搜尋") }, 1, null);
+        }
+
+        internal override MssqlExportPreflight Preflight(MssqlExportRequest request, CancellationToken token)
+        {
+            PreflightThread = Thread.CurrentThread.ManagedThreadId;
+            if (BlockPreflight)
+                WaitInspection(token);
+            Seen = request;
+            return new MssqlExportPreflight(new MssqlExportSchema(request.Tables.Select(k => Table(k.ObjectId, k.Schema, "")), null, null, Deny ? 0 : 1, null), Deny ? new[] { new MssqlExportIssue("snapshot", null, null, "SNAPSHOT unavailable") } : null);
+        }
+
+        internal override MssqlExportResult Export(MssqlExportRequest request, IProgress<MssqlExportProgress> progress, CancellationToken token)
+        {
+            Seen = request;
+            Progress = progress;
+            Exporting = true;
+            if (Preview)
+            {
+                Frame(request.JobId, 12345678);
+                while (!token.IsCancellationRequested)
+                    Thread.Sleep(100);
+                Thread.Sleep(600);
+            }
+
+            if (Block)
+            {
+                while (!token.IsCancellationRequested)
+                    Thread.Sleep(10);
+                Canceled = true;
+                Release.Wait();
+            }
+
+            return new MssqlExportResult(request.JobId, token.IsCancellationRequested ? MssqlExportStage.Canceled : MssqlExportStage.Completed, null, null, null, TimeSpan.FromSeconds(2), null, null, null);
+        }
+
+        private void WaitInspection(CancellationToken token)
+        {
+            Inspecting = true;
+            while (!token.IsCancellationRequested)
+                Thread.Sleep(10);
+            Canceled = true;
+            Release.Wait();
+            token.ThrowIfCancellationRequested();
+        }
+
+        internal void Frame(Guid id, long bytes, bool stale = false)
+        {
+            Progress.Report(new MssqlExportProgress(id, MssqlExportStage.Data, Seen.Tables[0], 50, 5000, 50, 5000, bytes, 100, 10000, 0, Seen.Tables.Count, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(stale ? -10 : 2), 2500, TimeSpan.FromSeconds(3), 43, MssqlExportEstimationState.Measuring, 0, null, "fixture"));
+        }
+    }
+
+    private static MssqlExportWizardForm WForm(WizardService service, string path, MssqlObjectKey[] initial = null)
+    {
+        SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+        var form = new MssqlExportWizardForm(new Dictionary<string, object> { { "pdo", new object () }, { "isConnect", true } }, "fixture", new MssqlExportWizardOptions(MssqlExportMode.SchemaAndData, initial, true, path, null), service);
+        WControl<PunkyReportLoadingControl>(form, "mssqlPunky").Muted = !service.Preview;
+        return form;
+    }
+
+    private static void WConfirm(Form form)
+    {
+        WClick(form, "mssqlStart");
+        WClick(form, "mssqlStart");
+        WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+    }
+
+    private static void Wizard_Selection()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "wizard-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var service = new WizardService();
+            using (var form = WForm(service, Path.Combine(dir, "a.sql")))
+            {
+                form.Show();
+                WPump(() => WControl<DataGridView>(form, "mssqlTableList").Rows.Count == 2);
+                var grid = WControl<DataGridView>(form, "mssqlTableList");
+                grid.Rows[0].Cells[0].Value = false;
+                WControl<TextBox>(form, "mssqlTableSearch").Text = "searchable";
+                Assert(grid.Rows.Count == 1 && (bool)grid.Rows[0].Cells[0].Value, "Comment search keeps checked identity");
+                WControl<TextBox>(form, "mssqlTableSearch").Text = "";
+                WConfirm(form);
+                Assert(service.Seen.Tables.Select(k => k.ObjectId).SequenceEqual(new[] { 2 }), "Search keeps object identity");
+                Assert(service.CatalogThread != service.UiThread && service.PreflightThread != service.UiThread, "DB work is background");
+                Assert(WControl<Button>(form, "mssqlStart").Enabled, "Successful preflight permits start: " + WControl<Label>(form, "mssqlStatus").Text + " / " + WControl<Label>(form, "mssqlConfirmation").Text);
+                form.Close();
+            }
+
+            using (var form = WForm(new WizardService(), Path.Combine(dir, "b.sql"), new[] { new MssqlObjectKey(42, "sales", "orders") }))
+            {
+                form.Show();
+                WPump(() => WControl<DataGridView>(form, "mssqlTableList").Rows.Count == 2);
+                var grid = WControl<DataGridView>(form, "mssqlTableList");
+                Assert(!(bool)grid.Rows[0].Cells[0].Value && (bool)grid.Rows[1].Cells[0].Value, "Initial schema/name selects exact table");
+                WClick(form, "mssqlSelectNone");
+                Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Zero selection blocks next");
+                form.Close();
+            }
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    private static void Wizard_Preflight()
+    {
+        var service = new WizardService
+        {
+            Deny = true
+        };
+        using (var form = WForm(service, ""))
+        {
+            form.Show();
+            WPump(() => WControl<DataGridView>(form, "mssqlTableList").Rows.Count == 2);
+            WClick(form, "mssqlStart");
+            Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Empty path blocks confirmation");
+            WControl<TextBox>(form, "mssqlOutputPath").Text = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql");
+            WControl<RadioButton>(form, "mssqlDataOnly").Checked = true;
+            Assert(!WControl<CheckBox>(form, "mssqlIncludeViews").Checked && !WControl<CheckBox>(form, "mssqlIncludeViews").Enabled, "Data-only excludes views");
+            WControl<RadioButton>(form, "mssqlSchemaOnly").Checked = true;
+            Assert(WControl<CheckBox>(form, "mssqlIncludeViews").Enabled, "Schema mode restores views availability");
+            WClick(form, "mssqlStart");
+            WPump(() => WControl<Button>(form, "mssqlBack").Enabled && WControl<Label>(form, "mssqlConfirmation").Text.Contains("SNAPSHOT unavailable"));
+            Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Failed preflight blocks start");
+            form.Close();
+        }
+    }
+
+    private static void Wizard_Lifecycle()
+    {
+        var service = new WizardService
+        {
+            Block = true
+        };
+        using (var form = WForm(service, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql")))
+        {
+            form.Show();
+            WPump(() => WControl<DataGridView>(form, "mssqlTableList").Rows.Count == 2);
+            WConfirm(form);
+            WClick(form, "mssqlStart");
+            WPump(() => service.Exporting);
+            Assert(form.Controls.Find("mssqlToggleSound", true).Length == 1, "Mute only; no play or pause");
+            service.Frame(service.Seen.JobId, 1234);
+            WPump(() => WControl<ProgressBar>(form, "mssqlOverallProgress").Value == 43);
+            Assert(WControl<ProgressBar>(form, "mssqlTableProgress").Value == 50, "True separate table progress");
+            service.Frame(service.Seen.JobId, 1234, true);
+            WPump(() => WControl<Label>(form, "mssqlSpeed").Text.EndsWith("—"));
+            Assert(WControl<ProgressBar>(form, "mssqlOverallProgress").Value == 43, "Stalled time does not fabricate progress");
+            service.Frame(Guid.NewGuid(), 9999);
+            Application.DoEvents();
+            Assert(!WControl<Label>(form, "mssqlWritten").Text.Contains("9999"), "Stale job ignored");
+            form.Close();
+            WPump(() => service.Canceled);
+            Assert(!form.IsDisposed, "Close waits for worker cleanup");
+            service.Release.Set();
+            WPump(() => form.IsDisposed);
+        }
+    }
+
+    private static void Wizard_RawSelectionAndReset()
+    {
+        foreach (var seed in new[]
+        {
+            "orders",
+            "sales.orders",
+            "missing"
+        }
+
+        )
+        {
+            var service = new WizardService();
+            if (seed == "sales.orders")
+                service.CatalogOverride = new[]
+                {
+                    new MssqlTableDefinition(new MssqlObjectKey(3, "dbo", "sales.orders"), null, null, null, null),
+                    WizardService.Table(2, "sales", "")
+                };
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+            using (var form = new MssqlExportWizardForm(new Dictionary<string, object>(), "fixture", new MssqlExportWizardOptions(MssqlExportMode.SchemaAndData, null, true, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"), null, seed), service))
+            {
+                form.Show();
+                WPump(() => WControl<DataGridView>(form, "mssqlTableList").Rows.Count == 2);
+                var grid = WControl<DataGridView>(form, "mssqlTableList");
+                Assert(grid.Rows.Cast<DataGridViewRow>().Count(r => (bool)r.Cells[0].Value) == (seed == "orders" ? 1 : 0), "Raw provider seed must resolve uniquely; never fall back to all");
+                if (seed == "orders")
+                {
+                    WConfirm(form);
+                    WClick(form, "mssqlStart");
+                    WPump(() => form.Result != null);
+                    WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+                    WClick(form, "mssqlStart");
+                    Assert(form.Result == null && WControl<Label>(form, "mssqlResult").Text == "", "Reset clears previous result");
+                }
+
+                form.Close();
+            }
+        }
+    }
+
+    private static void Wizard_InspectionClose()
+    {
+        foreach (bool duringCatalog in new[]
+        {
+            true,
+            false
+        }
+
+        )
+        {
+            var service = new WizardService
+            {
+                BlockCatalog = duringCatalog,
+                BlockPreflight = !duringCatalog
+            };
+            using (var form = WForm(service, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql")))
+            {
+                form.Show();
+                if (!duringCatalog)
+                {
+                    WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+                    WClick(form, "mssqlStart");
+                    WClick(form, "mssqlStart");
+                }
+
+                WPump(() => service.Inspecting);
+                form.Close();
+                WPump(() => service.Canceled);
+                Assert(!form.IsDisposed, "Inspection close must wait for owned worker cleanup");
+                service.Release.Set();
+                WPump(() => form.IsDisposed);
+            }
+        }
+    }
+
+    private static void Wizard_Layout()
+    {
+        foreach(float factor in new[]{1f,1.5f,2f})
+        {
+            using(var form=WForm(new WizardService(),Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".sql")))
+            {
+                form.Show(); WPump(()=>WControl<Button>(form,"mssqlStart").Enabled);
+                form.Scale(new System.Drawing.SizeF(factor,factor));
+                form.MinimumSize=System.Drawing.Size.Empty;
+                form.ClientSize=new System.Drawing.Size(640,480);
+                form.PerformLayout(); Application.DoEvents();
+                foreach(var name in new[]{"mssqlStart","mssqlCancel"})
+                {
+                    var button=WControl<Button>(form,name);
+                    var bounds=new System.Drawing.Rectangle(form.PointToClient(button.PointToScreen(System.Drawing.Point.Empty)),button.Size);
+                    Assert(form.ClientRectangle.Contains(bounds),"Fixed footer remains reachable under layout scaling: " + factor + " / " + name + " / " + bounds + " / " + form.ClientRectangle);
+                }
+                form.Close();
+            }
+        }
+    }
+    private static void Wizard_CancelTerminal()
+    {
+        var service=new WizardService { Block=true };
+        using(var form=WForm(service,Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".sql")))
+        {
+            form.Show(); WPump(()=>WControl<Button>(form,"mssqlStart").Enabled); WConfirm(form);
+            Assert(WControl<Button>(form,"mssqlStart").AccessibleName==WControl<Button>(form,"mssqlStart").Text,"Dynamic Start accessible name follows visible action");
+            WClick(form,"mssqlStart"); WPump(()=>service.Exporting); service.Frame(service.Seen.JobId,1234);
+            WPump(()=>WControl<ProgressBar>(form,"mssqlOverallProgress").Value==43);
+            WClick(form,"mssqlToggleSound");
+            Assert(WControl<Button>(form,"mssqlToggleSound").AccessibleName==WControl<Button>(form,"mssqlToggleSound").Text,"Mute accessible name follows action");
+            WClick(form,"mssqlCancel"); WPump(()=>service.Canceled); Assert(!form.IsDisposed,"Cancel displays cleanup before result");
+            service.Release.Set(); WPump(()=>form.Result!=null && WControl<Button>(form,"mssqlCancel").Enabled);
+            Assert(WControl<Button>(form,"mssqlCancel").AccessibleName==WControl<Button>(form,"mssqlCancel").Text,"Terminal Close accessible name follows action");
+            var queue=WControl<DataGridView>(form,"mssqlTableQueue");
+            Assert(queue.Rows.Cast<DataGridViewRow>().All(r=>!new[]{"匯出中","Exporting"}.Contains((string)r.Cells[2].Value)),"Terminal queue must stop showing Exporting");
+            WClick(form,"mssqlCancel"); Assert(form.IsDisposed,"Terminal close remains enabled");
+        }
+    }
+    private static int WizardPreview()
+    {
+        Application.EnableVisualStyles();
+        if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_THEME") == "dark")
+            ThemeManager.SetTheme("dark", false);
+        var service = new WizardService
+        {
+            Preview = true
+        };
+        using (var form = WForm(service, Path.Combine(Path.GetTempPath(), "fixture-preview-" + Guid.NewGuid().ToString("N") + ".sql")))
+        {
+            form.Text = "FIXTURE ONLY · " + form.Text;
+            Application.Run(form);
+        }
+
+        return 0;
+    }
+}
