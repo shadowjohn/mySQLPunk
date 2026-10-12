@@ -309,17 +309,17 @@ internal MssqlExportProgress Sample(MssqlExportStage stage, MssqlObjectKey curre
 
 `currentTableRows/currentTableSourceBytes`為目前表累計，`writtenBytes`為全檔累計；Sample未達節流時可回null，force必須回snapshot。estimator從schema取得nullable估計，切表時記錄已完成實際數；不可自行查DB。LoadCatalog／Preflight都各開短生命週期source並dispose。
 
-- [ ] **1. 寫失敗測試，group `worker`。** fake source記錄open/begin/read/complete/dispose與檔案步驟順序；估計用fake clock，不sleep。assert：
+- [x] **1. 寫失敗測試，group `worker`。** fake source記錄open/begin/read/complete/dispose與檔案步驟順序；估計用fake clock，不sleep。assert：
   ```csharp
   Assert(calls.IndexOf("source.dispose") < calls.IndexOf("artifact.verify"), "Release snapshot before local work");
   Assert(samples.Where(x => x.Stage != MssqlExportStage.Completed).All(x => x.Percent == null || x.Percent <= 99), "No early success");
   Assert(initial.Eta == null && stalled.Eta == null, "No fabricated countdown");
   Assert(result.PublishedPath != null && result.Stage == MssqlExportStage.LocalCompletedMirrorIncomplete, "Keep local outcome");
   ```
-- [ ] **2. 跑 worker group 為紅。** 讀取／寫入／verify／mirror取消，發布區取消，舊operation回報、DB斷線、schema指紋改變、實際rows超estimate、不同列寬、缺失估計都覆蓋。
-- [ ] **3. 實作階段順序。** 新source重做Inspect→BeginRead→DDL前段→逐表data→DDL後段／schema核對→CompleteRead與source Dispose→artifact Complete/Verify/Publish→選用mirror→結果。預檢失敗不建立partial；UI先前Preflight不跳過開始時的重查。SchemaOnly不讀rows；DataOnly不寫DDL。失敗停止整個工作，不跳表或重連續跑；finally reader/command/transaction/owner及本工作temp順序清理。
-- [ ] **4. 實作進度。** 預設200ms節流，階段／表／terminal強制回報；使用最近10秒樣本，至少3個樣本且至少2秒才估ETA。連續5秒無實際進展時ETA回null並顯示等待。估計remaining work按表估計bytes及實測row-width調整，不按表數等權；估計失準或劇烈速率變化可退回未知。局部verify/mirror以實際bytes計算，整體百分比單調且成功前≤99，不重置0；terminal狀態立即回報。UI log採上限200條。
-- [ ] **5. 跑worker group為綠並提交。** constructor default factory只建立自己的session；不讀全域backup設定、不觸碰共享provider。建議訊息 `feat(mssql-export): orchestrate cancellable export with measured progress`。
+- [x] **2. 跑 worker group 為紅。** 讀取／寫入／verify／mirror取消，發布區取消，舊operation回報、DB斷線、schema指紋改變、實際rows超estimate、不同列寬、缺失估計都覆蓋。
+- [x] **3. 實作階段順序。** 新source重做Inspect→BeginRead→DDL前段→逐表data→DDL後段／schema核對→CompleteRead與source Dispose→artifact Complete/Verify/Publish→選用mirror→結果。預檢失敗不建立partial；UI先前Preflight不跳過開始時的重查。SchemaOnly不讀rows；DataOnly不寫DDL。失敗停止整個工作，不跳表或重連續跑；finally reader/command/transaction/owner及本工作temp順序清理。
+- [x] **4. 實作進度。** 預設200ms節流，階段／表／terminal強制回報；使用最近10秒樣本，至少3個樣本且至少2秒才估ETA。連續5秒無實際進展時ETA回null並顯示等待。估計remaining work按表估計bytes及實測row-width調整，不按表數等權；估計失準或劇烈速率變化可退回未知。局部verify/mirror以實際bytes計算，整體百分比單調且成功前≤99，不重置0；terminal狀態立即回報。UI log採上限200條。
+- [x] **5. 跑worker group為綠並提交。** constructor default factory只建立自己的session；不讀全域backup設定、不觸碰共享provider。建議訊息 `feat(mssql-export): orchestrate cancellable export with measured progress`。
 
 ## Task 8：正式精靈與 Punky
 
