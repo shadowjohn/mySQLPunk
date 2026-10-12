@@ -337,17 +337,17 @@ internal MssqlExportWizardForm(Dictionary<string, object> connection, string dat
     MssqlExportWizardOptions options, MssqlSqlExportService service);
 ```
 
-- [ ] **1. 寫失敗測試，group `wizard`。** 在STA透過fake service，不連DB；預設全選／單表預選、搜尋comment保持勾選、同名表不同schema、零選取／空路徑阻擋、mode切換views、snapshot不足、reset舊結果、關閉等cleanup。assert：
+- [x] **1. 寫失敗測試，group `wizard`。** 在STA透過fake service，不連DB；預設全選／單表預選、搜尋comment保持勾選、同名表不同schema、零選取／空路徑阻擋、mode切換views、snapshot不足、reset舊結果、關閉等cleanup。assert：
   ```csharp
   Assert(selectedObjectIds.SequenceEqual(expectedObjectIds), "Search keeps object identity");
   Assert(!startButton.Enabled, "Failed preflight blocks start");
   Assert(!form.IsDisposed, "Close waits for worker cleanup");
   Assert(soundButtons.Count == 1, "Mute only; no play or pause");
   ```
-- [ ] **2. 跑wizard group為紅。** UI自動化以控件Name/AccessibleName與注入service驅動；不靠像素坐標斷言全部版面，也不把fake進度當真匯出。
-- [ ] **3. 建立精靈。** 參照已驗收index.html：選表→輸出設定→確認／預檢→進度／結果；table list顯示schema/name/comment/nullable estimates。Windows SaveFileDialog、背景捕獲destination stamp、庫級結構views預設勾選；確認頁明列SNAPSHOT與logical export範圍／mirror。DPI、working-area clamp、可捲內容及固定footer沿用現有UI模式，中英文沿用ReportText.Get。
-- [ ] **4. 接worker生命週期。** constructor只複製scalar connection settings並剔除pdo/isConnect/runtime state；Shown背景LoadCatalog，確認頁背景Preflight，改選項使預檢失效，通過才啟用開始；開始時freeze request。UI context建立Progress，Task.Run執行service；只接受同JobId且視窗存活的進度。UI timer只更新elapsed，距離最近實際進展5秒後將ETA顯示為等待／未知，不在阻塞reader時繼續假倒數，也不虛增bytes或百分比。執行禁改選項；取消／關閉等待worker，terminal才EndExport及disposeCTS。開始BeginExport一次、只有Muted控制，取消靜音不重播原音。
-- [ ] **5. 跑wizard group為綠，做本機WinForms人工檢視再提交。** light/dark、最小可用工作區與100%/150%/200%DPI、長table/comment、未知ETA、cancel與關閉按鈕可達。實際聽到聲音另記證據；未可觀察不聲稱通過。建議訊息 `feat(mssql-export): add native export wizard and Punky progress`。
+- [x] **2. 跑wizard group為紅。** UI自動化以控件Name/AccessibleName與注入service驅動；不靠像素坐標斷言全部版面，也不把fake進度當真匯出。
+- [x] **3. 建立精靈。** 參照已驗收index.html：選表→輸出設定→確認／預檢→進度／結果；table list顯示schema/name/comment/nullable estimates。Windows SaveFileDialog、背景捕獲destination stamp、庫級結構views預設勾選；確認頁明列SNAPSHOT與logical export範圍／mirror。DPI、working-area clamp、可捲內容及固定footer沿用現有UI模式，中英文沿用ReportText.Get。
+- [x] **4. 接worker生命週期。** constructor只複製scalar connection settings並剔除pdo/isConnect/runtime state；Shown背景LoadCatalog，確認頁背景Preflight，改選項使預檢失效，通過才啟用開始；開始時freeze request。UI context建立Progress，Task.Run執行service；只接受同JobId且視窗存活的進度。UI timer只更新elapsed，距離最近實際進展5秒後將ETA顯示為等待／未知，不在阻塞reader時繼續假倒數，也不虛增bytes或百分比。執行禁改選項；取消／關閉等待worker，terminal才EndExport及disposeCTS。開始BeginExport一次、只有Muted控制，取消靜音不重播原音。
+- [x] **5. 跑wizard group為綠，做本機WinForms人工檢視再提交。** light/dark、最小可用工作區與100%/150%/200%DPI、長table/comment、未知ETA、cancel與關閉按鈕可達。實際聽到聲音另記證據；未可觀察不聲稱通過。建議訊息 `feat(mssql-export): add native export wizard and Punky progress`。
 
 ## Task 9：四個互動入口接線與 provider 回歸
 
