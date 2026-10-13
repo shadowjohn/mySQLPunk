@@ -53,6 +53,11 @@ namespace mySQLPunk.lib
 
         public static ConnectionOpenResult Open(Dictionary<string, object> connection, bool loadDatabases = true)
         {
+            return Open(connection, loadDatabases, false);
+        }
+
+        private static ConnectionOpenResult Open(Dictionary<string, object> connection, bool loadDatabases, bool importOnly)
+        {
             if (connection == null) throw new ArgumentNullException("connection");
             Dictionary<string, object> effective = new Dictionary<string, object>(connection);
             ConnectionSecuritySettingsService.Normalize(effective);
@@ -71,7 +76,9 @@ namespace mySQLPunk.lib
                 }
 
                 string provider = ConnectionConfigurationService.NormalizeProvider(ConnectionConfigurationService.GetValue(effective, "db_kind"));
-                string connectionString = ConnectionConfigurationService.BuildConnectionString(effective);
+                string connectionString = importOnly
+                    ? ConnectionConfigurationService.BuildMssqlImportConnectionString(effective)
+                    : ConnectionConfigurationService.BuildConnectionString(effective);
                 IDatabase rawDatabase = ConnectionConfigurationService.CreateDatabase(provider);
                 database = tunnel == null ? rawDatabase : new SecuredDatabase(rawDatabase, tunnel);
                 if (tunnel != null) tunnel = null;
@@ -94,6 +101,26 @@ namespace mySQLPunk.lib
             string provider = ConnectionConfigurationService.NormalizeProvider(ConnectionConfigurationService.GetValue(connection, "db_kind"));
             if (provider != "mssql") throw new ArgumentException("MSSQL export requires a SQL Server connection", nameof(connection));
             ConnectionOpenResult result = Open(connection, false);
+            try
+            {
+                if (result.NativeMssqlConnection == null) throw new InvalidOperationException("SQL Server provider connection is unavailable");
+                return new MssqlOwnedSession(result.Database, result.NativeMssqlConnection);
+            }
+            catch
+            {
+                try { result.Database.Dispose(); } catch { }
+                throw;
+            }
+        }
+
+        internal static MssqlOwnedSession OpenMssqlImportSession(Dictionary<string, object> connection)
+        {
+            if (connection == null) throw new ArgumentNullException(nameof(connection));
+            string provider = ConnectionConfigurationService.NormalizeProvider(ConnectionConfigurationService.GetValue(connection, "db_kind"));
+            if (provider != "mssql") throw new ArgumentException("MSSQL import requires a SQL Server connection", nameof(connection));
+            // Validate the selected catalog before starting any SSH lease or opening a connection.
+            ConnectionConfigurationService.BuildMssqlImportConnectionString(connection);
+            ConnectionOpenResult result = Open(connection, false, true);
             try
             {
                 if (result.NativeMssqlConnection == null) throw new InvalidOperationException("SQL Server provider connection is unavailable");

@@ -43,6 +43,35 @@ namespace mySQLPunk.lib.MssqlImport
         }
     }
 
+    internal sealed class MssqlImportSessionState
+    {
+        public bool IsOpen { get; }
+        public int DatabaseId { get; }
+        public int TransactionCount { get; }
+        public int XactState { get; }
+        internal MssqlImportSessionState(bool isOpen, int databaseId, int transactionCount, int xactState)
+        { IsOpen = isOpen; DatabaseId = databaseId; TransactionCount = transactionCount; XactState = xactState; }
+    }
+
+    internal sealed class MssqlImportLobState
+    {
+        public bool Exists { get; }
+        public long RowCount { get; }
+        public long Sequence { get; }
+        public long ConsumedThrough { get; }
+        public bool Consumed { get; }
+        public bool Failed { get; }
+        internal MssqlImportLobState(bool exists, long rowCount, long sequence, long consumedThrough, bool consumed, bool failed)
+        { Exists = exists; RowCount = rowCount; Sequence = sequence; ConsumedThrough = consumedThrough; Consumed = consumed; Failed = failed; }
+    }
+
+    internal sealed class MssqlImportCounts
+    {
+        public long Tables { get; }
+        public long Rows { get; }
+        internal MssqlImportCounts(long tables, long rows) { Tables = tables; Rows = rows; }
+    }
+
     internal sealed class MssqlImportCleanup
     {
         public bool CommandEnded { get; }
