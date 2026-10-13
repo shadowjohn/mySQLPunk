@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，使用者於 2026-10-13 回覆「好，進實作」核准書面規格。
 
-**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 已實作與覆核通過（0982548／3ebf6b3，修正兩項 P2）；Task2 log／ETA 已實作與覆核通過（0cc1657）；Task3 開始。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
+**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 已實作與覆核通過（0982548／3ebf6b3，修正兩項 P2）；Task2 log／ETA 已實作與覆核通過（0cc1657）；Task3 專用連線層已實作與覆核通過（9df6437）；Task4 開始。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
 
 **Execution:** 保留先前選定的「分工實作並逐項覆核」。一次一位 implementer，各 task 經獨立覆核後才接下一項；最後整體覆核。build、native UI 與 DB tests 由單一 owner 串行執行，避免共享輸出／fixture 衝突。
 
@@ -110,11 +110,11 @@
 
 **Interfaces:** `ConnectionOpenService.OpenMssqlImportSession(Dictionary<string,object>): MssqlOwnedSession`，在開線前套 `ConnectRetryCount=0`、`MultipleActiveResultSets=false`；原 `OpenMssqlSession` 行為維持。`MssqlImportSqlSession(MssqlOwnedSession)` implements IMssqlImportSession，owner 只釋放一次。
 
-- [ ] **Step 1: 加入失敗 tests。** importer builder 明確 Initial Catalog／retry0／MARS false；舊 caller 既有值不變。使用 fake owner 驗證取消、初始化失敗、Dispose race 只有本次 session／SSH lease 被釋放，樹 provider 不受影響。
-- [ ] **Step 2: 實作唯讀 target／state／LOB probes。** server／DB id／create_date／版本／writable／metadata 可見性／object count；必要能力不以 sysadmin 或 ALTER DATABASE 一票否決。NativeSchema 非空／無法確認空庫擋下；Generic／NativeData 不套空庫要求。所有 identifiers quote，LOB temp name 只由 Guid.ToString("N") 組成；state query 5秒，lookup 不能讀任意帳號設定。
-- [ ] **Step 3: 實作原文 ExecuteReader 與所有 result drain。** `CommandBehavior.SequentialAccess`，涵蓋 ExecuteReader／Read／NextResult／reader Dispose 的全部 SqlError；不建 DataTable／回傳資料集合。CommandTimeout0，token＋Cancel 包住啟動與後續讀取，保留目前 command 的可靠 ownership。
-- [ ] **Step 4: 實作及測 cancellation／cleanup seam。** 不在 active reader 尚在跑時發第二條 status query；cleanup 獨立10秒，不使用已取消 token；關閉本 owner 不宣稱 rollback 已完成。一般 GO 跨 session 測 temp／SET／identity／transaction；另測 @@ROWCOUNT／@@ERROR 邊界並更新 generic-script 說明，避免不實相容宣稱。
-- [ ] **Step 5: 跑 worker／parser filters，提交。** native live cases 暫列 Task6 執行，不能以 fake 通過冒稱 DB 通過。Commit `feat: add isolated MSSQL import session adapter`。
+- [x] **Step 1: 加入失敗 tests。** importer builder 明確 Initial Catalog／retry0／MARS false；舊 caller 既有值不變。使用 fake owner 驗證取消、初始化失敗、Dispose race 只有本次 session／SSH lease 被釋放，樹 provider 不受影響。
+- [x] **Step 2: 實作唯讀 target／state／LOB probes。** server／DB id／create_date／版本／writable／metadata 可見性／object count；必要能力不以 sysadmin 或 ALTER DATABASE 一票否決。NativeSchema 非空／無法確認空庫擋下；Generic／NativeData 不套空庫要求。所有 identifiers quote，LOB temp name 只由 Guid.ToString("N") 組成；state query 5秒，lookup 不能讀任意帳號設定。
+- [x] **Step 3: 實作原文 ExecuteReader 與所有 result drain。** `CommandBehavior.SequentialAccess`，涵蓋 ExecuteReader／Read／NextResult／reader Dispose 的全部 SqlError；不建 DataTable／回傳資料集合。CommandTimeout0，token＋Cancel 包住啟動與後續讀取，保留目前 command 的可靠 ownership。
+- [x] **Step 4: 實作及測 cancellation／cleanup seam。** 不在 active reader 尚在跑時發第二條 status query；cleanup 獨立10秒，不使用已取消 token；關閉本 owner 不宣稱 rollback 已完成。一般 GO 跨 session 測 temp／SET／identity／transaction；另測 @@ROWCOUNT／@@ERROR 邊界並更新 generic-script 說明，避免不實相容宣稱。
+- [x] **Step 5: 跑 worker／parser filters，提交。** native live cases 暫列 Task6 執行，不能以 fake 通過冒稱 DB 通過。Commit `feat: add isolated MSSQL import session adapter`。
 
 ## Task 4: Sequential worker、recoverable skip、EOF checks 與取消結果
 
