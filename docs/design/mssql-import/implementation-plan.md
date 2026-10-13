@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，使用者於 2026-10-13 回覆「好，進實作」核准書面規格。
 
-**Status:** 書面實作計畫已整理，供最後範圍與步驟確認；尚未修改 importer 產品程式或執行 DB 匯入。
+**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 準備中。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
 
 **Execution:** 保留先前選定的「分工實作並逐項覆核」。一次一位 implementer，各 task 經獨立覆核後才接下一項；最後整體覆核。build、native UI 與 DB tests 由單一 owner 串行執行，避免共享輸出／fixture 衝突。
 
@@ -62,7 +62,7 @@
 - `MssqlImportInputException : Exception`：固定 `string Code` 與 `long BatchNumber/Line/ByteOffset`，讓預掃描失敗有穩定診斷。
 - `MssqlImportScan`：`long FileBytes/BatchCount/MaxBatchCodeUnits`、`string EncodingName/Sha256`、`MssqlImportScriptInfo Script`；不保存所有批次。
 - `MssqlImportScriptInfo`：`Kind { Generic, NativeSchema, NativeData }`、`Guid? NativeJobId`、`long? ExpectedTables/ExpectedRows`、`string SourceReadMode`、`bool HasLobProtocol`；native marker 候選毀損是預檢失敗，不降級 generic。
-- `MssqlImportInput.Open(string path): MssqlImportInput`；`Scan(CancellationToken, Action<long>): MssqlImportScan`；`ReadBatches(CancellationToken): IEnumerable<MssqlImportBatch>`；執行第二輪可取得 `ExecutionSha256`，物件為 IDisposable 並持有同一 handle。
+- `MssqlImportInput.Open(string path, string databaseName = null): MssqlImportInput`；`Scan(CancellationToken, Action<long>): MssqlImportScan`；`ReadBatches(CancellationToken): IEnumerable<MssqlImportBatch>`；執行第二輪可取得 `ExecutionSha256`，物件為 IDisposable 並持有同一 handle。
 - `MssqlImportSqlError`：`int Number/State/Class/RelativeLine`、`string Message`；`MssqlImportBatchException` 保留本批全部 `IReadOnlyList<MssqlImportSqlError> Errors` 及 `bool OutcomeUncertain`，原始 exception 不送 UI。
 - `MssqlImportSessionState`：`bool IsOpen`、`int DatabaseId/TransactionCount/XactState`；target identity 另含實際 ServerName／DatabaseName／DatabaseId／DatabaseCreateDate／Version／Writable／metadata 可見性／user object count。
 - `MssqlImportLobState`：`bool Exists`、`long RowCount/Sequence/ConsumedThrough`、`bool Consumed/Failed`；native identifier 僅能由驗證過的 GUID 產生。
@@ -88,7 +88,7 @@
 
 - [ ] **Step 1: 加入並跑失敗的 parser tests。** `MssqlImportParserPreservesContexts` 驗證字串／雙引號／方括號／巢狀 comment 中 GO 不拆；1／2／3／7-byte buffer 切在 UTF-8、BOM、CRLF、`''`、`]]` 中間仍原文相同。`MssqlImportParserLimits` 的斷言：16,777,216 code unit 的 Scan 成功且 MaxBatchCodeUnits 相等；16,777,217 時拋 MssqlImportInputException、Code="BatchTooLarge"。
 - [ ] **Step 2: 實作固定 byte／decoder buffer、bounded current batch 與 lexical line candidate。** 不用無界 ReadLine、ReadAllText／ReadAllBytes／ReadToEnd；strict decoder 的 EOF flush 要抓無效序列。明訂 EndByte 包含目前 batch 的 GO delimiter，但 SQL Text 不含 GO。純註解／空白尾段不送空 command，其 byte 覆蓋只在 EOF 驗證通過後才計入最終 ProcessedBytes=FileBytes。
-- [ ] **Step 3: 補 unsupported／native tests 並實作 inspector。** GO n、GO block comment、SQLCMD 真指令、跨庫直接 USE、未閉合 EOF、無效 encoding 拒絕；字串中的相同文字不拒絕。同 DB USE 可接受。native Schema／DataOnly／無 LOB、正確／缺失／重複／溢位 footer、錯 job、偽造 GUID、header 不一致都要測；native candidate 不可因缺 footer 轉 generic。合法 Generic 不要求 footer。
+- [ ] **Step 3: 補 unsupported／native tests 並實作 inspector。** GO n、GO block comment、SQLCMD 真指令、跨庫直接 USE、未閉合 EOF、無效 encoding 拒絕；字串中的相同文字不拒絕。同 DB USE 在傳入 databaseName 且 decoded identifier 完全 Ordinal 相等時可接受；unknown target 或不同大小寫也保守拒絕，避免 case-sensitive server 的跨庫同批寫入。native Schema／DataOnly／無 LOB、正確／缺失／重複／溢位 footer、錯 job、偽造 GUID、header 不一致都要測；native candidate 不可因缺 footer 轉 generic。合法 Generic 不要求 footer。
 - [ ] **Step 4: 以同一 handle 掃描→rewind→執行第二輪，測 SHA 一致與 FileShare.Read 阻止一般寫入／刪除；檔案重選 Dispose 後可寫。** 原始 byte／line offset、無 GO 的最後批次、僅註解檔不產生可執行空 command；大檔統計使用 Int64。
 - [ ] **Step 5: 驗證並提交精確檔案。** `MYSQLPUNK_SMOKE_FILTER='MSSQL import parser'` 跑 `tests/Run-SmokeTests.ps1 -Configuration Debug`，必須 matched tests 全過；`git diff --check` 通過。Commit `feat: add bounded MSSQL GO input preflight`。
 
@@ -179,4 +179,4 @@ powershell.exe -NoProfile -File tests/Run-SmokeTests.ps1 -Configuration Release
 .\build.bat release
 ```
 
-每task依序記錄BASE／實作commit／測試證據／diff package／覆核結論。只修正實質spec或correctness問題，不做無意義review循環；user／production資料不拿來做破壞式fixture。計畫確認後沿用分工逐項覆核方式，不再重問執行方法。
+每task依序記錄BASE／實作commit／測試證據／diff package／覆核結論。只修正實質spec或correctness問題，不做無意義review循環；user／production資料不拿來做破壞式fixture。依使用者明確進實作的授權，沿用分工逐項覆核方式，不再重問執行授權或方法。
