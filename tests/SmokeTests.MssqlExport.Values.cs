@@ -42,6 +42,13 @@ public static partial class SmokeTests
             AssertEquals("'03:04:05.1234567'", MssqlValueCodec.FormatScalar(new TimeSpan(0,3,4,5).Add(TimeSpan.FromTicks(1234567)), ValueColumn("time")), "Time ticks");
             AssertEquals("'2026-10-12'", MssqlValueCodec.FormatScalar(new DateTime(2026,10,12), ValueColumn("date")), "ISO date");
             AssertEquals("'2026-10-12T03:04:05.1234567'", MssqlValueCodec.FormatScalar(new DateTime(2026,10,12,3,4,5).AddTicks(1234567), ValueColumn("datetime2")), "Date ticks");
+            AssertEquals("'2026-10-12T03:04:05.123'", MssqlValueCodec.FormatScalar(new DateTime(2026,10,12,3,4,5).AddMilliseconds(123), ValueColumn("datetime")), "Legacy datetime literal uses SQL-compatible 3 digits");
+            AssertEquals("'2026-10-12T03:04:00.000'", MssqlValueCodec.FormatScalar(new DateTime(2026,10,12,3,4,0), ValueColumn("smalldatetime")), "Legacy smalldatetime literal uses SQL-compatible 3 digits");
+            foreach (var legacy in new[]{new DateTime(1753,1,1),new DateTime(2026,10,12,3,4,5).AddMilliseconds(3),new DateTime(2026,10,12,3,4,5).AddMilliseconds(7),new DateTime(9999,12,31,23,59,59).AddMilliseconds(997)}) {
+                var stored=new SqlDateTime(legacy);
+                string literal=MssqlValueCodec.FormatScalar(stored.Value,ValueColumn("datetime")).Trim('\'');
+                Assert(stored.Equals(new SqlDateTime(DateTime.ParseExact(literal,"yyyy-MM-dd'T'HH:mm:ss.fff",CultureInfo.InvariantCulture))),"Legacy datetime stored ticks survive 3-digit serialization");
+            }
             AssertEquals("'00112233-4455-6677-8899-aabbccddeeff'", MssqlValueCodec.FormatScalar(new Guid("00112233-4455-6677-8899-aabbccddeeff"), ValueColumn("uniqueidentifier")), "GUID");
             double number = 1.2345678901234567;
             Assert(double.Parse(MssqlValueCodec.FormatScalar(number, ValueColumn("float")), CultureInfo.InvariantCulture) == number, "Float roundtrip");

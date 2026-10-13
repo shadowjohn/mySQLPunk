@@ -87,7 +87,9 @@ namespace mySQLPunk.lib.MssqlExport
                 case "real": return ((float)value).ToString("R", Invariant);
                 case "uniqueidentifier": return "'" + ((Guid)value).ToString("D") + "'";
                 case "date": return "'" + ((DateTime)value).ToString("yyyy-MM-dd", Invariant) + "'";
-                case "datetime": case "datetime2": case "smalldatetime": return "'" + ((DateTime)value).ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", Invariant) + "'";
+                // Legacy datetime parsers reject >3 fractional digits; datetime2 retains all seven.
+                case "datetime": case "smalldatetime": return "'" + ((DateTime)value).ToString("yyyy-MM-dd'T'HH:mm:ss.fff", Invariant) + "'";
+                case "datetime2": return "'" + ((DateTime)value).ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", Invariant) + "'";
                 case "datetimeoffset": return "'" + ((DateTimeOffset)value).ToString("yyyy-MM-dd'T'HH:mm:ss.fffffffzzz", Invariant) + "'";
                 case "time": return "'" + ((TimeSpan)value).ToString(@"hh\:mm\:ss\.fffffff", Invariant) + "'";
                 default: throw new NotSupportedException("No scalar codec for " + column.NativeType + ".");
