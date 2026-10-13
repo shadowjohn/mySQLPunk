@@ -1,7 +1,7 @@
 # MSSQL 匯出：可選 SNAPSHOT 與自動還原資料庫設定
 
 日期：2026-10-13
-狀態：設計草案，待使用者審核；產品程式尚未修改。
+狀態：2026-10-13 使用者核准「同意設計，進入實作計畫」；[實作計畫](snapshot-options-implementation-plan.md) 待審核，產品程式尚未修改。
 基底：codex/mssql-export-preflight-compat，34024b7。
 
 ## 使用者需求與取代範圍
