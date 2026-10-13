@@ -45,8 +45,8 @@ namespace mySQLPunk.lib.MssqlExport
         void ReleaseLock(CancellationToken cancellation);
         bool IsUsable { get; }
     }
-    internal enum MssqlSnapshotRecoveryPhase { Prepared, Enabled, Restoring, Unconfirmed }
-    internal enum MssqlSnapshotRecoveryCode { None, EnableUnconfirmed, RestoreUnconfirmed }
+    internal enum MssqlSnapshotRecoveryPhase { Prepared, Enabled, Restoring, Unconfirmed, EnableAttempted }
+    internal enum MssqlSnapshotRecoveryCode { None, EnableUnconfirmed, RestoreUnconfirmed, JournalUpdateFailed, JournalRemoveFailed, LockReleaseFailed, IdentityChanged, SessionUnavailable, ObserverFailed }
     internal enum MssqlSnapshotRecoveryReadError { None, InvalidRecord, UnsupportedVersion, TooLarge, UnsafePath, ReadFailed, Overflow }
     internal sealed class MssqlSnapshotRecoveryRecord
     {

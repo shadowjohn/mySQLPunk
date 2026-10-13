@@ -29,6 +29,13 @@ public static partial class SmokeTests
     {
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL export snapshot lifecycle preserve", SnapshotLifecycle_PreserveOnAndRestoreOwnedOff, ref passed);
+        Run("MSSQL export snapshot lifecycle unknown", SnapshotLifecycle_UnknownEnableAndIdentity, ref passed);
+        Run("MSSQL export snapshot lifecycle cancellation", SnapshotLifecycle_CancelDeadlineAndResidual, ref passed);
+        Run("MSSQL export snapshot lifecycle journal", SnapshotLifecycle_NoJournalNoAlter, ref passed);
+        Run("MSSQL export snapshot lifecycle capability", SnapshotLifecycle_CapabilityAndCooperation, ref passed);
+        Run("MSSQL export snapshot lifecycle residual", SnapshotLifecycle_ResidualAndObservers, ref passed);
+        Run("MSSQL export snapshot lifecycle deadline", SnapshotLifecycle_WholeDeadline, ref passed);
         Run("MSSQL export snapshot recovery untrusted", SnapshotRecovery_UntrustedFiles, ref passed);
         Run("MSSQL export snapshot recovery faults", SnapshotRecovery_NoSecretsOrUnsafeDelete, ref passed);
         Run("MSSQL export snapshot recovery durable", SnapshotRecovery_DurableCreateAndUpdate, ref passed);
