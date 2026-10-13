@@ -144,6 +144,22 @@ public static partial class SmokeTests
             Assert(input.Scan(CancellationToken.None,null).Script.Kind==MssqlImportScriptKind.NativeSchema,"Existing zero-object schema export remains valid.");
         using(var input=ImportInput(ImportHeader.Replace("READ COMMITTED","Schema only (no data transaction)")+ImportHint+"CREATE TABLE x(a int);\nGO\n"+ImportFooter.Replace("rows=2","rows=0")))
             Assert(input.Scan(CancellationToken.None,null).Script.Kind==MssqlImportScriptKind.NativeSchema,"SchemaOnly source mode and zero row footer are coherent.");
+        using(var input=ImportInput(ImportHeader.Replace("READ COMMITTED","Schema only (no data transaction)")+ImportHint+
+            "CREATE TABLE p(id int PRIMARY KEY); CREATE TABLE c(id int,parent int);\nGO\nALTER TABLE c ADD CONSTRAINT FK_c FOREIGN KEY(parent) REFERENCES p(id) ON DELETE NO ACTION ON UPDATE NO ACTION;\nGO\n"+ImportFooter.Replace("tables=1 rows=2","tables=2 rows=0")))
+            Assert(input.Scan(CancellationToken.None,null).Script.Kind==MssqlImportScriptKind.NativeSchema,"Actual exporter FK ON DELETE/ON UPDATE are schema action clauses, not SchemaOnly data writes.");
+        foreach(string dml in new[]{"SET IMPLICIT_TRANSACTIONS ON UPDATE x SET a=1;", "SET ANSI_NULLS ON DELETE FROM x;",
+            "ALTER TABLE x ADD FOREIGN KEY(a) REFERENCES x(a) ON UPDATE SET NULL; UPDATE x SET a=1;",
+            "ALTER TABLE x ADD FOREIGN KEY(a) REFERENCES x(a) ON DELETE NO ACTION SET ANSI_NULLS ON DELETE FROM x;"})
+            using(var input=ImportInput(ImportHeader.Replace("READ COMMITTED","Schema only (no data transaction)")+ImportHint+"CREATE TABLE x(a int); "+dml+"\nGO\n"+ImportFooter.Replace("rows=2","rows=0")))
+                ImportReject(input,"NativeFormat");
+        foreach(string ddl in new[]{
+            "CREATE TABLE p(a int,b int,PRIMARY KEY(a,b)); CREATE TABLE c(a int,b int); ALTER TABLE c ADD FOREIGN KEY(a,b) REFERENCES dbo.p(a,b) ON DELETE NO ACTION ON UPDATE NO ACTION;",
+            "CREATE TABLE p(a int,b int,PRIMARY KEY(a,b)); CREATE TABLE c(a int,b int,FOREIGN KEY(a,b) REFERENCES dbo.p(a,b) ON DELETE CASCADE ON UPDATE SET NULL,CONSTRAINT CK_c CHECK(a>=0));"})
+            using(var input=ImportInput(ImportHeader.Replace("READ COMMITTED","Schema only (no data transaction)")+ImportHint+ddl+"\nGO\n"+ImportFooter.Replace("tables=1 rows=2","tables=2 rows=0")))
+                Assert(input.Scan(CancellationToken.None,null).Script.Kind==MssqlImportScriptKind.NativeSchema,"Composite FK key-list commas are not constraint boundaries in ALTER or CREATE TABLE.");
+        foreach(string action in new[]{"NO ACTION","CASCADE","SET NULL","SET DEFAULT"})
+            using(var input=ImportInput(ImportHeader.Replace("READ COMMITTED","Schema only (no data transaction)")+ImportHint+"CREATE TABLE x(a int); ALTER TABLE x ADD FOREIGN KEY(a) REFERENCES x(a) ON DELETE "+action+" ON UPDATE "+action+";\nGO\n"+ImportFooter.Replace("rows=2","rows=0")))
+                Assert(input.Scan(CancellationToken.None,null).Script.Kind==MssqlImportScriptKind.NativeSchema,"Exact FK referential action recognized: "+action);
         foreach(string malformed in new[]{ImportHeader+ImportHint+"SELECT 'CREATE TABLE x(a int)';\nGO\n"+ImportFooter,"CREATE TABLE x(a int);\nGO\n"+ImportHeader+ImportHint+ImportFooter,ImportHeader.Replace("READ COMMITTED","Schema only (no data transaction)")+ImportHint+"CREATE TABLE x(a int); INSERT INTO x VALUES(1);\nGO\n"+ImportFooter})
             using(var input=ImportInput(malformed)) ImportReject(input,"NativeFormat");
     }

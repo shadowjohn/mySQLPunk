@@ -265,12 +265,22 @@ namespace mySQLPunk.lib.MssqlImport
                         }
                         catch { cleanup = new MssqlImportCleanup(false, false, false, "CleanupFailed"); }
                         try { if (session != null) session.Dispose(); }
-                        catch { cleanup = new MssqlImportCleanup(cleanup.CommandEnded, false, cleanup.TransactionCleanupConfirmed, "SessionReleaseFailed"); }
+                        catch { cleanup = new MssqlImportCleanup(cleanup.CommandEnded, false, cleanup.TransactionCleanupConfirmed, "SessionReleaseFailed", cleanup.Errors); }
                         try { input.Dispose(); } catch { summary += ";InputReleaseFailed"; if (status != MssqlImportStatus.Failed) status = MssqlImportStatus.CleanupUncertain; }
                         if (cleanup == null || !cleanup.CommandEnded || !cleanup.SessionReleased || !cleanup.TransactionCleanupConfirmed)
                         {
                             summary += ";CleanupUnconfirmed";
                             if (status != MssqlImportStatus.Failed) status = MssqlImportStatus.CleanupUncertain;
+                        }
+                        if (cleanup != null && cleanup.Errors.Count != 0)
+                        {
+                            try
+                            {
+                                log.WriteError(new MssqlImportBatch(0, 0, 0, 0, 0, string.Empty), new MssqlImportBatchException(cleanup.Errors, true),
+                                    "Stop;Origin=Cleanup;DuringBatch=" + (batch == null ? "0" : batch.Number.ToString(CultureInfo.InvariantCulture)));
+                                log.Flush();
+                            }
+                            catch { MarkLogIncomplete(); }
                         }
                         try { log.WriteEnd(Result()); } catch { MarkLogIncomplete(); }
                         try { log.Dispose(); } catch { MarkLogIncomplete(); }

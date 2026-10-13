@@ -103,7 +103,7 @@ public static partial class SmokeTests
             cancel.Cancel();
             Assert(command.Cancels > 0 && command.LastToken == cancel.Token, "Cancellation reaches the exact startup command and token.");
             Assert(owner.Released.Wait(2000), "Watchdog attempts owned close after cancellation deadline.");
-            var pending = session.Cleanup();
+            var pending = ImportWaitForPublishedReleaseWhileActive(session);
             Assert(!pending.CommandEnded && pending.SessionReleased && !pending.TransactionCleanupConfirmed,
                 "Owned close is not command acknowledgement or rollback proof.");
             release.Set(); Assert(task.Wait(2000), "Worker unwinds only after provider completion.");
@@ -214,6 +214,8 @@ public static partial class SmokeTests
         var readers = new Queue<ImportSessionReader>(new[] { ImportValues(7, 0, 0), ImportValues(true, 1L, 9L, 9L, true, false), ImportValues(0, 0) });
         using (var session = new MssqlImportSqlSession(owner, () => { var cmd = new ImportSessionCommand(readers.Dequeue()); commands.Add(cmd); return cmd; }, () => true)) {
             var state = session.ReadState(CancellationToken.None); Assert(state.IsOpen && state.DatabaseId == 7 && state.TransactionCount == 0 && state.XactState == 0, "State keeps DB and transaction facts.");
+            Assert(commands[0].CommandText.StartsWith("DECLARE @databaseId int=DB_ID(); SELECT @databaseId,@@TRANCOUNT,XACT_STATE();", StringComparison.Ordinal),
+                "Capture metadata DB_ID in its own statement so its SQL17 internal transaction cannot pollute XACT_STATE in the state SELECT.");
             var job = new Guid("10000000-0000-0000-0000-000000000001"); var lob = session.ReadLobState(job, CancellationToken.None);
             Assert(lob.Exists && lob.RowCount == 1 && lob.Sequence == 9 && lob.ConsumedThrough == 9 && lob.Consumed && !lob.Failed, "LOB aggregate preserves unique row and protocol counters.");
             Assert(commands[1].CommandText.Contains("#mp_" + job.ToString("N") + "_s") && commands[1].CommandTimeout == 5, "LOB lookup uses only GUID-derived identifier and bounded timeout.");
@@ -245,8 +247,8 @@ public static partial class SmokeTests
 
     private sealed class ImportSessionOwner : IDisposable
     {
-        internal int Disposes; internal Exception Error; internal ManualResetEventSlim Released = new ManualResetEventSlim();
-        public void Dispose() { Interlocked.Increment(ref Disposes); Released.Set(); if (Error != null) throw Error; }
+        internal int Disposes; internal Exception Error; internal Action BeforeReturn; internal ManualResetEventSlim Released = new ManualResetEventSlim();
+        public void Dispose() { Interlocked.Increment(ref Disposes); Released.Set(); if (BeforeReturn != null) BeforeReturn(); if (Error != null) throw Error; }
     }
     private sealed class ImportSessionCommand : DbCommand
     {

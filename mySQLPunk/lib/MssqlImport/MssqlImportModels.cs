@@ -78,8 +78,12 @@ namespace mySQLPunk.lib.MssqlImport
         public bool SessionReleased { get; }
         public bool TransactionCleanupConfirmed { get; }
         public string IssueCode { get; }
-        internal MssqlImportCleanup(bool commandEnded, bool sessionReleased, bool transactionCleanupConfirmed, string issueCode)
-        { CommandEnded = commandEnded; SessionReleased = sessionReleased; TransactionCleanupConfirmed = transactionCleanupConfirmed; IssueCode = issueCode; }
+        public IReadOnlyList<MssqlImportSqlError> Errors { get; }
+        internal MssqlImportCleanup(bool commandEnded, bool sessionReleased, bool transactionCleanupConfirmed, string issueCode, IEnumerable<MssqlImportSqlError> errors = null)
+        {
+            CommandEnded = commandEnded; SessionReleased = sessionReleased; TransactionCleanupConfirmed = transactionCleanupConfirmed; IssueCode = issueCode;
+            Errors = Array.AsReadOnly((errors ?? Enumerable.Empty<MssqlImportSqlError>()).ToArray());
+        }
     }
 
     internal sealed class MssqlImportSqlError

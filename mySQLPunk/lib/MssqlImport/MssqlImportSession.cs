@@ -31,6 +31,7 @@ namespace mySQLPunk.lib.MssqlImport
         private ActiveCommand active;
         private bool releaseStarted, sessionReleased, cleanupRunning;
         private MssqlImportCleanup cleanup;
+        private IReadOnlyList<MssqlImportSqlError> releaseErrors;
 
         private sealed class ActiveCommand
         {
@@ -114,7 +115,9 @@ WHERE p.state='D' AND p.grantee_principal_id IN (SELECT principal_id FROM sys.us
             cancellation.ThrowIfCancellationRequested();
             EnsureNoActiveCommand();
             if (!ConnectionUsable()) return new MssqlImportSessionState(false, 0, 0, 0);
-            object[] state = ReadValues("SELECT DB_ID(),@@TRANCOUNT,XACT_STATE();", 5, cancellation);
+            // Observed on SQL17.0.4025.3: DB_ID metadata work exposed XACT_STATE=1 in the same SELECT at @@TRANCOUNT=0.
+            // Complete that statement first, then observe the actual caller transaction without normalizing its state.
+            object[] state = ReadValues("DECLARE @databaseId int=DB_ID(); SELECT @databaseId,@@TRANCOUNT,XACT_STATE();", 5, cancellation);
             if (state == null || state.Length != 3 || Missing(state[0]) || Missing(state[1]) || Missing(state[2]) || Convert.ToInt32(state[0], CultureInfo.InvariantCulture) <= 0)
                 throw new InvalidOperationException("SessionStateUnavailable");
             return new MssqlImportSessionState(true, Convert.ToInt32(state[0], CultureInfo.InvariantCulture),
@@ -196,6 +199,7 @@ WHERE p.state='D' AND p.grantee_principal_id IN (SELECT principal_id FROM sys.us
                 cleanupRunning = true;
             }
             bool transactionConfirmed = false;
+            IReadOnlyList<MssqlImportSqlError> cleanupErrors = null;
             string issue = null;
             try
             {
@@ -208,12 +212,16 @@ WHERE p.state='D' AND p.grantee_principal_id IN (SELECT principal_id FROM sys.us
                     if (!transactionConfirmed) issue = "TransactionCleanupUnconfirmed";
                 }
             }
+            catch (MssqlImportBatchException error) { issue = "TransactionCleanupFailed"; cleanupErrors = error.Errors; }
             catch { issue = "TransactionCleanupFailed"; }
             finally { ReleaseOwner(null); }
             lock (gate)
             {
                 if (!sessionReleased) issue = issue == null ? "SessionReleaseFailed" : issue + ";SessionReleaseFailed";
-                cleanup = new MssqlImportCleanup(active == null, sessionReleased, transactionConfirmed, issue);
+                var errors = new List<MssqlImportSqlError>();
+                if (cleanupErrors != null) errors.AddRange(cleanupErrors);
+                if (releaseErrors != null) errors.AddRange(releaseErrors);
+                cleanup = new MssqlImportCleanup(active == null, sessionReleased, transactionConfirmed, issue, errors);
                 cleanupRunning = false;
                 return cleanup;
             }
@@ -231,8 +239,17 @@ WHERE p.state='D' AND p.grantee_principal_id IN (SELECT principal_id FROM sys.us
                 releaseStarted = true; value = owner; owner = null;
             }
             bool released = false;
-            try { value.Dispose(); released = true; } catch { /* Cleanup's receipt must report failure rather than infer release. */ }
-            finally { lock (gate) sessionReleased = released; }
+            IReadOnlyList<MssqlImportSqlError> details = null;
+            try { value.Dispose(); released = true; }
+            catch (SqlException error)
+            {
+                var errors = new List<MssqlImportSqlError>();
+                foreach (SqlError detail in error.Errors)
+                    errors.Add(new MssqlImportSqlError(detail.Number, detail.State, detail.Class, detail.LineNumber, detail.Message));
+                details = errors.AsReadOnly();
+            }
+            catch { /* Non-SQL release failures retain the fixed receipt code, never raw exception text. */ }
+            finally { lock (gate) { sessionReleased = released; releaseErrors = details; } }
         }
 
         private bool ConnectionUsable()

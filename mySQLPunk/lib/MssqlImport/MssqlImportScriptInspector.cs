@@ -13,6 +13,8 @@ namespace mySQLPunk.lib.MssqlImport
         private readonly string databaseName;
         private bool candidate, header, hint, footer, schema, data, lob, usePending;
         private string mode, createKind;
+        private bool foreignKeyword, foreignKey, references;
+        private int referentialAction, parenthesisDepth, foreignKeyDepth;
         private Guid? job, lobJob;
         private long? tables, rows;
         private MssqlImportBatch current;
@@ -28,6 +30,7 @@ namespace mySQLPunk.lib.MssqlImport
             if (complete) throw new InvalidOperationException("Inspector is complete.");
             current = batch ?? throw new ArgumentNullException(nameof(batch));
             UsesNativeLob = false; InitializesNativeLob = false; Phase = MssqlImportPhase.None;
+            ResetReferentialContext(); parenthesisDepth = 0;
             string text = batch.Text;
             bool lineHasCode = false;
             int i = 0;
@@ -98,9 +101,17 @@ namespace mySQLPunk.lib.MssqlImport
                 }
                 if (usePending) throw Error("DatabaseChange");
                 createKind = null;
+                if (c == '(') parenthesisDepth++;
+                else if (c == ')')
+                {
+                    if (parenthesisDepth > 0) parenthesisDepth--;
+                    if (foreignKey && parenthesisDepth < foreignKeyDepth) ResetReferentialContext();
+                }
+                else if (c == ';' || (c == ',' && (!foreignKey || parenthesisDepth <= foreignKeyDepth))) ResetReferentialContext();
                 i++;
             }
             if (usePending) throw Error("DatabaseChange");
+            ResetReferentialContext();
             // Keep only immutable source coordinates, not the previous SQL payload.
             current = new MssqlImportBatch(batch.Number, batch.StartByte, batch.EndByte, batch.StartLine, batch.EndLine, string.Empty);
             currentIndex = 0;
@@ -131,6 +142,8 @@ namespace mySQLPunk.lib.MssqlImport
         }
         private void Token(string token, bool quoted)
         {
+            bool dataToken = !quoted && (token.Equals("INSERT", StringComparison.OrdinalIgnoreCase) || token.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || token.Equals("DELETE", StringComparison.OrdinalIgnoreCase));
+            if (ReferentialKeyword(token, quoted)) dataToken = false;
             if (usePending)
             {
                 usePending = false;
@@ -156,7 +169,7 @@ namespace mySQLPunk.lib.MssqlImport
                 if (token.Equals("CONSTRAINT", StringComparison.OrdinalIgnoreCase) || token.Equals("FOREIGN", StringComparison.OrdinalIgnoreCase)) Phase = MssqlImportPhase.Constraints;
                 else if (createKind == "create" && token.Equals("INDEX", StringComparison.OrdinalIgnoreCase) && Phase != MssqlImportPhase.Constraints) Phase = MssqlImportPhase.Indexes;
                 else if (Phase == MssqlImportPhase.None && token.Equals("CREATE", StringComparison.OrdinalIgnoreCase)) Phase = MssqlImportPhase.Schema;
-                else if ((Phase == MssqlImportPhase.None || Phase == MssqlImportPhase.Schema) && (token.Equals("INSERT", StringComparison.OrdinalIgnoreCase) || token.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || token.Equals("DELETE", StringComparison.OrdinalIgnoreCase))) Phase = MssqlImportPhase.Data;
+                else if ((Phase == MssqlImportPhase.None || Phase == MssqlImportPhase.Schema) && dataToken) Phase = MssqlImportPhase.Data;
                 if (createKind == "create" && (token.Equals("UNIQUE", StringComparison.OrdinalIgnoreCase) || token.Equals("CLUSTERED", StringComparison.OrdinalIgnoreCase) || token.Equals("NONCLUSTERED", StringComparison.OrdinalIgnoreCase))) return;
             }
             if (createKind == "object")
@@ -166,7 +179,40 @@ namespace mySQLPunk.lib.MssqlImport
             }
             else if (createKind == "create" && !quoted && (token.Equals("TABLE", StringComparison.OrdinalIgnoreCase) || token.Equals("VIEW", StringComparison.OrdinalIgnoreCase) || token.Equals("PROCEDURE", StringComparison.OrdinalIgnoreCase) || token.Equals("FUNCTION", StringComparison.OrdinalIgnoreCase))) createKind = "object";
             else createKind = !quoted && token.Equals("CREATE", StringComparison.OrdinalIgnoreCase) ? "create" : null;
-            if (!quoted && (token.Equals("INSERT", StringComparison.OrdinalIgnoreCase) || token.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || token.Equals("DELETE", StringComparison.OrdinalIgnoreCase))) data = true;
+            if (dataToken) data = true;
+        }
+        // This recognizes only actual FOREIGN KEY ... REFERENCES ... ON action clauses,
+        // not arbitrary previous-ON tokens such as SET ANSI_NULLS ON DELETE ... .
+        private bool ReferentialKeyword(string token, bool quoted)
+        {
+            string word = quoted ? string.Empty : token.ToUpperInvariant();
+            if (referentialAction == 4)
+            {
+                referentialAction = 0;
+                if (word == "DELETE" || word == "UPDATE") { referentialAction = 1; return true; }
+                references = false;
+            }
+            else if (referentialAction != 0)
+            {
+                int expected = referentialAction;
+                if (expected == 1 && word == "NO") { referentialAction = 2; return false; }
+                if (expected == 1 && word == "SET") { referentialAction = 3; return false; }
+                if ((expected == 1 && word == "CASCADE") || (expected == 2 && word == "ACTION") || (expected == 3 && (word == "NULL" || word == "DEFAULT"))) { referentialAction = 0; return false; }
+                data = true; referentialAction = 0; references = false;
+            }
+            if (word == "INSERT" || word == "UPDATE" || word == "DELETE" || word == "SET" || word == "ALTER" || word == "CREATE" || word == "SELECT")
+            { references = false; foreignKey = false; }
+            if (references && word == "ON") referentialAction = 4;
+            if (foreignKeyword && word == "KEY") foreignKey = true;
+            if (word == "FOREIGN") foreignKeyDepth = parenthesisDepth;
+            foreignKeyword = word == "FOREIGN";
+            if (foreignKey && word == "REFERENCES") references = true;
+            return false;
+        }
+        private void ResetReferentialContext()
+        {
+            if (referentialAction > 0 && referentialAction < 4) data = true; // Incomplete action must never hide real data syntax.
+            referentialAction = 0; foreignKeyword = false; foreignKey = false; references = false; foreignKeyDepth = 0;
         }
         private void Comment(string text, int start, int end)
         {
