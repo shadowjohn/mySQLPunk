@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，使用者於 2026-10-13 回覆「好，進實作」核准書面規格。
 
-**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 已實作與覆核通過（0982548／3ebf6b3，修正兩項 P2）；Task2 log／ETA 已實作與覆核通過（0cc1657）；Task3 專用連線層已實作與覆核通過（9df6437）；Task4 開始。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
+**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 已實作與覆核通過（0982548／3ebf6b3，修正兩項 P2）；Task2 log／ETA 已實作與覆核通過（0cc1657）；Task3 專用連線層已實作與覆核通過（9df6437）；Task4 循序 worker 已實作與覆核通過（0707bc9）；Task5 開始。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
 
 **Execution:** 保留先前選定的「分工實作並逐項覆核」。一次一位 implementer，各 task 經獨立覆核後才接下一項；最後整體覆核。build、native UI 與 DB tests 由單一 owner 串行執行，避免共享輸出／fixture 衝突。
 
@@ -22,7 +22,7 @@
 - 嚴格 UTF-8 有／無 BOM、UTF-16 LE／BE 有 BOM；解碼後 U+0000 回報 EmbeddedNul，明示 v1 literal-NUL 相容邊界，不能誤稱 UTF-8 NUL 一定是無效編碼；保留原文及同一 session。支援獨立 GO／GO -- 註解，拒絕 GO n、同分隔行 block comment、SQLCMD 指令與跨 DB 的直接 USE。
 - 預設不略過錯誤；略過對象為失敗 GO batch，不是單筆 row。timeout／斷線／log IO／未知交易／native LOB 失敗仍停止，不重連、重試、重播或續傳。
 - 專用連線明確指定 Initial Catalog；ConnectRetryCount=0，單一 command，CommandTimeout=0。狀態查詢 5 秒、cleanup 10 秒，取消 10 秒無回應後只嘗試關閉本次 owned connection。
-- 不新增全檔外層 transaction、不自動清庫／DROP 使用者物件、不改 SNAPSHOT／recovery model／constraint trust、不 GRANT／KILL。
+- 不新增全檔外層 transaction、不自動清庫／DROP 使用者物件、不改 SNAPSHOT／recovery model／constraint trust、不 GRANT／KILL。 隔離驗收例外僅限新建 GUID-owned LocalDB 測試庫：WITHOUT LOGIN fixture users／custom roles 可作 GRANT／DENY 與 readonly／recreate target 測試；不擴張至 server login、master／msdb、Transfer 或既有真人帳號，清除仍須雙重 ownership／路徑驗證。
 - 所有走到 EOF 的作業都做 session／交易／digest／已初始化 LOB 終態檢查，包括已略過錯誤者。native LOB 結尾要求唯一 state row、Failed=0、Consumed=1、Sequence=ConsumedThrough。
 - error log 預設 `%LOCALAPPDATA%\mySQLPunk\ImportLogs\import-<timestamp>-<job>.log`；略過前落檔並 flush。UI 最近 100 筆或 64 KiB UTF-16 文字，先到者為準，完整路徑可見。
 - 進度與 batch／line／byte／error 統計為 Int64；command／result drain／狀態處理完成才更新確認邊界。affected rows 不能標為實際匯入筆數。
@@ -122,11 +122,11 @@
 
 **Interfaces:** 完成 Service.Preflight／Run；Preflight 保留 input／scan／target identity／已建立 log；Run 在新專用 execution session 重查相同 server／DB id／create_date 與能力，所有 batches 同線。
 
-- [ ] **Step 1: 先寫失敗的 fake-session tests。** `DefaultStopsAtFirstError`、`SkipContinuesOnlySafeBatch`：未勾後續0calls；勾選一般class11–16、前後交易0／XactState0、same DB、無LOB pending、log flush成功才下一批。任何 SqlError 嚴重／timeout／傳輸／不明 outcome 不可 skip，不比對 message 語言。`FlushFailsBeforeSkip` 注入真實log flush fault，斷言 `NextBatchCalls==0`。
-- [ ] **Step 2: 實作預檢→確認→執行流程。** 所有 input encoding／batch／native／目標／log 可寫性問題於第一個 DB write 前阻擋，parser失敗時execution factory calls=0；不同檔案／target／skip設定令預檢失效，ReusedPreflightIsRejected 測試第二次 Run 不送 SQL。一次一批，結果與 state 查明後才確認 bytes；目前batch可能部分生效，分開成功、失敗與未知批次。
-- [ ] **Step 3: 實作 native batch role／state gate 及 EOF。** native LOB initialization／assemble／commit 任一 error fatal，即使 XACT_STATE0；普通batch遇錯也查已初始化 native state。每個走到 EOF 的作業都查交易、identity、digest、LOB唯一state／Failed0／Consumed1／Sequence=ConsumedThrough，包含 skip／DataOnly；pending／missing／wrongjob 不得 amber完成。無錯 NativeSchema 才逐表 COUNT_BIG 對 footer tables／rows，核對可取消。
-- [ ] **Step 4: 實作取消／cleanup terminal tests。** 先 Stopping、不排下一批；Cancel10秒無回應只關本 session；cleanup10秒限時。自然 EOF 未結交易、取消在成功回應邊界、狀態查詢／COUNT_BIG／log flush 中取消、cleanup未確認都測。已失敗的原始結果不能被 cleanup exception 覆蓋；若最後 log失敗要顯示存檔未完整。
-- [ ] **Step 5: 跑 worker filter、提交。** `PartialBatchEffectsAreNotReportedAsRows`、`SkippedRunStillChecksEofState`、`NativeLobPendingAtEofFails`、`NoReconnectOrReplay` 均通過。Commit `feat: execute MSSQL import batches with explicit outcomes`。
+- [x] **Step 1: 先寫失敗的 fake-session tests。** `DefaultStopsAtFirstError`、`SkipContinuesOnlySafeBatch`：未勾後續0calls；勾選一般class11–16、前後交易0／XactState0、same DB、無LOB pending、log flush成功才下一批。任何 SqlError 嚴重／timeout／傳輸／不明 outcome 不可 skip，不比對 message 語言。`FlushFailsBeforeSkip` 注入真實log flush fault，斷言 `NextBatchCalls==0`。
+- [x] **Step 2: 實作預檢→確認→執行流程。** 所有 input encoding／batch／native／目標／log 可寫性問題於第一個 DB write 前阻擋，parser失敗時execution factory calls=0；不同檔案／target／skip設定令預檢失效，ReusedPreflightIsRejected 測試第二次 Run 不送 SQL。一次一批，結果與 state 查明後才確認 bytes；目前batch可能部分生效，分開成功、失敗與未知批次。
+- [x] **Step 3: 實作 native batch role／state gate 及 EOF。** native LOB initialization／assemble／commit 任一 error fatal，即使 XACT_STATE0；普通batch遇錯也查已初始化 native state。每個走到 EOF 的作業都查交易、identity、digest、LOB唯一state／Failed0／Consumed1／Sequence=ConsumedThrough，包含 skip／DataOnly；pending／missing／wrongjob 不得 amber完成。無錯 NativeSchema 才逐表 COUNT_BIG 對 footer tables／rows，核對可取消。
+- [x] **Step 4: 實作取消／cleanup terminal tests。** 先 Stopping、不排下一批；Cancel10秒無回應只關本 session；cleanup10秒限時。自然 EOF 未結交易、取消在成功回應邊界、狀態查詢／COUNT_BIG／log flush 中取消、cleanup未確認都測。已失敗的原始結果不能被 cleanup exception 覆蓋；若最後 log失敗要顯示存檔未完整。
+- [x] **Step 5: 跑 worker filter、提交。** `PartialBatchEffectsAreNotReportedAsRows`、`SkippedRunStillChecksEofState`、`NativeLobPendingAtEofFails`、`NoReconnectOrReplay` 均通過。Commit `feat: execute MSSQL import batches with explicit outcomes`。
 
 ## Task 5: Four-step native wizard、Punky 與 MSSQL routing
 
