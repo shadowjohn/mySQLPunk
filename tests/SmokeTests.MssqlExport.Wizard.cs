@@ -48,6 +48,12 @@ public static partial class SmokeTests
     }
     private static void SnapshotWizard_RecoveryAndTerminalStatus()
     {
+        var unknownRecord = new MssqlSnapshotRecoveryRecord(Guid.NewGuid(), WIdentity(), 0, MssqlSnapshotRecoveryPhase.Unconfirmed, 1, DateTime.UtcNow, MssqlSnapshotRecoveryCode.RestoreUnconfirmed);
+        using (var unknownForm = WForm(new WizardService { Notices = new[] { new MssqlSnapshotRecoveryNotice(unknownRecord, "fixture-unknown.json", MssqlSnapshotRecoveryReadError.None) } }, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"))) {
+            unknownForm.Show(); WPump(() => WControl<Button>(unknownForm, "mssqlStart").Enabled); WClick(unknownForm, "mssqlStart");
+            AssertContains(WControl<Label>(unknownForm, "mssqlRecoveryNotices").Text, "IdentityUnknown", "Native notice distinguishes unavailable current identity");
+            Assert(!WControl<RadioButton>(unknownForm, "mssqlSnapshotYes").Enabled, "Unknown identity never authorizes snapshot management"); unknownForm.Close();
+        }
         foreach (string theme in new[] { "light", "dark" }) {
         ThemeManager.SetTheme(theme, false);
         var record = new MssqlSnapshotRecoveryRecord(Guid.NewGuid(), new MssqlSnapshotIdentity("fixture-server", "fixture_db", 8, new DateTime(2021,1,1)), 0, MssqlSnapshotRecoveryPhase.Unconfirmed, 3, DateTime.UtcNow, MssqlSnapshotRecoveryCode.RestoreUnconfirmed);

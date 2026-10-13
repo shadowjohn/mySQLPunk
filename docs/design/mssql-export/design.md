@@ -24,7 +24,7 @@
 
 1. 既有 WinForms MSSQL 互動式本機 SQL 匯出入口共用專用精靈及 worker；依入口預選結構與資料、僅結構或僅資料。資料庫入口預設全選，單表入口只預選指定資料表。
 2. 原生 SQL Server 型別與結構的正確腳本、逐表串流資料、大欄位分塊輸出、可取消查詢、串流檔案完整性驗證。
-3. 持續寫入來源採同一個 SNAPSHOT 交易；不自動變更 DB 設定。
+3. 2026-10-13 已核准的 [可選 SNAPSHOT 設計](snapshot-options-design.md) 取代原規則：預設 READ COMMITTED；選 SNAPSHOT 時依原狀有限管理 ON/OFF。
 4. 「建立備份」保留目前選用的備份鏡像與保留份數功能；一般手動 SQL 匯出不因此新增鏡像。
 5. 沿用現有 Punky 素材、ThemeManager、UiKit、獨立連線及 SSH transport 的生命週期。
 
@@ -70,7 +70,7 @@ SQL Server 原生 `.bak`、還原工具重寫、排程／自動備份改造、�
 
 列出來源、模式、表與檢視範圍、輸出路徑、估計工作量、一致性模式、鏡像，以及具體不支援項目。檢查失敗須指出物件及原因，保留選取供修正。
 
-未啟用 SNAPSHOT 時，含資料模式停在此頁；不能自動降級成一般讀取或 NOLOCK。僅結構不需要跨表資料快照，但仍檢查 schema 變動與定義可讀性。
+預設一般 READ COMMITTED 不因 SNAPSHOT OFF 被擋；明確選 SNAPSHOT 時需有效 ALTER 與可管理狀態，不能偷偷降級。僅結構不需要跨表資料快照，但仍檢查 schema 變動與定義可讀性。
 
 開始按鈕捕獲不可變的本次 request；執行期間不能改選取、路徑或模式。原型頂端的任意跳頁工具不進正式產品。
 
@@ -91,8 +91,8 @@ SQL Server 原生 `.bak`、還原工具重寫、排程／自動備份改造、�
 
 1. UI 只捕獲本次選擇及必要的連線設定，worker 經既有安全連線流程取得獨立連線及 SSH lease；不得借用主視窗 provider。
 2. 在 `ConnectionOpenService` 邊界提供最小的內部 MSSQL 工作連線存取方式，保持 wrapper 及 raw SqlConnection 同一擁有者。不改動所有 provider 的 `IDatabase` public contract，不以另開連線字串繞過 transport 生命週期。
-3. 前置檢查讀取目標 DB 的 `snapshot_isolation_state`，僅 ON 接受含資料快照；過渡狀態不當作可用。只開 `READ_COMMITTED_SNAPSHOT` 不等於這次跨表交易已使用 SNAPSHOT。
-4. 使用者選擇期間不持有快照。按開始後重做必要檢查，在指定資料庫開始一筆明確的 SNAPSHOT transaction，必要來源查詢均使用同一交易。
+3. 前置檢查讀取目標 DB 的 `snapshot_isolation_state` 與管理能力；選 SNAPSHOT 才要求可管理的 ON/OFF，OFF 由作業有限啟用與恢復，過渡狀態不當作可管理。只開 `READ_COMMITTED_SNAPSHOT` 不等於這次跨表交易已使用 SNAPSHOT。
+4. 使用者選擇期間不持有快照。按開始後重做必要檢查，在指定資料庫依明確選項開始一筆 READ COMMITTED 或 SNAPSHOT transaction，必要來源查詢均使用同一交易。
 5. 所有選取表依序用同一交易讀取；不能每表重新開交易，也不能中途重新連線續跑而仍宣稱同一時點。
 6. SNAPSHOT 不保證 metadata 可任意變更。預檢後凍結本次物件定義；物件變更、不可讀、schema 變動導致查詢失敗等情況中止本次工作，不跳過失敗表後顯示成功。
 7. 讀完最後來源資料及必要來源查核後立即結束交易並釋放 DB／SSH 資源；本機驗證、發布、mirror 不延長快照持有時間。

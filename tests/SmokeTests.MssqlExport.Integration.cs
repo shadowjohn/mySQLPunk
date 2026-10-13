@@ -21,10 +21,12 @@ public static partial class SmokeTests
     {
         string profile = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION");
         if (string.IsNullOrEmpty(profile)) { Console.WriteLine("SKIP live integration (explicit runner -Run required)"); return; }
-        Assert(new[] { "Core", "Large", "Concurrency", "ClientProbe", "FinalFix", "Geometry", "Properties", "References" }.Contains(profile), "Known integration profile");
-        using (var fixture = new IntegrationFixture(profile))
+        Assert(new[] { "OptionalSnapshot", "SnapshotLifecycle", "Core", "Large", "Concurrency", "ClientProbe", "FinalFix", "Geometry", "Properties", "References" }.Contains(profile), "Known integration profile");
+        using (var fixture = new IntegrationFixture(profile, profile != "OptionalSnapshot" && profile != "SnapshotLifecycle"))
         {
-            if (profile == "ClientProbe") IntegrationClientProbe(fixture);
+            if (profile == "OptionalSnapshot") IntegrationOptionalSnapshot(fixture);
+            else if (profile == "SnapshotLifecycle") IntegrationSnapshotLifecycle(fixture);
+            else if (profile == "ClientProbe") IntegrationClientProbe(fixture);
             else if (profile == "FinalFix") IntegrationFinalFix(fixture);
             else if (profile == "Geometry") IntegrationGeometry(fixture);
             else if (profile == "Properties") IntegrationProperties(fixture);
@@ -44,8 +46,13 @@ public static partial class SmokeTests
         internal Action AfterBegin;
         internal Action<MssqlTableDefinition> BeforeRows;
         internal bool RestrictedReader;
+        internal bool ParentFirst;
+        internal string SourceOverride, JournalOverride;
+        internal Action<bool> BeforeSetting, AfterSetting;
+        internal readonly List<string> SettingAudit = new List<string>();
+        internal readonly List<string> LockAudit = new List<string>();
         private int restoreSequence;
-        internal IntegrationFixture(string profile)
+        internal IntegrationFixture(string profile, bool initialSnapshot = true)
         {
             Profile = profile;
             Server = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_SERVER");
@@ -71,7 +78,9 @@ public static partial class SmokeTests
                         Exec(c,"USE " + Q(db) + "; EXEC sys.sp_addextendedproperty @name=N'mysqlpunk_export_owner',@value=" + Lit(Token) + ";");
                         Exec(c,"USE master; ALTER DATABASE " + Q(db) + " SET RECOVERY SIMPLE;");
                     }
-                    Exec(c,"ALTER DATABASE " + Q(Source) + " SET ALLOW_SNAPSHOT_ISOLATION ON;");
+                    if (initialSnapshot) Exec(c,"ALTER DATABASE " + Q(Source) + " SET ALLOW_SNAPSHOT_ISOLATION ON;");
+                    Evidence["initialSnapshotRequested"] = initialSnapshot;
+                    Evidence["initialSnapshotObserved"] = Scalar(c,"SELECT snapshot_isolation_state FROM sys.databases WHERE name=" + Lit(Source));
                 }
                 Evidence["sourceCollation"] = "Latin1_General_100_BIN2";
                 Save();
@@ -99,11 +108,13 @@ public static partial class SmokeTests
         }
         internal IMssqlExportSource NewSource()
         {
+            Assert(SourceOverride == null || SourceOverride == Source || SourceOverride == Target, "Source factory uses exact owned database whitelist");
+            Assert(JournalOverride == null || Path.GetFullPath(JournalOverride).StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "Injected journal remains inside owned fixture root");
             var provider = new my_mssql();
-            provider.SetConn(new SqlConnectionStringBuilder { DataSource = Server, InitialCatalog = Source, IntegratedSecurity = true, Pooling = false, TrustServerCertificate = true }.ConnectionString);
+            provider.SetConn(new SqlConnectionStringBuilder { DataSource = Server, InitialCatalog = SourceOverride ?? Source, IntegratedSecurity = true, Pooling = false, TrustServerCertificate = true }.ConnectionString);
             provider.Open(); WorkerConnections.Add(provider.MCT);
             if (RestrictedReader) Exec(provider.MCT,"EXECUTE AS USER = N'fixture_reader';");
-            return new IntegrationSource(new MssqlExportSource(new MssqlOwnedSession(provider,provider.MCT), new MssqlSnapshotRecoveryStore(Path.Combine(Root,"journal"))),this);
+            return new IntegrationSource(new MssqlExportSource(new MssqlOwnedSession(provider,provider.MCT), new MssqlSnapshotRecoveryStore(JournalOverride ?? Path.Combine(Root,"journal")), c => new IntegrationSnapshotBackend(c,this)),this);
         }
         internal MssqlSqlExportService Service(MssqlArtifactFiles files = null, Action<MssqlExportStage> phase = null)
         {
@@ -113,24 +124,25 @@ public static partial class SmokeTests
                 if (phase != null) phase(stage);
             }, new MssqlSnapshotRecoveryStore(Path.Combine(Root,"journal")));
         }
-        internal MssqlExportRequest Request(string filename = "export.sql", bool views = true, MssqlExportMode mode = MssqlExportMode.SchemaAndData, Func<MssqlTableDefinition,bool> select = null, bool mirror = false)
+        internal MssqlExportRequest Request(string filename = "export.sql", bool views = true, MssqlExportMode mode = MssqlExportMode.SchemaAndData, Func<MssqlTableDefinition,bool> select = null, bool mirror = false, bool? useSnapshot = null)
         {
             var tables = Service().LoadCatalog(Source,CancellationToken.None).Tables.Where(t => select == null || select(t)).Select(t => t.Key).ToArray();
             string path = Path.Combine(Root,filename);
-            return new MssqlExportRequest(Guid.NewGuid(),Source,tables,mode,views,path,MssqlExportArtifact.CaptureDestination(path,CancellationToken.None),mirror ? new MssqlMirrorOptions(Path.Combine(Root,"mirror"),2) : null, mode != MssqlExportMode.SchemaOnly);
+            return new MssqlExportRequest(Guid.NewGuid(),Source,tables,mode,views,path,MssqlExportArtifact.CaptureDestination(path,CancellationToken.None),mirror ? new MssqlMirrorOptions(Path.Combine(Root,"mirror"),2) : null, useSnapshot ?? (mode != MssqlExportMode.SchemaOnly));
         }
         internal MssqlExportResult Export(MssqlExportRequest request, CancellationToken cancellation = default(CancellationToken), MssqlArtifactFiles files = null, Action<MssqlExportStage> phase = null, Action<MssqlExportProgress> progress = null)
         {
             using (var memory = new IntegrationMemory())
             {
                 var result = Service(files,phase).Export(request,new WorkerProgress(p => { memory.Stage = p.Stage.ToString(); if (progress != null) progress(p); }),cancellation);
-                Evidence["export-" + Path.GetFileName(request.TargetPath)] = new { stage=result.Stage.ToString(), result.Elapsed, result.ErrorMessage, result.PublishedPath, result.MirrorPath, rows = result.RowCounts.Sum(x => x.Rows), memory = memory.Snapshot() };
+                Evidence["export-" + Path.GetFileName(request.TargetPath)] = new { stage=result.Stage.ToString(), result.Elapsed, result.ErrorMessage, result.PublishedPath, result.MirrorPath, request.UseSnapshot, cleanup = result.SnapshotCleanup, snapshotState = SnapshotState(this), journal = Directory.Exists(Path.Combine(Root,"journal")) ? Directory.GetFiles(Path.Combine(Root,"journal")) : new string[0], settingAudit = SettingAudit.ToArray(), lockAudit = LockAudit.ToArray(), rows = result.RowCounts.Sum(x => x.Rows), memory = memory.Snapshot() };
                 Save(); return result;
             }
         }
         internal void Restore(string file, bool expectSuccess = true)
         {
             Assert(File.Exists(file),"Restore artifact exists");
+            RecordArtifact(file);
             bool go = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_CLIENT") == "Go";
             string endpoint = go ? "np:"+Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_PIPE") : Server;
             string args = "-S \"" + endpoint + "\" -d " + Target + " -E -b -x " + (go ? "" : "-f 65001 ") + "-i \"" + file + "\"";
@@ -138,7 +150,7 @@ public static partial class SmokeTests
             var elapsed = Stopwatch.StartNew();
             using (var p = Process.Start(start))
             {
-                var stdout = p.StandardOutput.ReadToEndAsync(); var stderr = p.StandardError.ReadToEndAsync(); p.WaitForExit();
+                var stdout = p.StandardOutput.ReadToEndAsync(); var stderr = p.StandardError.ReadToEndAsync(); if (!p.WaitForExit(Profile == "Large" ? 3600000 : 300000)) { p.Kill(); p.WaitForExit(10000); throw new TimeoutException("Owned sqlcmd restore exceeded profile deadline"); }
                 int attempt = ++restoreSequence;
                 File.WriteAllText(file + ".restore-" + attempt + ".log",stdout.Result + stderr.Result);
                 elapsed.Stop();
@@ -167,6 +179,7 @@ public static partial class SmokeTests
                         while (r.Read()) Assert(Path.GetDirectoryName(Path.GetFullPath(r.GetString(0))) == Root,"Owned database file path before DROP");
                 }
                 using (var c = Open("master")) Exec(c,"ALTER DATABASE " + Q(db) + " SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE " + Q(db));
+                Evidence["cleaned-" + db] = DateTime.UtcNow; Save();
                 Created.Remove(db); Console.WriteLine("CLEANED " + db);
             }
             Evidence["cleanup"] = "All exact token-owned databases dropped; artifacts retained"; Save();
@@ -175,14 +188,14 @@ public static partial class SmokeTests
 
     private sealed class IntegrationSource : IMssqlExportSource
     {
-        private readonly IMssqlExportSource inner; private readonly IntegrationFixture fixture;
+        private readonly IMssqlExportSource inner; private readonly IntegrationFixture fixture; private MssqlExportSchema originalReadSchema;
         internal IntegrationSource(IMssqlExportSource inner, IntegrationFixture fixture) { this.inner=inner; this.fixture=fixture; }
         public MssqlExportCatalog ReadCatalog(string d,CancellationToken c) { return inner.ReadCatalog(d,c); }
         public MssqlExportPreflight Inspect(MssqlExportRequest r,CancellationToken c) { return inner.Inspect(r,c); }
-        public MssqlExportSchema BeginRead(MssqlExportRequest r,Action<MssqlExportStage> report,CancellationToken c) { var schema=inner.BeginRead(r,report,c); if(fixture.AfterBegin!=null)fixture.AfterBegin(); return schema; }
+        public MssqlExportSchema BeginRead(MssqlExportRequest r,Action<MssqlExportStage> report,CancellationToken c) { var schema=inner.BeginRead(r,report,c); originalReadSchema=schema; if(fixture.AfterBegin!=null)fixture.AfterBegin(); if(fixture.ParentFirst) schema = new MssqlExportSchema(schema.Tables.OrderBy(t=>t.Key.Name=="Parent"?0:1),schema.Views,schema.Dependencies,schema.SnapshotState,schema.Issues,schema.ExtendedProperties,schema.SnapshotCapability); return schema; }
         public MssqlRowReader OpenRows(MssqlTableDefinition t,CancellationToken c) { if(fixture.BeforeRows!=null)fixture.BeforeRows(t); return inner.OpenRows(t,c); }
         public MssqlSnapshotCleanupResult FinishRead(Action<MssqlExportStage> report) { return inner.FinishRead(report); }
-        public void CompleteRead(MssqlExportSchema s,CancellationToken c) { inner.CompleteRead(s,c); }
+        public void CompleteRead(MssqlExportSchema s,CancellationToken c) { inner.CompleteRead(originalReadSchema ?? s,c); }
         public void Dispose() { inner.Dispose(); }
     }
 
@@ -493,9 +506,9 @@ public static partial class SmokeTests
         f.Evidence["encryptedDefinitionIssues"]=encryptedCheck.Issues.Select(x=>x.Code+":"+x.ObjectKey?.Name).ToArray();
         using(var c=f.Open("master"))IntegrationFixture.Exec(c,"ALTER DATABASE "+IntegrationFixture.Q(f.Source)+" SET ALLOW_SNAPSHOT_ISOLATION OFF;");
         var off=f.Request("snapshot-off.sql",false,select:t=>t.Key.Name=="IdentityEmpty");
-        Assert(f.Service().Preflight(off,CancellationToken.None).Issues.Any(x=>x.Code=="SnapshotUnavailable"),"Snapshot OFF rejected");
+        Assert(f.Service().Preflight(off,CancellationToken.None).CanStart,"Snapshot OFF with confirmed ALTER capability may start");
         using(var c=f.Open("master"))IntegrationFixture.Exec(c,"ALTER DATABASE "+IntegrationFixture.Q(f.Source)+" SET ALLOW_SNAPSHOT_ISOLATION ON;");
-        f.Pass("Live unsupported spatial variant alias typed XML sequence encrypted definition and SNAPSHOT OFF preflight");
+        f.Pass("Live unsupported spatial variant alias typed XML sequence encrypted definition and manageable SNAPSHOT OFF preflight");
         using(var c=f.Open(f.Source))IntegrationFixture.Exec(c,"CREATE USER fixture_reader WITHOUT LOGIN; GRANT SELECT TO fixture_reader; DENY VIEW DEFINITION TO fixture_reader;");
         var hidden=f.Request("hidden.sql",false,select:t=>t.Key.Schema=="一");
         f.RestrictedReader=true;

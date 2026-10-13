@@ -25,8 +25,9 @@ public static partial class SmokeTests
     private static readonly string SmokeFilter = (Environment.GetEnvironmentVariable("MYSQLPUNK_SMOKE_FILTER") ?? string.Empty).Trim();
 
     [STAThread]
-    public static int Main()
+    public static int Main(string[] args)
     {
+        if (args.Length != 0) return SnapshotCrashChild(args);
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
         Run("MSSQL export snapshot worker cleanup cancellation", SnapshotWorker_CancellationDuringCleanup, ref passed);

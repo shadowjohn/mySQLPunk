@@ -1,5 +1,7 @@
 # Production preflight compatibility investigation (2026-10-13)
 
+> 2026-10-13 policy update: historical snapshot-required / no-automatic-ALTER rules below are superseded by [snapshot-options-design.md](snapshot-options-design.md). Current default is explicit READ COMMITTED with mixed-time/FK warnings. Optional SNAPSHOT requires ALTER even if already ON and manages its own OFF-to-ON change with bounded cleanup. Historical SQL2019 diagnostics remain evidence of that earlier observation only; no new production connection, setting change, export or restore has been performed.
+
 Base: merged master f0d4f56. Active worktree: .worktrees/mssql-export, branch codex/mssql-export-preflight-compat. Original master and unrelated Desktop Properties files remain untouched.
 
 ## Confirmed diagnosis

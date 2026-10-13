@@ -158,7 +158,7 @@ WHERE e.class=1 AND o.is_ms_shipped=0";
 
     private static void CompatibilityPermissions(IntegrationFixture f)
     {
-        var data = f.Request("permission-data.sql", false);
+        var data = f.Request("permission-data.sql", false, useSnapshot: false);
         var schema = f.Request("permission-schema.sql", false, MssqlExportMode.SchemaOnly);
         using (var c = f.Open(f.Source)) IntegrationFixture.Exec(c, "CREATE USER fixture_reader WITHOUT LOGIN; GRANT CONNECT TO fixture_reader; GRANT SELECT TO fixture_reader; DENY VIEW DEFINITION TO fixture_reader;");
         f.RestrictedReader = true;
@@ -174,9 +174,11 @@ WHERE e.class=1 AND o.is_ms_shipped=0";
                 IntegrationFixture.Exec(c, "EXECUTE AS USER=N'fixture_reader';");
                 Assert(Convert.ToInt32(IntegrationFixture.Scalar(c, "SELECT HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','ALTER')")) == 0, "Fixture reader has no database ALTER permission");
             }
-            Assert(f.Service().Preflight(data, CancellationToken.None).CanStart, "Live reader with definitions and SELECT can export when snapshot is already ON");
+            Assert(f.Service().Preflight(data, CancellationToken.None).CanStart, "Live ordinary reader with definitions and SELECT can export");
+            var selected = f.Request("permission-snapshot.sql", false, useSnapshot: true);
+            Assert(!f.Service().Preflight(selected, CancellationToken.None).CanStart, "Selected Snapshot without ALTER is refused even ON");
             var dataResult = f.Export(data);
-            Assert(dataResult.Stage == MssqlExportStage.Completed, "Actual data export does not require ALTER when snapshot is ON: " + dataResult.ErrorMessage);
+            Assert(dataResult.Stage == MssqlExportStage.Completed, "Actual ordinary data export does not require ALTER: " + dataResult.ErrorMessage);
             using (var c = f.Open(f.Source)) IntegrationFixture.Exec(c, "DENY SELECT ON OBJECT::[報表].[Property] TO fixture_reader;");
             Assert(f.Service().Preflight(data, CancellationToken.None).Issues.Any(x => x.Code == "UnreadableTable"), "Live SELECT denial blocks data mode");
             Assert(f.Service().Preflight(schema, CancellationToken.None).CanStart, "Definitions without table SELECT permit schema-only");

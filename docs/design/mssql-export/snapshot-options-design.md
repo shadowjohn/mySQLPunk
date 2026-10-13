@@ -1,14 +1,14 @@
 # MSSQL 匯出：可選 SNAPSHOT 與自動還原資料庫設定
 
 日期：2026-10-13
-狀態：2026-10-13 使用者核准「同意設計，進入實作計畫」；[實作計畫](snapshot-options-implementation-plan.md) 待審核，產品程式尚未修改。
+狀態：2026-10-13 使用者核准後完成 Task1–5 實作與逐項覆核；Task6 隔離驗收、194組 Release smoke 及 Debug/Release build 已通過。Task6 與全分支獨立覆核仍待完成；正式 SQL2019 未驗證。
 基底：codex/mssql-export-preflight-compat，34024b7。
 
 ## 使用者需求與取代範圍
 
 使用者要求匯出前可決定是否使用 SNAPSHOT，預設「否」；程式先檢查 ON/OFF 能力與權限，權限不足時停用選項，走一般匯出；選「是」時由程式在作業中自動處理開關。
 
-此決定取代 design.md、production-preflight.md 中「所有含資料匯出必須預先 ON、不自動變更設定」的規則。原本 SNAPSHOT 模式的同一時間點保證保留；一般模式明確不具有該保證。既有串流、Geometry/LOB 分段、原檔保護、取消、DDL fingerprint、Punky、進度與鏡像架構繼續沿用。這份設計只授權未來產品行為；本次設計工作沒有連線或更改正式庫。
+此決定取代 design.md、production-preflight.md 中「所有含資料匯出必須預先 ON、不自動變更設定」的規則。原本 SNAPSHOT 模式的同一時間點保證保留；一般模式明確不具有該保證。既有串流、Geometry/LOB 分段、原檔保護、取消、DDL fingerprint、Punky、進度與鏡像架構繼續沿用。本設計定義本次產品行為；設計與實作驗收均未連線或更改正式庫。
 
 ## 方案比較
 
