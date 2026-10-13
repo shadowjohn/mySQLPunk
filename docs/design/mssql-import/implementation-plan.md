@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，使用者於 2026-10-13 回覆「好，進實作」核准書面規格。
 
-**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 已實作與覆核通過（0982548／3ebf6b3，修正兩項 P2）；Task2 開始。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
+**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 已實作與覆核通過（0982548／3ebf6b3，修正兩項 P2）；Task2 log／ETA 已實作與覆核通過（0cc1657）；Task3 開始。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
 
 **Execution:** 保留先前選定的「分工實作並逐項覆核」。一次一位 implementer，各 task 經獨立覆核後才接下一項；最後整體覆核。build、native UI 與 DB tests 由單一 owner 串行執行，避免共享輸出／fixture 衝突。
 
@@ -98,11 +98,11 @@
 
 **Interfaces:** 產出 IMssqlImportLog／Tail／Estimator 及 terminal DTO；log 可注入 Stream factory 與 clock，測 IO 失敗不需修改檔案權限。Estimator 僅消費已確認 progress，不推測 affected rows。
 
-- [ ] **Step 1: 加入失敗 tests。** `MssqlImportLogRetainsAllErrors` 寫入 1,283 個多 SqlError detail 的事件，磁碟都有、UI ≤100筆且 ≤32,768 chars；單筆 >64 KiB 不截完整 log。唯一檔名 CreateNew、UTF-8、包含 batch／line／byte／codes／path／job，沒有整個 SQL 或連線字串。
-- [ ] **Step 2: 實作串流 log 與 tail。** Start 必須在 DB 寫入前 flush；每次準備 skip 前 flush；create／append／flush／end／Dispose fault 均可被 worker 看見。TotalErrors 不隨 UI 淘汰減少；不累積所有失敗批次，log 存開啟／資料夾／複製可用的真實路徑。
-- [ ] **Step 3: 加入並實作 ETA tests。** 暖機少於 3樣本或2秒不估；約10秒窗口；5秒停滯／Indexes／Verifying 回未知；有 skip 時 Processed=Successful+Skipped、成功比例獨立；read-ahead 和執行中 batch 不算確認。測 Int64 >2 GiB／高 batch 序號、clock injected、200 ms throttle 不漏最終狀態。
-- [ ] **Step 4: 驗證 fault assertions。** Task2驗證Flush失敗實際向caller拋出；`FlushFailsBeforeSkip` 的 `NextBatchCalls==0` 排程斷言移交Task4真實worker，不能用test-only假worker驗證自己；密集錯誤10倍數量下 tail 記憶體固定；UI 文案顯示完整路徑且不冒稱所有資料成功。
-- [ ] **Step 5: 跑 worker filter、提交。** `MYSQLPUNK_SMOKE_FILTER='MSSQL import worker'`、Debug smoke 全 matched tests 通過。Commit `feat: add MSSQL import logging and progress estimates`。
+- [x] **Step 1: 加入失敗 tests。** `MssqlImportLogRetainsAllErrors` 寫入 1,283 個多 SqlError detail 的事件，磁碟都有、UI ≤100筆且 ≤32,768 chars；單筆 >64 KiB 不截完整 log。唯一檔名 CreateNew、UTF-8、包含 batch／line／byte／codes／path／job，沒有整個 SQL 或連線字串。
+- [x] **Step 2: 實作串流 log 與 tail。** Start 必須在 DB 寫入前 flush；每次準備 skip 前 flush；create／append／flush／end／Dispose fault 均可被 worker 看見。TotalErrors 不隨 UI 淘汰減少；不累積所有失敗批次，log 存開啟／資料夾／複製可用的真實路徑。
+- [x] **Step 3: 加入並實作 ETA tests。** 暖機少於 3樣本或2秒不估；約10秒窗口；5秒停滯／Indexes／Verifying 回未知；有 skip 時 Processed=Successful+Skipped、成功比例獨立；read-ahead 和執行中 batch 不算確認。測 Int64 >2 GiB／高 batch 序號、clock injected、200 ms throttle 不漏最終狀態。
+- [x] **Step 4: 驗證 fault assertions。** Task2驗證Flush失敗實際向caller拋出；`FlushFailsBeforeSkip` 的 `NextBatchCalls==0` 排程斷言移交Task4真實worker，不能用test-only假worker驗證自己；密集錯誤10倍數量下 tail 記憶體固定；UI 文案顯示完整路徑且不冒稱所有資料成功。
+- [x] **Step 5: 跑 worker filter、提交。** `MYSQLPUNK_SMOKE_FILTER='MSSQL import worker'`、Debug smoke 全 matched tests 通過。Commit `feat: add MSSQL import logging and progress estimates`。
 
 ## Task 3: Import-only owned session、target preflight 與 bounded result drain
 
