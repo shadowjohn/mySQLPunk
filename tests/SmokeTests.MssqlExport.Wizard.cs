@@ -57,11 +57,15 @@ public static partial class SmokeTests
             WSaveRender(form, "snapshot-full-output-" + theme);
             string notices = WControl<Label>(form, "mssqlRecoveryNotices").Text;
             AssertContains(notices, "IdentityChanged", "Historical same-name database is explicitly distinguished"); AssertContains(notices, "Overflow", "Unreadable/overflow journals are surfaced"); AssertContains(notices, "sys.databases", "Manual read-only inspection guidance");
-            WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled); WClick(form, "mssqlStart"); WPump(() => service.Exporting);
+            WControl<RadioButton>(form, "mssqlSnapshotYes").Checked = true;
+            WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+            Assert(service.Seen.UseSnapshot, "Recovery fixture captures explicitly selected SNAPSHOT mode");
+            WClick(form, "mssqlStart"); WPump(() => service.Exporting);
+            Assert(service.Seen.UseSnapshot, "Export retains captured SNAPSHOT mode");
             WClick(form, "mssqlCancel"); WPump(() => service.Canceled);
             service.Progress.Report(new MssqlExportProgress(service.Seen.JobId, MssqlExportStage.RestoringSnapshot, null, 0, 0, 0, 0, 0, null, null, 0, 2, TimeSpan.Zero, TimeSpan.Zero, null, null, null, MssqlExportEstimationState.Measuring, 0, null, "restoring"));
             WPump(() => WControl<Label>(form, "mssqlStage").Text.Contains("SNAPSHOT"));
-            service.Release.Set(); WPump(() => form.Result != null); AssertContains(WControl<Label>(form, "mssqlResult").Text, "Unconfirmed", "Result exposes cleanup independently of cancellation"); WSaveRender(form, "snapshot-full-canceled-unconfirmed-" + theme);
+            service.Release.Set(); WPump(() => form.Result != null); Assert(form.Result.UseSnapshot, "Fake result propagates captured SNAPSHOT mode"); AssertContains(WControl<Label>(form, "mssqlResult").Text, "Unconfirmed", "Result exposes cleanup independently of cancellation"); WSaveRender(form, "snapshot-full-canceled-unconfirmed-" + theme);
             WControl<Panel>(form, "mssqlStep3").AutoScrollPosition = new System.Drawing.Point(0, WControl<Panel>(form, "mssqlStep3").Controls[0].Height); WSaveRender(form, "snapshot-full-cleanup-detail-" + theme);
             var resultLabel = WControl<Label>(form, "mssqlResult"); var resultPage = WControl<Panel>(form, "mssqlStep3");
             Assert(resultPage.ClientRectangle.IntersectsWith(new System.Drawing.Rectangle(resultPage.PointToClient(resultLabel.PointToScreen(System.Drawing.Point.Empty)), resultLabel.Size)), "Cleanup details are reachable by native scrolling"); form.Close();
