@@ -952,9 +952,11 @@ GO
         }        f.Setup("core.sql");
         using(var source=f.Open(f.Source))ImportLiveFixture.Exec(source,"CREATE TABLE dbo.Untrusted(id int NOT NULL,parent int NULL); ALTER TABLE dbo.Untrusted WITH NOCHECK ADD CONSTRAINT FK_Untrusted FOREIGN KEY(parent) REFERENCES [一].[同名]]表](id); CREATE TABLE dbo.CompositeParent(a int NOT NULL,b int NOT NULL,PRIMARY KEY(a,b)); INSERT dbo.CompositeParent VALUES(1,2); CREATE TABLE dbo.CompositeChild(a int,b int,CONSTRAINT FK_Composite FOREIGN KEY(a,b) REFERENCES dbo.CompositeParent(a,b) ON DELETE NO ACTION ON UPDATE NO ACTION); INSERT dbo.CompositeChild VALUES(1,2);");
         // Extend only this owned Core source; preserve existing tables/rows/case IDs and compare raw target bytes below.
-        using(var source=f.Open(f.Source))ImportLiveFixture.Exec(source,@"ALTER TABLE [一].[同名]]表] ADD legacydt datetime NULL,legacysmall smalldatetime NULL;
-UPDATE [一].[同名]]表] SET legacydt=CASE [unique] WHEN 1 THEN CONVERT(datetime,'1753-01-01T00:00:00.003',126) WHEN 2 THEN CONVERT(datetime,'9999-12-31T23:59:59.997',126) END,
+        using(var source=f.Open(f.Source)){
+            ImportLiveFixture.Exec(source,"ALTER TABLE [一].[同名]]表] ADD legacydt datetime NULL,legacysmall smalldatetime NULL;");
+            ImportLiveFixture.Exec(source,@"UPDATE [一].[同名]]表] SET legacydt=CASE [unique] WHEN 1 THEN CONVERT(datetime,'1753-01-01T00:00:00.003',126) WHEN 2 THEN CONVERT(datetime,'9999-12-31T23:59:59.997',126) END,
 legacysmall=CASE [unique] WHEN 1 THEN CONVERT(smalldatetime,'1900-01-01T00:00:00.000',126) WHEN 2 THEN CONVERT(smalldatetime,'2079-06-06T23:59:00.000',126) END;");
+        }
         MssqlExportRequest full=null;
         f.Case("core.native-schema-data",()=>{
             full=ImportDraftExportNative(f.Server,f.Source,f.Databases,f.Root,"native-full.sql",MssqlExportMode.SchemaAndData);
