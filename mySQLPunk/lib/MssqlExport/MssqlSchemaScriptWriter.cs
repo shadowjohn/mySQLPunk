@@ -15,6 +15,8 @@ namespace mySQLPunk.lib.MssqlExport
         {
             Validate(schema, request, output, cancellation);
             Settings(output);
+            output.WriteLine("-- Source read mode: " + (request.Mode == MssqlExportMode.SchemaOnly ? "Schema only (no data transaction)" : request.UseSnapshot ? "SNAPSHOT" : "READ COMMITTED"));
+            if (request.Mode != MssqlExportMode.SchemaOnly && !request.UseSnapshot) output.WriteLine("-- " + MssqlSqlExportService.OrdinaryReadWarning);
             if (request.Mode == MssqlExportMode.DataOnly) return;
             output.WriteLine("-- Restore into an empty, compatible target selected by the caller; existing objects fail.");
             output.WriteLine("-- Named filegroups must already exist. Rowversion values are regenerated.");

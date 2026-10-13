@@ -32,11 +32,12 @@ public static partial class SmokeTests
         foreach (bool? select in new bool?[] { false, true, null }) {
             var table = new MssqlTableDefinition(new MssqlObjectKey(1, "dbo", "visible"), new Dictionary<string, object> { { "can_select", select.HasValue ? (object)select.Value : DBNull.Value } }, null, null, null);
             var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] { table.Key }, mode, false, Path.Combine(Path.GetTempPath(), "matrix.sql"), null, null, mode != MssqlExportMode.SchemaOnly);
-            var schema = new MssqlExportSchema(new[] { table }, null, null, state, null);
-            var issues = new MssqlExportMetadataReader().Validate(schema, request);
+            var identity = new MssqlSnapshotIdentity("server", "fixture", 1, new DateTime(2026, 1, 1));
+            var schema = new MssqlExportSchema(new[] { table }, null, null, state, null, null, new MssqlSnapshotCapability(identity, state, true, true));
+            var issues = new MssqlExportMetadataReader().ValidateStart(schema, request);
             Assert(issues.Any(x => x.Code == "UnreadableTable") == (select != true && mode != MssqlExportMode.SchemaOnly), "Schema-only needs readable definitions, not SELECT; both data modes need SELECT");
-            Assert(issues.Any(x => x.Code == "SnapshotUnavailable") == (state != 1 && mode != MssqlExportMode.SchemaOnly), "Snapshot state gates only data modes, including unknown states");
-            Assert(new MssqlExportPreflight(schema, issues).CanStart == (mode == MssqlExportMode.SchemaOnly || (select == true && state == 1)), "Mode/state/permission matrix cannot silently pass missing data prerequisites");
+            Assert(issues.Any(x => x.Code == "SnapshotUnavailable") == (state != 0 && state != 1 && mode != MssqlExportMode.SchemaOnly), "Snapshot state gates only data modes, including unknown states");
+            Assert(new MssqlExportPreflight(schema, issues).CanStart == (mode == MssqlExportMode.SchemaOnly || (select == true && (state == 0 || state == 1))), "Mode/state/permission matrix cannot silently pass missing data prerequisites");
         }
     }
     private static void Metadata_RequiresNativeReader()
@@ -66,7 +67,7 @@ public static partial class SmokeTests
         for (int state = 0; state <= 3; state++)
         {
             var candidate = new MssqlExportSchema(tables, null, null, state, null);
-            Assert(System.Linq.Enumerable.Any(new MssqlExportMetadataReader().Validate(candidate, request), x => x.Code == "SnapshotUnavailable") == (state != 1), "Only ON accepts data snapshot");
+            Assert(System.Linq.Enumerable.Any(new MssqlExportMetadataReader().Validate(candidate, request), x => x.Code == "SnapshotUnavailable") == false, "Final shape validation never repeats settings capability gate");
         }
         var v1 = new MssqlViewDefinition(new MssqlObjectKey(201, "dbo", "v1"), new Dictionary<string, object> { { "definition", "CREATE VIEW dbo.v1 AS SELECT * FROM dbo.v2" } });
         var v2 = new MssqlViewDefinition(new MssqlObjectKey(202, "dbo", "v2"), new Dictionary<string, object> { { "definition", "CREATE VIEW dbo.v2 AS SELECT * FROM dbo.v1" } });

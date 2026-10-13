@@ -103,7 +103,7 @@ public static partial class SmokeTests
             provider.SetConn(new SqlConnectionStringBuilder { DataSource = Server, InitialCatalog = Source, IntegratedSecurity = true, Pooling = false, TrustServerCertificate = true }.ConnectionString);
             provider.Open(); WorkerConnections.Add(provider.MCT);
             if (RestrictedReader) Exec(provider.MCT,"EXECUTE AS USER = N'fixture_reader';");
-            return new IntegrationSource(new MssqlExportSource(new MssqlOwnedSession(provider,provider.MCT)),this);
+            return new IntegrationSource(new MssqlExportSource(new MssqlOwnedSession(provider,provider.MCT), new MssqlSnapshotRecoveryStore(Path.Combine(Root,"journal"))),this);
         }
         internal MssqlSqlExportService Service(MssqlArtifactFiles files = null, Action<MssqlExportStage> phase = null)
         {
@@ -111,7 +111,7 @@ public static partial class SmokeTests
                 Assert(WorkerConnections.All(c => c.State == ConnectionState.Closed), "Real source connections released before file " + stage);
                 Evidence["sourceReleasedBeforeLocalPhases"] = true;
                 if (phase != null) phase(stage);
-            });
+            }, new MssqlSnapshotRecoveryStore(Path.Combine(Root,"journal")));
         }
         internal MssqlExportRequest Request(string filename = "export.sql", bool views = true, MssqlExportMode mode = MssqlExportMode.SchemaAndData, Func<MssqlTableDefinition,bool> select = null, bool mirror = false)
         {
@@ -179,8 +179,9 @@ public static partial class SmokeTests
         internal IntegrationSource(IMssqlExportSource inner, IntegrationFixture fixture) { this.inner=inner; this.fixture=fixture; }
         public MssqlExportCatalog ReadCatalog(string d,CancellationToken c) { return inner.ReadCatalog(d,c); }
         public MssqlExportPreflight Inspect(MssqlExportRequest r,CancellationToken c) { return inner.Inspect(r,c); }
-        public MssqlExportSchema BeginRead(MssqlExportRequest r,CancellationToken c) { var schema=inner.BeginRead(r,c); if(fixture.AfterBegin!=null)fixture.AfterBegin(); return schema; }
+        public MssqlExportSchema BeginRead(MssqlExportRequest r,Action<MssqlExportStage> report,CancellationToken c) { var schema=inner.BeginRead(r,report,c); if(fixture.AfterBegin!=null)fixture.AfterBegin(); return schema; }
         public MssqlRowReader OpenRows(MssqlTableDefinition t,CancellationToken c) { if(fixture.BeforeRows!=null)fixture.BeforeRows(t); return inner.OpenRows(t,c); }
+        public MssqlSnapshotCleanupResult FinishRead(Action<MssqlExportStage> report) { return inner.FinishRead(report); }
         public void CompleteRead(MssqlExportSchema s,CancellationToken c) { inner.CompleteRead(s,c); }
         public void Dispose() { inner.Dispose(); }
     }

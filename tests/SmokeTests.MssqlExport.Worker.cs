@@ -60,6 +60,120 @@ public static partial class SmokeTests
             Assert(!safe.Message.Contains("SqlPermissionDenied") && !safe.Message.Contains("LoginRejected"), "Unknown failure does not invent a permission cause");
         }
     }
+    private static void SnapshotWorker_RecoveryNotices()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "snapshot-notices-" + Guid.NewGuid().ToString("N"));
+        try {
+            var store = new MssqlSnapshotRecoveryStore(root);
+            var current = new MssqlSnapshotIdentity("server", "fixture", 2, new DateTime(2026, 2, 1));
+            var historical = new MssqlSnapshotIdentity("server", "fixture", 1, new DateTime(2026, 1, 1));
+            var other = new MssqlSnapshotIdentity("server", "other", 3, new DateTime(2026, 1, 1));
+            foreach (var id in new[] { current, historical, other }) store.Create(new MssqlSnapshotRecoveryRecord(Guid.NewGuid(),id,0,MssqlSnapshotRecoveryPhase.Unconfirmed,1,DateTime.UtcNow,MssqlSnapshotRecoveryCode.RestoreUnconfirmed));
+            File.WriteAllText(Path.Combine(root,Guid.NewGuid().ToString("N")+".json"),"{");
+            var service = new MssqlSqlExportService(() => { throw new Exception("No DB allowed for notices"); },new MssqlArtifactFiles(),null,store);
+            var candidates = service.LoadRecoveryNotices(current);
+            Assert(candidates.Count == 3 && candidates.Any(n => n.Record != null && n.Record.Identity.DatabaseId == 1) && candidates.Any(n => n.ReadError != MssqlSnapshotRecoveryReadError.None), "Display includes historical same-name and unreadable records");
+            Assert(service.LoadRecoveryNotices(null).Count == 4 && service.LoadRecoveryNotices(new MssqlSnapshotIdentity(null,null,0,default(DateTime))).Count == 4, "Unknown identity does not hide pending display candidates");
+            Assert(!MssqlSnapshotLifecycle.SameIdentity(current,historical) && Directory.GetFiles(root).Length == 4, "Display never relaxes repair authorization or removes history");
+        } finally { if (Directory.Exists(root)) Directory.Delete(root,true); }
+    }
+    private static void SnapshotWorker_ModeAndCleanupOrder()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "snapshot-worker-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        try {
+            foreach (var mode in new[] { MssqlExportMode.SchemaOnly, MssqlExportMode.DataOnly, MssqlExportMode.SchemaAndData })
+            foreach (bool snapshot in new[] { false, true }) {
+                if (snapshot && mode == MssqlExportMode.SchemaOnly) continue;
+                var schema = WorkerSchema(); var events = new List<string>(); var source = new WorkerSource(schema, events);
+                string target = Path.Combine(root, mode + "-" + snapshot + ".sql");
+                var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", schema.Tables.Select(t => t.Key).ToArray(), mode, false, target, MssqlExportArtifact.CaptureDestination(target, CancellationToken.None), null, snapshot);
+                Assert(MssqlExportSource.ReadIsolation(request) == (mode == MssqlExportMode.SchemaOnly ? (IsolationLevel?)null : snapshot ? IsolationLevel.Snapshot : IsolationLevel.ReadCommitted), "Explicit source transaction isolation");
+                var service = new MssqlSqlExportService(() => source, new MssqlArtifactFiles(), stage => { if (stage == MssqlExportStage.Verifying) events.Add("local-verify"); }, new SnapshotFakeStore(events));
+                var result = service.Export(request, null, CancellationToken.None);
+                Assert(result.Stage == MssqlExportStage.Completed && result.UseSnapshot == snapshot, "Mode follows published artifact: " + mode + " / " + snapshot + " / " + result.ErrorMessage);
+                Assert(events.IndexOf("restore") < events.IndexOf("local-verify") && events.IndexOf("restore") < events.IndexOf("source.dispose"), "Explicit restoration precedes disposal and local verify");
+                Assert(events.Count(x => x == "restore") == 1 && result.SnapshotCleanup != null, "One cleanup result per job");
+                string sql = File.ReadAllText(target);
+                AssertContains(sql, "-- Source read mode: " + (mode == MssqlExportMode.SchemaOnly ? "Schema only" : snapshot ? "SNAPSHOT" : "READ COMMITTED"), "Header covers DataOnly before early return");
+                bool ordinary = !snapshot && mode != MssqlExportMode.SchemaOnly;
+                Assert(result.Warnings.Contains(MssqlSqlExportService.OrdinaryReadWarning) == ordinary && sql.Contains(MssqlSqlExportService.OrdinaryReadWarning) == ordinary, "Ordinary consistency/restore warning in result and SQL only for ordinary data");
+            }
+        } finally { Directory.Delete(root, true); }
+    }
+    private static void SnapshotWorker_PrimaryFailureAndRecovery()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "snapshot-outcomes-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        try {
+            foreach (string fault in new[] { "", "rows", "cancel-read", "complete", "verify", "publish", "mirror", "observer", "finish", "rows-finish" })
+            using (var cancellation = new CancellationTokenSource()) {
+                var schema = WorkerSchema(); var events = new List<string>(); var source = new WorkerSource(schema, events) { Fault = fault == "rows-finish" ? "rows" : fault, Cancel = cancellation, ThrowFinish = fault.EndsWith("finish") };
+                source.Cleanup = new MssqlSnapshotCleanupResult(MssqlSnapshotCleanupState.Unconfirmed, 1, Path.Combine(root,"journal.json"), "RestoreUnconfirmed");
+                string target = Path.Combine(root, fault + ".sql");
+                var mirror = fault == "mirror" ? new MssqlMirrorOptions(Path.Combine(root,"mirror"),2) : null;
+                var request = WorkerRequest(target, schema, MssqlExportMode.DataOnly, mirror);
+                var service = new MssqlSqlExportService(() => source, new WorkerFiles(fault,cancellation), stage => {
+                    if (fault == "verify" && stage == MssqlExportStage.Verifying || fault == "publish" && stage == MssqlExportStage.Publishing) throw new IOException("private failure");
+                }, new SnapshotFakeStore(events));
+                var result = service.Export(request, new WorkerProgress(p => { if (fault == "observer") throw new IOException("observer private"); }), cancellation.Token);
+                Assert(events.Count(x => x == "restore") == 1 && events.Count(x => x == "source.dispose") == 1, "Cleanup exactly once after " + fault);
+                Assert(result.SnapshotCleanup.State == MssqlSnapshotCleanupState.Unconfirmed && result.Warnings.Any(), "Recovery outcome survives " + fault);
+                if (!source.ThrowFinish) Assert(result.ResidualPaths.Contains(source.Cleanup.RecoveryRecordPath), "Residual journal in result");
+                if (fault == "" || fault == "observer" || fault == "finish") Assert(result.Stage == MssqlExportStage.Completed && result.PublishedPath == target, "Complete data publishes despite unconfirmed restoration");
+                else if (fault == "mirror") Assert(result.Stage == MssqlExportStage.LocalCompletedMirrorIncomplete && result.PublishedPath == target, "Mirror truth kept");
+                else {
+                    Assert(result.Stage == (fault == "cancel-read" ? MssqlExportStage.Canceled : MssqlExportStage.Failed) && result.PublishedPath == null, "Primary outcome preserved " + fault);
+                    if (fault == "rows-finish") AssertContains(result.ErrorMessage, "Data (IOException)", "Cleanup failure does not replace primary read failure");
+                }
+                Assert(!string.Join(" ", result.Warnings).Contains("private"), "No raw errors leaked");
+            }
+        } finally { Directory.Delete(root, true); }
+    }
+    private static void SnapshotWorker_SourceCleanupOwnership()
+    {
+        foreach (string fault in new[] { "", "reader", "release", "off", "dispose" })
+        using (var connection = new System.Data.SqlClient.SqlConnection()) {
+            var events = new List<string>(); var owner = new MssqlSessionOwner(); int evictions = 0;
+            var store = new SnapshotFakeStore(events); var backend = new SnapshotFakeBackend(events) { FailRelease = fault == "release", ThrowOff = fault == "off" };
+            var wrapped = new MssqlExportSource.SourceSnapshotBackend(backend);
+            var lifecycle = new MssqlSnapshotLifecycle(wrapped, store, Guid.NewGuid()); lifecycle.Prepare(null,CancellationToken.None);
+            var source = new MssqlExportSource(new MssqlOwnedSession(owner,connection), store, evictPool: c => { evictions++; events.Add("evict"); });
+            Action<string, object> set = (name, value) => typeof(MssqlExportSource).GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(source, value);
+            set("request", SnapshotRequest(MssqlExportMode.DataOnly,true)); set("lifecycle", lifecycle); set("snapshotBackend", wrapped);
+            var reader = new DataTable().CreateDataReader();
+            var rows = new MssqlRowReader(reader, new WorkerDispose(() => { Assert(reader.IsClosed, "Reader closes first"); events.Add("reader-close"); if (fault == "reader") throw new IOException(); }));
+            set("activeReader", rows);
+            if (fault == "reader") { try { rows.Dispose(); } catch (IOException) { } }
+            if (fault == "dispose") { source.Dispose(); Assert(backend.AlterCalls.Count == 1 && evictions == 1 && owner.DisposeCount == 1, "Dispose releases resources without hidden ALTER"); continue; }
+            var cleanup = source.FinishRead(stage => { Assert(reader.IsClosed, "Reader before restore callback"); if (fault != "reader") Assert(owner.DisposeCount == 0, "Live owner retained for restoration"); });
+            source.Dispose(); Assert(ReferenceEquals(cleanup,source.FinishRead(null)), "FinishRead idempotent");
+            Assert(owner.DisposeCount == 1 && evictions == (fault == "reader" || fault == "release" ? 1 : 0), "Eviction only for uncertain session resource closure");
+            Assert(backend.SeenDeadlines.All(d => d != null), "Source adapter forwards lifecycle deadlines");
+            if (fault == "reader") Assert(backend.AlterCalls.Count == 1 && cleanup.State == MssqlSnapshotCleanupState.Unconfirmed && store.Exists, "Unknown reader closure releases owner and forbids ALTER");
+            if (fault == "release") Assert(cleanup.State == MssqlSnapshotCleanupState.RestoredOff && cleanup.WarningCode == "LockReleaseFailed" && store.Exists, "Release failure preserves known OFF and journal warning");
+            if (fault == "off") Assert(cleanup.State == MssqlSnapshotCleanupState.Unconfirmed && store.Exists, "OFF uncertainty survives source finish");
+            if (fault == "") Assert(cleanup.State == MssqlSnapshotCleanupState.RestoredOff && events.IndexOf("reader-close") < events.IndexOf("OFF"), "Normal source ordering restores after reader");
+        }
+    }
+    private static void SnapshotWorker_StartValidation()
+    {
+        var reader = new MssqlExportMetadataReader(); var basis = WorkerSchema();
+        var identity = new MssqlSnapshotIdentity("server","fixture",1,new DateTime(2026,1,1));
+        foreach (int state in new[] { 0,1,2,3,-1 }) foreach (bool? alter in new bool?[] { true,false,null }) foreach (bool snapshot in new[] { false,true }) {
+            var schema = new MssqlExportSchema(basis.Tables,null,null,state,null,null,new MssqlSnapshotCapability(identity,state,alter,true));
+            var request = new MssqlExportRequest(Guid.NewGuid(),"fixture",schema.Tables.Select(t=>t.Key).ToArray(),MssqlExportMode.DataOnly,false,Path.Combine(Path.GetTempPath(),"start.sql"),null,null,snapshot);
+            Assert(!reader.Validate(schema,request).Any(x=>x.Code=="SnapshotUnavailable"),"Shape validation independent of settings capability");
+            Assert(reader.ValidateStart(schema,request).Any(x=>x.Code=="SnapshotUnavailable") == (snapshot && (alter != true || state != 0 && state != 1)), "Only selected snapshot requires stable capability");
+            var output = new StringWriter(); new MssqlSchemaScriptWriter().WriteBeforeData(schema,request,output,CancellationToken.None);
+            Assert(output.ToString().Contains("Source read mode"),"Writing DDL does not recheck ALTER");
+        }
+    }
+    private static void SnapshotWorker_ProgressDoesNotCompleteInterruptedTable()
+    {
+        var schema = WorkerSchema(); var estimator = new MssqlExportProgressEstimator(Guid.NewGuid(), schema, false);
+        estimator.Sample(MssqlExportStage.Data, schema.Tables[0].Key, 5, 50, 100, TimeSpan.Zero, true);
+        var restored = estimator.Sample(MssqlExportStage.RestoringSnapshot, null, 0, 0, 100, TimeSpan.FromSeconds(1), true);
+        Assert(restored.CompletedTables == 0 && restored.Rows == 5 && restored.Eta == null, "Restoring never completes interrupted table or invents ETA");
+    }
     private static void Worker_RequiresService()
     {
         Assert(typeof(MssqlObjectKey).Assembly.GetType("mySQLPunk.lib.MssqlExport.MssqlSqlExportService") != null, "Worker must orchestrate owned source and verified publication");
@@ -189,11 +303,11 @@ public static partial class SmokeTests
     private sealed class WorkerSource : IMssqlExportSource
     {
         private readonly MssqlExportSchema schema; private readonly List<string> calls; private readonly Action disposed; private bool closed;
-        internal string Fault; internal CancellationTokenSource Cancel;
+        internal string Fault; internal CancellationTokenSource Cancel; internal bool ThrowFinish;
         internal WorkerSource(MssqlExportSchema schema, List<string> calls, Action disposed = null) { this.schema = schema; this.calls = calls; this.disposed = disposed; calls.Add("source.open"); }
         public MssqlExportCatalog ReadCatalog(string db, CancellationToken c) { c.ThrowIfCancellationRequested(); return new MssqlExportCatalog(schema.Tables, 1, null); }
         public MssqlExportPreflight Inspect(MssqlExportRequest r, CancellationToken c) { calls.Add("source.inspect"); return new MssqlExportPreflight(schema, Fault == "inspect" ? new[] { new MssqlExportIssue("Denied", null, null, "denied") } : null); }
-        public MssqlExportSchema BeginRead(MssqlExportRequest r, CancellationToken c) { calls.Add("source.begin"); if (Fault == "begin") throw new IOException("snapshot failed"); return schema; }
+        public MssqlExportSchema BeginRead(MssqlExportRequest r, Action<MssqlExportStage> report, CancellationToken c) { calls.Add("source.begin"); if (Fault == "begin") throw new IOException("snapshot failed"); return schema; }
         public MssqlRowReader OpenRows(MssqlTableDefinition t, CancellationToken c) {
             calls.Add("source.rows"); if (Fault == "rows") throw new IOException("DB disconnected private connection-string");
             if (Fault == "cancel-read") { Cancel.Cancel(); c.ThrowIfCancellationRequested(); }
@@ -201,6 +315,8 @@ public static partial class SmokeTests
             var reader = data.CreateDataReader(); return new MssqlRowReader(reader, new WorkerDispose(() => { Assert(reader.IsClosed, "Reader closes before command"); calls.Add("command.dispose"); }));
         }
         public void CompleteRead(MssqlExportSchema s, CancellationToken c) { calls.Add("source.complete"); if (Fault == "complete") throw new InvalidOperationException("schema fingerprint changed"); }
+        internal MssqlSnapshotCleanupResult Cleanup = new MssqlSnapshotCleanupResult(MssqlSnapshotCleanupState.NotRequired, null, null, null);
+        public MssqlSnapshotCleanupResult FinishRead(Action<MssqlExportStage> report) { calls.Add("restore"); if (ThrowFinish) throw new IOException("private cleanup"); report?.Invoke(MssqlExportStage.RestoringSnapshot); return Cleanup; }
         public void Dispose() { if (closed) return; closed = true; calls.Add("source.dispose"); disposed?.Invoke(); }
     }
     private sealed class WorkerFiles : MssqlArtifactFiles

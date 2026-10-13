@@ -142,10 +142,16 @@ WHERE d.referenced_class=1", cancellation))
             }
             return changed ? new MssqlExportSchema(schema.Tables, views, dependencies, schema.SnapshotState, issues, schema.ExtendedProperties, schema.SnapshotCapability) : schema;
         }
+        internal IReadOnlyList<MssqlExportIssue> ValidateStart(MssqlExportSchema schema, MssqlExportRequest request)
+        {
+            var issues = new List<MssqlExportIssue>(Validate(schema, request));
+            if (request.UseSnapshot && (schema.SnapshotCapability == null || !schema.SnapshotCapability.CanManage))
+                issues.Add(new MssqlExportIssue("SnapshotUnavailable", null, null, "SNAPSHOT requires known state OFF/ON, database ALTER permission and a writable database. Choose ordinary reading or ask the DBA to review capability."));
+            return issues.AsReadOnly();
+        }
         internal IReadOnlyList<MssqlExportIssue> Validate(MssqlExportSchema schema, MssqlExportRequest request)
         {
             var issues = new List<MssqlExportIssue>(schema.Issues);
-            if (request.Mode != MssqlExportMode.SchemaOnly && schema.SnapshotState != 1) issues.Add(new MssqlExportIssue("SnapshotUnavailable", null, null, "ALLOW_SNAPSHOT_ISOLATION must be ON (state 1). Current state: " + MssqlSnapshotState.Describe(schema.SnapshotState) + ". Ask the DBA to review this database setting; retry after state ON, or choose schema only. The exporter does not change settings or require ALTER permission when already ON."));
             var ids = new HashSet<int>(schema.Tables.Select(x => x.Key.ObjectId).Concat(schema.Views.Select(x => x.Key.ObjectId)));
             foreach (var t in schema.Tables)
             {
