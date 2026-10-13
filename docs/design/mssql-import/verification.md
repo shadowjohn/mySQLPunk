@@ -73,3 +73,5 @@ Repair Phase A Debug and Release each passed 39 importer entries plus AutoReleas
 ## Boundaries
 
 Live cleanup and cancellation prove successful cleanup and truthful uncertainty. A naturally occurring provider SqlError during rollback/owner disposal was not induced; its complete-error contract has adapter/worker/log regression evidence only. Owner-release diagnostics and composite-FK changes were followed by offline checks and small Core. The review repair was followed by Faults22 and focused offline checks; large profiles remain the historical measured evidence above. Full unrelated regression, native UI/audio/DPI, SQL Server 2019/Transfer and the user's 4.17 GiB dump, browser/IIS/production remain separate acceptance work. No user dump was opened or executed by Task 6.
+
+Task 6 independent scoped re-review approved I1/I2 at `5c848ae`. The terminal truncation fix at `152e419` passed its actual-service/native UI regression plus13wizard/19worker groups. Whole-branch and SQL2019 Transfer acceptance remain Task7.

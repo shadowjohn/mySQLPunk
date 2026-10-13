@@ -146,11 +146,11 @@
 
 **Interfaces:** runner 參數 `-Run -AuthorizationPath <manifest> -Profile Core|Lob|Geometry|Faults|Memory|All -OutputDirectory <C-path>`。授權必須解析成 `(localdb)\mySQLPunkExportTest_20261012`、明確C fixture root及owner token；沒有有效manifest不得寫DB。runner 設定並還原 `MYSQLPUNK_MSSQL_IMPORT_INTEGRATION/SERVER/OUTPUT/AUTH/PROFILE`，filter固定 `MSSQL import integration`，要求實際 profile receipt，不能把未啟用測試當 live pass。runner 不自動啟動不明instance；必要時由controller啟動先前已核准的專用名稱。
 
-- [ ] **Step 1: 補 runner guard 失敗 tests，再實作授權／cleanup保護。** 無-Run／錯server／錯root／reparse／非空output／不足20GiB皆不寫；GUID資料庫與實體檔、owner.token＋DB owner extended property雙重驗證才可清。Existing export runner缺manifest不可默默跳過；明確AuthorizationPath，必要時從已核准fixture重新建立可審查manifest，不擴張到Transfer。
-- [ ] **Step 2: Core profile。** 新建owned source／target，以現有 exporter產生SQL，再由新 importer本體還原；比對表／欄位／型別／identity／PK／indexes／FK trust／view／table與column extended properties。General腳本含GO、temp／SET／transaction、SELECT多result；無外部sqlcmd作SUT，獨立驗證可另行使用。
-- [ ] **Step 3: Lob／Geometry profiles。** 64MiB binary、18MiB Unicode、NULL／empty／XML／Geometry含SRID/Z/M/curves與invalid-but-storable；以串流rawbytes/hash及metadata驗證。native DataOnly也測；注入missing／duplicate／reordered／replayed chunk、Failed1但交易0、missingstate、pendingEOF及final INSERT constraint／Deserialize失敗，即使skip也停止且下一row不寫。
-- [ ] **Step 4: Faults／Memory profiles。** 一般batch先INSERT再失敗的stop／skip；所有SqlError落檔；XACT_ABORT／未結交易／斷線／有限timeout seam／logcreate-append-flush-end失敗；取消在resultdrain／stateprobe／COUNT_BIG／close race。結果集數百萬列與64MiB回傳LOB應bounded drain。相同batchshape生成256MiB與2.5GiB串流檔，記錄x64／peak private bytes／working set；暖機後10倍檔案不能線性10倍成長，差異超過256MiB須調查並修復，不能只增加記憶體上限。
-- [ ] **Step 5: 各profile通過後提交tests及verification摘要。** 記錄命令、實際matched tests、SQL版本、耗時／artifactsize／hash／cleanup／memory／取消結果；失敗不寫pass，無法驗證明列邊界。Commit `test: verify native MSSQL import roundtrips and failures`。
+- [x] **Step 1: 補 runner guard 失敗 tests，再實作授權／cleanup保護。** 無-Run／錯server／錯root／reparse／非空output／不足20GiB皆不寫；GUID資料庫與實體檔、owner.token＋DB owner extended property雙重驗證才可清。Existing export runner缺manifest不可默默跳過；明確AuthorizationPath，必要時從已核准fixture重新建立可審查manifest，不擴張到Transfer。
+- [x] **Step 2: Core profile。** 新建owned source／target，以現有 exporter產生SQL，再由新 importer本體還原；比對表／欄位／型別／identity／PK／indexes／FK trust／view／table與column extended properties。General腳本含GO、temp／SET／transaction、SELECT多result；無外部sqlcmd作SUT，獨立驗證可另行使用。
+- [x] **Step 3: Lob／Geometry profiles。** 64MiB binary、18MiB Unicode、NULL／empty／XML／Geometry含SRID/Z/M/curves與invalid-but-storable；以串流rawbytes/hash及metadata驗證。native DataOnly也測；注入missing／duplicate／reordered／replayed chunk、Failed1但交易0、missingstate、pendingEOF及final INSERT constraint／Deserialize失敗，即使skip也停止且下一row不寫。
+- [x] **Step 4: Faults／Memory profiles。** 一般batch先INSERT再失敗的stop／skip；所有SqlError落檔；XACT_ABORT／未結交易／斷線／有限timeout seam／logcreate-append-flush-end失敗；取消在resultdrain／stateprobe／COUNT_BIG／close race。結果集數百萬列與64MiB回傳LOB應bounded drain。相同batchshape生成256MiB與2.5GiB串流檔，記錄x64／peak private bytes／working set；暖機後10倍檔案不能線性10倍成長，差異超過256MiB須調查並修復，不能只增加記憶體上限。
+- [x] **Step 5: 各profile通過後提交tests及verification摘要。** 記錄命令、實際matched tests、SQL版本、耗時／artifactsize／hash／cleanup／memory／取消結果；失敗不寫pass，無法驗證明列邊界。Commit `test: verify native MSSQL import roundtrips and failures`。
 
 ## Task 7: SQL2019 Transfer 實檔試跑、整體驗證與交付
 
