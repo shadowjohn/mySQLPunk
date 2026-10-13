@@ -30,6 +30,29 @@ public static partial class SmokeTests
                 Assert(batches[0].StartLine == 1 && batches[0].EndLine == 13 && batches[1].StartLine == 15 && batches[1].EndLine == 15, "Original line offsets exclude GO delimiter.");
             }
         }
+        // A later malformed byte in one decoder buffer must not erase valid
+        // preceding line/GO transitions, including EOF decoder flush errors.
+        foreach(Encoding encoding in new Encoding[]{new UTF8Encoding(false,true),new UTF8Encoding(true,true),new UnicodeEncoding(false,true,true),new UnicodeEncoding(true,true,true)})
+        foreach(int buffer in new[]{8192,1,2,3,7})
+        foreach(int padding in new[]{0,9000})
+        foreach(string newline in new[]{"\n","\r\n"})
+        {
+            string prefix=(padding==0?"":"--"+new string(' ',padding)+newline)+"SELECT 1;"+newline+"GO"+newline+"SELECT '"+newline;
+            byte[] valid=ImportBytes(prefix,encoding);
+            bool utf8=encoding.CodePage==65001, little=encoding.CodePage==1200;
+            byte[][] invalid=utf8 ? new[]{new byte[]{0xff},new byte[]{0xe2,0x82}} : little ? new[]{new byte[]{0x00,0xdc},new byte[]{0x00,0xd8},new byte[]{0x41}} : new[]{new byte[]{0xdc,0x00},new byte[]{0xd8,0x00},new byte[]{0x41}};
+            foreach(byte[] suffix in invalid)
+            using(var stream=new MemoryStream(valid.Concat(suffix).ToArray()))
+            using(var reader=new MssqlGoBatchReader(stream,buffer))
+            {
+                try {reader.ReadBatches(CancellationToken.None).ToArray();Assert(false,"Malformed encoding must reject after valid GO prefix.");}
+                catch(MssqlImportInputException ex)
+                {
+                    Assert(ex.Code=="InvalidEncoding" && ex.BatchNumber==2 && ex.Line==(padding==0?4:5) && ex.ByteOffset==valid.LongLength,
+                        "Decoder error must preserve actual batch/line/raw byte coordinates: "+encoding.CodePage+" buffer="+buffer+" padding="+padding+" got "+ex.Message);
+                }
+            }
+        }
         using(var input = ImportInput("-- only\r\n/* nested /* ok */ end */\r\nGO\r\n-- tail"))
         {
             Assert(input.Scan(CancellationToken.None,null).BatchCount==0, "Only comments never become executable commands.");
@@ -87,6 +110,10 @@ public static partial class SmokeTests
             using(var input=ImportInput(bytes)) ImportReject(input,"InvalidEncoding");
         foreach(byte[] bytes in new[]{new byte[]{0x53,0,0x45,0},ImportBytes("SELECT '\0';",new UTF8Encoding(false,true)),ImportBytes("SELECT '\0';",new UnicodeEncoding(false,true,true))})
             using(var input=ImportInput(bytes)) ImportReject(input,"EmbeddedNul");
+        foreach(string sql in new[]{"SELECT col$(suffix) FROM dbo.t;","SELECT dbo.table$(suffix).col FROM dbo.t;","USE Transfer$(suffix);","SELECT @col$(suffix);","SELECT #tmp$(suffix);","SELECT "+new string('x',600)+"$(suffix);","SELECT 1;\nGO\nSELECT col$(suffix);"})
+            using(var input=ImportInput(sql,"Transfer")) ImportReject(input,"SqlCmdUnsupported");
+        using(var input=ImportInput("SELECT N'col$(suffix)', \"col$(suffix)\", [col$(suffix)], [a]]$(suffix)]; -- col$(suffix)\n/* outer /* col$(suffix) */ end */"))
+            Assert(input.Scan(CancellationToken.None,null).Script.Kind==MssqlImportScriptKind.Generic,"Embedded SQLCMD text remains inert in all protected lexical contexts.");
         using(var input=ImportInput("SELECT '$(name) :connect !!';")) Assert(input.Scan(CancellationToken.None,null).BatchCount==1,"No SQLCMD expansion in strings.");
     }
 

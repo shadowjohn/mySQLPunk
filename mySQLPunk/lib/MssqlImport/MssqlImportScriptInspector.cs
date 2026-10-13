@@ -74,7 +74,11 @@ namespace mySQLPunk.lib.MssqlImport
                 if (IsWord(c))
                 {
                     int start = i;
-                    while (i < text.Length && IsWord(text[i])) i++;
+                    while (i < text.Length && IsWord(text[i]))
+                    {
+                        if (text[i] == '$' && i + 1 < text.Length && text[i + 1] == '(') { currentIndex = i; throw Error("SqlCmdUnsupported"); }
+                        i++;
+                    }
                     int length = i - start;
                     if (firstCode && length == 2 && string.Compare(text, start, "GO", 0, 2, StringComparison.OrdinalIgnoreCase) == 0) throw Error("UnsupportedGo");
                     // Long identifiers are irrelevant unless they claim our reserved native

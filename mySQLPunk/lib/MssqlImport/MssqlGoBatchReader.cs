@@ -47,6 +47,9 @@ namespace mySQLPunk.lib.MssqlImport
                 while (more)
                 {
                     cancellation.ThrowIfCancellationRequested();
+                    // Decode failures are deferred through lookahead, so all preceding
+                    // valid CR/LF and GO boundaries update the source coordinates first.
+                    if (current.DecodeError != null) { byteOffset = current.Start; throw Error("InvalidEncoding", current.DecodeError); }
                     more = chars.MoveNext();
                     Unit next = more ? chars.Current : default(Unit);
                     char c = current.Character;
@@ -171,7 +174,9 @@ namespace mySQLPunk.lib.MssqlImport
         {
             internal char Character;
             internal long Start, End;
-            internal Unit(char character, long start, long end) { Character = character; Start = start; End = end; }
+            internal DecoderFallbackException DecodeError;
+            internal Unit(char character, long start, long end) { Character = character; Start = start; End = end; DecodeError = null; }
+            internal Unit(long offset, DecoderFallbackException error) { Character = '\0'; Start = End = offset; DecodeError = error; }
         }
         private IEnumerable<Unit> Decode(CancellationToken cancellation)
         {
@@ -195,6 +200,7 @@ namespace mySQLPunk.lib.MssqlImport
             var buffer = new byte[bufferSize];
             var decoded = new char[Math.Max(4, bufferSize + 2)];
             long decodedByte = bom, chunkStart = bom;
+            int previousByte = -1;
             using (var hash = SHA256.Create())
             {
                 hash.TransformBlock(prefix, 0, prefixCount, null, 0);
@@ -203,15 +209,26 @@ namespace mySQLPunk.lib.MssqlImport
                 while (true)
                 {
                     cancellation.ThrowIfCancellationRequested();
-                    int usedBytes, usedChars; bool complete;
-                    try { decoder.Convert(source, offset, count, decoded, 0, decoded.Length, eof, out usedBytes, out usedChars, out complete); }
-                    catch (DecoderFallbackException ex) { byteOffset = Math.Max(0, chunkStart + ex.Index); throw Error("InvalidEncoding", ex); }
+                    int usedBytes = 0, usedChars = 0; bool complete;
+                    // Decode only through the next encoded newline. A failed conversion
+                    // can then hide no earlier line/GO transition in its valid prefix.
+                    // Reads and buffers stay fixed-size; this is not byte-at-a-time decoding.
+                    int span = DecodeSpan(source, offset, count, chunkStart, bom, encoding.CodePage, previousByte);
+                    DecoderFallbackException failure = null;
+                    try { decoder.Convert(source, offset, span, decoded, 0, decoded.Length, eof, out usedBytes, out usedChars, out complete); }
+                    catch (DecoderFallbackException ex) { failure = ex; }
+                    if (failure != null)
+                    {
+                        yield return new Unit(Math.Max(0, chunkStart + failure.Index), failure);
+                        yield break;
+                    }
                     for (int i = 0; i < usedChars; i++)
                     {
                         char c = decoded[i];
                         int bytes = encoding.CodePage != 65001 ? 2 : char.IsHighSurrogate(c) ? 0 : char.IsLowSurrogate(c) ? 4 : c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
                         yield return new Unit(c, decodedByte, decodedByte + bytes); decodedByte += bytes;
                     }
+                    if (usedBytes != 0) previousByte = source[offset + usedBytes - 1];
                     offset += usedBytes; count -= usedBytes; chunkStart += usedBytes;
                     if (count != 0) continue;
                     if (eof)
@@ -227,6 +244,23 @@ namespace mySQLPunk.lib.MssqlImport
                     source = buffer; offset = 0; count = read; eof = read == 0;
                 }
             }
+        }
+        private static int DecodeSpan(byte[] source, int offset, int count, long byteStart, int bom, int codePage, int previousByte)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                byte value = source[offset + i];
+                if (codePage == 65001)
+                {
+                    if (value == 10 || value == 13) return i + 1;
+                }
+                else if (((byteStart + i - bom) & 1) != 0)
+                {
+                    int prior = i == 0 ? previousByte : source[offset + i - 1];
+                    if (codePage == 1200 ? value == 0 && (prior == 10 || prior == 13) : prior == 0 && (value == 10 || value == 13)) return i + 1;
+                }
+            }
+            return count;
         }
         // The caller owns the same file handle across scan and execution.
         public void Dispose() { }
