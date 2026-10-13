@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，使用者於 2026-10-13 回覆「好，進實作」核准書面規格。
 
-**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 已實作與覆核通過（0982548／3ebf6b3，修正兩項 P2）；Task2 log／ETA 已實作與覆核通過（0cc1657）；Task3 專用連線層已實作與覆核通過（9df6437）；Task4 循序 worker 已實作與覆核通過（0707bc9）；Task5 開始。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
+**Status:** 隔離分支 codex/mssql-import 的 Task1–5 已實作並通過逐項獨立覆核；Task6 進入隔離驗收，先驗證 runner 與 fixture ownership guards，再啟動已核准的專用 LocalDB。實際 Transfer 試跑仍待 Task7。進度與裁決存於 `.superpowers/sdd/implementation-plan/progress.md`。
 
 **Execution:** 保留先前選定的「分工實作並逐項覆核」。一次一位 implementer，各 task 經獨立覆核後才接下一項；最後整體覆核。build、native UI 與 DB tests 由單一 owner 串行執行，避免共享輸出／fixture 衝突。
 
@@ -134,11 +134,11 @@
 
 **Interfaces:** `MssqlImportWizardForm(MssqlImportRequest initialRequest, Func<MssqlImportService> serviceFactory)`；Form1 `OpenMssqlImportWizard(TreeDatabaseTarget)`。沿用 PunkyReportLoadingControl.BeginExport／EndExport／SetRunning／Muted；routing 測試可注入 wizard runner，不需真連線。
 
-- [ ] **Step 1: 先寫失敗 wizard tests。** 四步導覽、未預檢／有阻擋不能開始、確認target必勾、skip預設false；重選檔案／目標會失效舊預檢；關閉釋放 input。所有檔案入口在 MSSQL 先路由新 wizard，其他引擎與查詢編輯器維持既有呼叫。
-- [ ] **Step 2: 實作符合核准原型的 WinForms layout。** 顯示實際 server／db、檔案size／編碼／native摘要、READ COMMITTED警告、一般腳本intrinsics邊界與部分寫入說明；結果明示實際核對範圍。log textarea ReadOnly，最近100／64KiB與總數／fullpath，open／folder／copy操作真實檔案。
-- [ ] **Step 3: 接 background worker 與單一 cancellation owner。** jobId＋generation 擋 late callback；timer約200ms拉取bounded snapshot；忙碌時不重入、FormClosing轉取消，收尾後才關窗；Disposed UI 不被 callback更新。Punky預設loop、first-cycle音效／靜音、無播放／暫停按鈕。
-- [ ] **Step 4: 執行 native UI tests。** STA＋WindowsFormsSynchronizationContext、form.Show／PerformClick／bounded DoEvents；深淺色、高 DPI、縮放後取消可到達、error截段、停止中與終態、close/complete race。若使用 preview，只新增 `MYSQLPUNK_MSSQL_IMPORT_WIZARD_PREVIEW/THEME` 且不開真DB，不能混用 export preview knob。
-- [ ] **Step 5: 跑 wizard filter及路由回歸、提交。** 把 native screenshots 存 `docs/design/mssql-import/snapshot/`，與原型JPEG分開命名；記錄動畫視覺／聲音哪些是實際人工確認。Commit `feat: add MSSQL SQL import wizard`。
+- [x] **Step 1: 先寫失敗 wizard tests。** 四步導覽、未預檢／有阻擋不能開始、確認target必勾、skip預設false；重選檔案／目標會失效舊預檢；關閉釋放 input。所有檔案入口在 MSSQL 先路由新 wizard，其他引擎與查詢編輯器維持既有呼叫。
+- [x] **Step 2: 實作符合核准原型的 WinForms layout。** 顯示實際 server／db、檔案size／編碼／native摘要、READ COMMITTED警告、一般腳本intrinsics邊界與部分寫入說明；結果明示實際核對範圍。log textarea ReadOnly，最近100／64KiB與總數／fullpath，open／folder／copy操作真實檔案。
+- [x] **Step 3: 接 background worker 與單一 cancellation owner。** jobId＋generation 擋 late callback；timer約200ms拉取bounded snapshot；忙碌時不重入、FormClosing轉取消，收尾後才關窗；Disposed UI 不被 callback更新。Punky預設loop、first-cycle音效／靜音、無播放／暫停按鈕。
+- [x] **Step 4: 執行 native UI tests。** STA＋WindowsFormsSynchronizationContext、form.Show／PerformClick／bounded DoEvents；深淺色、高 DPI、縮放後取消可到達、error截段、停止中與終態、close/complete race。若使用 preview，只新增 `MYSQLPUNK_MSSQL_IMPORT_WIZARD_PREVIEW/THEME` 且不開真DB，不能混用 export preview knob。
+- [x] **Step 5: 跑 wizard filter及路由回歸、提交。** 把 native screenshots 存 `docs/design/mssql-import/snapshot/`，與原型JPEG分開命名；記錄動畫視覺／聲音哪些是實際人工確認。Commit `feat: add MSSQL SQL import wizard`。
 
 ## Task 6: Authorized isolated DB roundtrip 與 fault acceptance
 
