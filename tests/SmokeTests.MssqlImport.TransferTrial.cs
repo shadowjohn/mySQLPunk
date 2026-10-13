@@ -301,6 +301,17 @@ FROM sys.dm_db_log_space_usage;";
         }catch{ }
         return value;
     }
+    private static void TransferAddProgress(JObject record,MssqlImportProgress progress)
+    {
+        record["fileBytes"]=progress==null?JValue.CreateNull():new JValue(progress.FileBytes);
+        record["scannedBytes"]=progress==null?JValue.CreateNull():new JValue(progress.ScannedBytes);
+        record["successfulBytes"]=progress==null?JValue.CreateNull():new JValue(progress.SuccessfulBytes);
+        record["skippedBytes"]=progress==null?JValue.CreateNull():new JValue(progress.SkippedBytes);
+        record["processedBytes"]=progress==null?JValue.CreateNull():new JValue(progress.ProcessedBytes);
+        record["batchNumber"]=progress==null?JValue.CreateNull():new JValue(progress.BatchNumber);
+        record["remainingSeconds"]=progress==null||!progress.Remaining.HasValue?JValue.CreateNull():new JValue(progress.Remaining.Value.TotalSeconds);
+        record["estimatedFinishUtc"]=progress==null||!progress.EstimatedFinish.HasValue?JValue.CreateNull():new JValue(progress.EstimatedFinish.Value.ToUniversalTime().ToString("o"));
+    }
     private sealed class TransferTrialMonitor : IDisposable
     {
         private readonly string output;
@@ -340,6 +351,7 @@ FROM sys.dm_db_log_space_usage;";
                             ["peakSampledPrivateBytes"]=peakPrivate,["peakWorkingSetBytes"]=process.PeakWorkingSet64,
                             ["successfulBatches"]=p==null?0:p.SuccessfulBatches,["failedBatches"]=p==null?0:p.FailedBatches,["stage"]=p==null?"Scanning":p.Stage.ToString(),
                             ["cFreeBytes"]=freeSpace()};
+                        TransferAddProgress(record,p);
                         if(pollOperator&&File.Exists(Path.Combine(output,"cancel.request"))){record["cancelCode"]="TrialOperatorStop";cancellation.Cancel();}
                         if((long)record["cFreeBytes"]<TransferCancelFree){record["cancelCode"]="TrialLowSpace";cancellation.Cancel();}
                         foreach(var property in readAllocation().Properties())record[property.Name]=property.Value.DeepClone();
@@ -486,6 +498,13 @@ FROM sys.dm_db_log_space_usage;";
             {monitor.RequireReady();TransferGuardCheck(cancellation.Token.WaitHandle.WaitOne(2000),"Low-space monitor cancels the owned token.");}
             using(var cancellation=new CancellationTokenSource())using(var monitor=new TransferTrialMonitor(fixture,cancellation,"offline-io",()=>TransferEntryFree,used,allocation,()=>new TransferMonitorWriteFault(),false))
             {try{monitor.RequireReady();}catch(InvalidOperationException error){TransferGuardCheck(error.Message=="TrialMonitorIoFailure","Monitor reports fixed IO failure.");}TransferGuardCheck(cancellation.Token.WaitHandle.WaitOne(2000),"Monitor IO fault cancels the owned token.");}
+            var progressRecord=new JObject();
+            var longProgress=new MssqlImportProgress(Guid.NewGuid(),7000000001L,MssqlImportStage.Executing,scannedBytes:6000000000L,successfulBytes:4000000000L,skippedBytes:3000000000L,batchNumber:5000000001L);
+            TransferAddProgress(progressRecord,longProgress);
+            TransferGuardCheck((long)progressRecord["fileBytes"]==7000000001L&&(long)progressRecord["scannedBytes"]==6000000000L&&(long)progressRecord["processedBytes"]==7000000000L&&(long)progressRecord["successfulBytes"]==4000000000L&&(long)progressRecord["skippedBytes"]==3000000000L&&(long)progressRecord["batchNumber"]==5000000001L,"Streamed progress retains Int64 bytes and batch values.");
+            TransferGuardCheck(progressRecord["remainingSeconds"].Type==JTokenType.Null&&progressRecord["estimatedFinishUtc"].Type==JTokenType.Null,"Unknown ETA stays null rather than zero or invented finish.");
+            TransferAddProgress(progressRecord,null);
+            TransferGuardCheck(progressRecord["fileBytes"].Type==JTokenType.Null&&progressRecord["processedBytes"].Type==JTokenType.Null&&progressRecord["remainingSeconds"].Type==JTokenType.Null,"No snapshot remains unknown.");
             Exception original=new InvalidOperationException("TrialSutNotCompleted"),primary=original;string secondary="";var receipt=new JObject();TransferRetainFailure(ref primary,new IOException("secondary"),ref secondary,receipt);
             TransferGuardCheck(object.ReferenceEquals(primary,original)&&secondary=="TrialFailure:IOException","Secondary error cannot replace the original failure.");
             TransferGuardCheck(TransferOfflineSqlAttempts==1,"All negative/monitor/JSON/marker guards stop before SQL factory; the sole blocked call was deliberate.");
