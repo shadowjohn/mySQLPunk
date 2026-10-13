@@ -7334,6 +7334,12 @@ namespace mySQLPunk
                 return;
             }
 
+            if (IsMssqlImportTarget(target))
+            {
+                OpenMssqlImportWizard(target);
+                return;
+            }
+
             MySqlImportOptions mysqlOptions = null;
             if (IsMySqlTarget(target))
             {
@@ -7347,7 +7353,7 @@ namespace mySQLPunk
                 dialog.Filter = Localization.T("Common.SqlFilesFilter");
                 dialog.Multiselect = false;
 
-                if (dialog.ShowDialog() != DialogResult.OK)
+                if (ShowSqlImportFileDialog(dialog) != DialogResult.OK)
                 {
                     return;
                 }

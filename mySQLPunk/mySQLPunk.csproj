@@ -300,7 +300,9 @@
     <Compile Include="lib\SchemaReportOpenXmlWriter.Specification.cs" />
     <Compile Include="lib\SchemaReportPdfWriter.cs" />
     <Compile Include="ReportExportWizardForm.cs" />
+    <Compile Include="MssqlImportWizardForm.cs" />
     <Compile Include="MssqlExportWizardForm.cs" />
+    <Compile Include="Form1.MssqlImport.cs" />
     <Compile Include="Form1.MssqlExport.cs" />
     <Compile Include="ReportTemplatePreviewForm.cs" />
     <Compile Include="PunkyReportLoadingControl.cs" />

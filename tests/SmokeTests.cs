@@ -29,8 +29,21 @@ public static partial class SmokeTests
     {
         if (args.Length == 1 && args[0].StartsWith("--owned-restore-fixture-", StringComparison.Ordinal)) return RestoreProcessChild(args[0]);
         if (args.Length != 0) return SnapshotCrashChild(args);
+        if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_IMPORT_WIZARD_PREVIEW") == "1") return ImportWizardPreview();
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL import wizard close race and log fault", ImportWizard_CloseCompletionRaceAndLogFailure, ref passed);
+        Run("MSSQL import wizard cancellation dispatch", ImportWizard_CancelDoesNotBlockUi, ref passed);
+        Run("MSSQL import wizard snapshots and actions", ImportWizard_SnapshotsAndActions, ref passed);
+        Run("MSSQL import wizard preflight lifetime", ImportWizard_PreflightLateAndDispose, ref passed);
+        Run("MSSQL import wizard modal and outcomes", ImportWizard_ModalAndOutcomes, ref passed);
+        Run("MSSQL import wizard routing", ImportWizard_Routing, ref passed);
+        Run("MSSQL import wizard gates", ImportWizard_GatesAndInvalidation, ref passed);
+        Run("MSSQL import wizard failure", ImportWizard_PreflightFailureAndRelease, ref passed);
+        Run("MSSQL import wizard lifetime", ImportWizard_CancellationAndClose, ref passed);
+        Run("MSSQL import wizard layout", ImportWizard_ThemesAndCompactLayout, ref passed);
+        Run("MSSQL import wizard log", ImportWizard_DurableLogAndHonestResult, ref passed);
+        Run("MSSQL import wizard heartbeat", ImportWizard_HeartbeatExpiresEstimate, ref passed);
         Run("MSSQL import worker service boundaries", MssqlImportWorkerAdditionalBoundaries, ref passed);
         Run("MSSQL import worker service stop and skip", MssqlImportWorkerStopAndSkip, ref passed);
         Run("MSSQL import worker service log faults", MssqlImportWorkerFlushAndLogFaults, ref passed);
