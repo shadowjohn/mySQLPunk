@@ -74,6 +74,17 @@ namespace mySQLPunk.lib
             return builder.ConnectionString;
         }
 
+        internal static string BuildMssqlImportConnectionString(Dictionary<string, object> connection)
+        {
+            if (connection == null) throw new ArgumentNullException(nameof(connection));
+            if (string.IsNullOrWhiteSpace(GetValue(connection, "initial_database")))
+                throw new ArgumentException("MSSQL import requires an explicit target database.", nameof(connection));
+            var builder = new SqlConnectionStringBuilder(BuildSqlServerConnectionString(connection));
+            builder.ConnectRetryCount = 0;
+            builder.MultipleActiveResultSets = false;
+            return builder.ConnectionString;
+        }
+
         public static string BuildMySqlConnectionString(Dictionary<string, object> connection)
         {
             uint port = 3306;
