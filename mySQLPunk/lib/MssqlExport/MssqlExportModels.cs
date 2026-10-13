@@ -126,7 +126,8 @@ namespace mySQLPunk.lib.MssqlExport
         public string TargetPath { get; }
         public ExportDestinationStamp Destination { get; }
         public MssqlMirrorOptions Mirror { get; }
-        public MssqlExportRequest(Guid jobId, string databaseName, IReadOnlyList<MssqlObjectKey> tables, MssqlExportMode mode, bool includeViews, string targetPath, ExportDestinationStamp destination, MssqlMirrorOptions mirror)
+        public bool UseSnapshot { get; }
+        public MssqlExportRequest(Guid jobId, string databaseName, IReadOnlyList<MssqlObjectKey> tables, MssqlExportMode mode, bool includeViews, string targetPath, ExportDestinationStamp destination, MssqlMirrorOptions mirror, bool useSnapshot = false)
         {
             if (jobId == Guid.Empty) throw new ArgumentException("Job identity is required", nameof(jobId));
             if (string.IsNullOrWhiteSpace(databaseName)) throw new ArgumentException("Database is required", nameof(databaseName));
@@ -138,7 +139,8 @@ namespace mySQLPunk.lib.MssqlExport
             if (selection.Contains(null)) throw new ArgumentException("Table selection contains null", nameof(tables));
             JobId = jobId; DatabaseName = databaseName; Tables = selection.AsReadOnly();
             Mode = mode; IncludeViews = includeViews; TargetPath = Path.GetFullPath(targetPath);
-            Destination = destination; Mirror = mirror;
+            if (mode == MssqlExportMode.SchemaOnly && useSnapshot) throw new ArgumentException("Schema-only export cannot use snapshot", nameof(useSnapshot));
+            Destination = destination; Mirror = mirror; UseSnapshot = useSnapshot;
         }
     }
 
@@ -291,9 +293,11 @@ namespace mySQLPunk.lib.MssqlExport
     {
         public IReadOnlyList<MssqlTableDefinition> Tables { get; }
         public int SnapshotState { get; }
+        public MssqlSnapshotCapability SnapshotCapability { get; }
         public IReadOnlyList<MssqlExportIssue> Issues { get; }
-        internal MssqlExportCatalog(IEnumerable<MssqlTableDefinition> tables, int snapshotState, IEnumerable<MssqlExportIssue> issues)
-        { Tables = MssqlNativeFacts.Copy(tables); SnapshotState = snapshotState; Issues = MssqlNativeFacts.Copy(issues); }
+        internal MssqlExportCatalog(IEnumerable<MssqlTableDefinition> tables, int snapshotState, IEnumerable<MssqlExportIssue> issues, MssqlSnapshotCapability snapshotCapability = null)
+        { Tables = MssqlNativeFacts.Copy(tables); SnapshotState = snapshotState; SnapshotCapability = snapshotCapability;
+            if (snapshotCapability != null && snapshotCapability.State != snapshotState) throw new ArgumentException("Snapshot capability state mismatch", nameof(snapshotCapability)); Issues = MssqlNativeFacts.Copy(issues); }
     }
     internal sealed class MssqlExportSchema
     {
@@ -303,11 +307,13 @@ namespace mySQLPunk.lib.MssqlExport
         public IReadOnlyList<MssqlExtendedPropertyDefinition> ExtendedProperties { get; }
         public IReadOnlyList<MssqlExportIssue> Issues { get; }
         public int SnapshotState { get; }
+        public MssqlSnapshotCapability SnapshotCapability { get; }
         public string Fingerprint { get; }
-        internal MssqlExportSchema(IEnumerable<MssqlTableDefinition> tables, IEnumerable<MssqlViewDefinition> views, IEnumerable<MssqlDependency> dependencies, int snapshotState, IEnumerable<MssqlExportIssue> issues, IEnumerable<MssqlExtendedPropertyDefinition> extendedProperties = null)
+        internal MssqlExportSchema(IEnumerable<MssqlTableDefinition> tables, IEnumerable<MssqlViewDefinition> views, IEnumerable<MssqlDependency> dependencies, int snapshotState, IEnumerable<MssqlExportIssue> issues, IEnumerable<MssqlExtendedPropertyDefinition> extendedProperties = null, MssqlSnapshotCapability snapshotCapability = null)
         {
             ExtendedProperties = MssqlNativeFacts.Copy(extendedProperties);
-            Tables = MssqlNativeFacts.Copy(tables); Views = MssqlNativeFacts.Copy(views); Dependencies = MssqlNativeFacts.Copy(dependencies); Issues = MssqlNativeFacts.Copy(issues); SnapshotState = snapshotState;
+            Tables = MssqlNativeFacts.Copy(tables); Views = MssqlNativeFacts.Copy(views); Dependencies = MssqlNativeFacts.Copy(dependencies); Issues = MssqlNativeFacts.Copy(issues); SnapshotState = snapshotState; SnapshotCapability = snapshotCapability;
+            if (snapshotCapability != null && snapshotCapability.State != snapshotState) throw new ArgumentException("Snapshot capability state mismatch", nameof(snapshotCapability));
             var text = new StringBuilder();
             foreach (var t in Tables.OrderBy(x => x.Key.ObjectId))
             {
@@ -338,6 +344,7 @@ namespace mySQLPunk.lib.MssqlExport
     {
         public MssqlExportSchema Schema { get; }
         public int SnapshotState => Schema.SnapshotState;
+        public MssqlSnapshotCapability SnapshotCapability => Schema.SnapshotCapability;
         public IReadOnlyList<MssqlExportIssue> Issues { get; }
         public bool CanStart => Issues.Count == 0;
         internal MssqlExportPreflight(MssqlExportSchema schema, IEnumerable<MssqlExportIssue> issues) { Schema = schema; Issues = MssqlNativeFacts.Copy(issues); }
@@ -371,7 +378,7 @@ namespace mySQLPunk.lib.MssqlExport
         }
     }
 
-    internal enum MssqlExportStage { Preflight, Schema, Data, Verifying, Publishing, Mirroring, CancelRequested, Completed, Canceled, Failed, LocalCompletedMirrorIncomplete }
+    internal enum MssqlExportStage { Preflight, Schema, Data, Verifying, Publishing, Mirroring, CancelRequested, Completed, Canceled, Failed, LocalCompletedMirrorIncomplete, EnablingSnapshot, RestoringSnapshot }
     internal enum MssqlExportEstimationState { Estimating, Measuring, Waiting, Unreliable, Complete }
     internal sealed class MssqlExportProgress
     {
@@ -418,11 +425,13 @@ namespace mySQLPunk.lib.MssqlExport
         public IReadOnlyList<string> Warnings { get; }
         public IReadOnlyList<string> ResidualPaths { get; }
         public string ErrorMessage { get; }
+        public bool UseSnapshot { get; }
+        public MssqlSnapshotCleanupResult SnapshotCleanup { get; }
         internal MssqlExportResult(Guid jobId, MssqlExportStage stage, string publishedPath, string mirrorPath,
-            IEnumerable<MssqlTableRowCount> rows, TimeSpan elapsed, IEnumerable<string> warnings, IEnumerable<string> residuals, string errorMessage)
+            IEnumerable<MssqlTableRowCount> rows, TimeSpan elapsed, IEnumerable<string> warnings, IEnumerable<string> residuals, string errorMessage, bool useSnapshot = false, MssqlSnapshotCleanupResult snapshotCleanup = null)
         {
             JobId = jobId; Stage = stage; PublishedPath = publishedPath; MirrorPath = mirrorPath; RowCounts = MssqlNativeFacts.Copy(rows);
-            Elapsed = elapsed; Warnings = MssqlNativeFacts.Copy(warnings); ResidualPaths = MssqlNativeFacts.Copy(residuals); ErrorMessage = errorMessage;
+            Elapsed = elapsed; Warnings = MssqlNativeFacts.Copy(warnings); ResidualPaths = MssqlNativeFacts.Copy(residuals); ErrorMessage = errorMessage; UseSnapshot = useSnapshot; SnapshotCleanup = snapshotCleanup;
         }
     }
 

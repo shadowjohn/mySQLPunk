@@ -29,6 +29,9 @@ public static partial class SmokeTests
     {
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL export snapshot options defaults", SnapshotOptions_DefaultAndSchemaOnly, ref passed);
+        Run("MSSQL export snapshot options capability", SnapshotOptions_CapabilityMatrix, ref passed);
+        Run("MSSQL export snapshot options fingerprint", SnapshotOptions_Fingerprint, ref passed);
         Run("MSSQL export references integration preparation", Reference_IntegratesPreparationAndOrdering, ref passed);
         Run("MSSQL export references integration gates", Reference_IntegrationGatesAndFingerprint, ref passed);
         Run("MSSQL export references token rewrite", Reference_RewritesTokens, ref passed);

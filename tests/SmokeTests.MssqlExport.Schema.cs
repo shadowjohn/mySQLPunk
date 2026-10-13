@@ -14,7 +14,7 @@ public static partial class SmokeTests
         return result;
     }
     private static MssqlExportRequest SchemaRequest(MssqlExportSchema schema, MssqlExportMode mode = MssqlExportMode.SchemaAndData)
-    { return new MssqlExportRequest(Guid.NewGuid(), "source_db", schema.Tables.Select(t => t.Key).ToArray(), mode, mode != MssqlExportMode.DataOnly && schema.Views.Count != 0, Path.Combine(Path.GetTempPath(), "schema.sql"), null, null); }
+    { return new MssqlExportRequest(Guid.NewGuid(), "source_db", schema.Tables.Select(t => t.Key).ToArray(), mode, mode != MssqlExportMode.DataOnly && schema.Views.Count != 0, Path.Combine(Path.GetTempPath(), "schema.sql"), null, null, mode != MssqlExportMode.SchemaOnly); }
     private static void Schema_RequiresWriter()
     { Assert(typeof(MssqlObjectKey).Assembly.GetType("mySQLPunk.lib.MssqlExport.MssqlSchemaScriptWriter") != null, "Native two-stage schema writer must exist"); }
     private static MssqlExportSchema SchemaFixture()

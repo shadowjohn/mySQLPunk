@@ -117,7 +117,7 @@ public static partial class SmokeTests
         {
             var tables = Service().LoadCatalog(Source,CancellationToken.None).Tables.Where(t => select == null || select(t)).Select(t => t.Key).ToArray();
             string path = Path.Combine(Root,filename);
-            return new MssqlExportRequest(Guid.NewGuid(),Source,tables,mode,views,path,MssqlExportArtifact.CaptureDestination(path,CancellationToken.None),mirror ? new MssqlMirrorOptions(Path.Combine(Root,"mirror"),2) : null);
+            return new MssqlExportRequest(Guid.NewGuid(),Source,tables,mode,views,path,MssqlExportArtifact.CaptureDestination(path,CancellationToken.None),mirror ? new MssqlMirrorOptions(Path.Combine(Root,"mirror"),2) : null, mode != MssqlExportMode.SchemaOnly);
         }
         internal MssqlExportResult Export(MssqlExportRequest request, CancellationToken cancellation = default(CancellationToken), MssqlArtifactFiles files = null, Action<MssqlExportStage> phase = null, Action<MssqlExportProgress> progress = null)
         {

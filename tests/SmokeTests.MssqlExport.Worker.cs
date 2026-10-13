@@ -181,7 +181,7 @@ public static partial class SmokeTests
         finally { Directory.Delete(root, true); }
     }
     private static MssqlExportRequest WorkerRequest(string target, MssqlExportSchema schema, MssqlExportMode mode, MssqlMirrorOptions mirror)
-    { return new MssqlExportRequest(Guid.NewGuid(), "fixture", schema.Tables.Select(x => x.Key).ToArray(), mode, false, target, MssqlExportArtifact.CaptureDestination(target, CancellationToken.None), mirror); }
+    { return new MssqlExportRequest(Guid.NewGuid(), "fixture", schema.Tables.Select(x => x.Key).ToArray(), mode, false, target, MssqlExportArtifact.CaptureDestination(target, CancellationToken.None), mirror, mode != MssqlExportMode.SchemaOnly); }
     private sealed class WorkerProgress : IProgress<MssqlExportProgress>
     { private readonly Action<MssqlExportProgress> action; internal WorkerProgress(Action<MssqlExportProgress> action) { this.action = action; } public void Report(MssqlExportProgress p) { action(p); } }
     private sealed class WorkerDispose : IDisposable

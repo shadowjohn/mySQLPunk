@@ -19,7 +19,8 @@ namespace mySQLPunk.lib.MssqlExport
             EnsureVisibility(connection, null, cancellation);
             var tables = ReadTables(connection, null, cancellation);
             var issues = tables.Where(t => !t.Flag("can_select")).Select(t => new MssqlExportIssue("UnreadableTable", t.Key, null, "SELECT permission is required."));
-            return new MssqlExportCatalog(tables, Snapshot(connection, null, cancellation), issues);
+            var capability = new MssqlSnapshotBackend(connection).ReadCapability(cancellation);
+            return new MssqlExportCatalog(tables, capability.State, issues, capability);
         }
         internal MssqlExportSchema ReadSchema(SqlConnection connection, SqlTransaction transaction, MssqlExportRequest request, CancellationToken cancellation)
         {
@@ -98,7 +99,8 @@ WHERE d.referenced_class=1", cancellation))
                     f.Flag("is_ambiguous"), f.Flag("is_caller_dependent")));
             }
             var properties = ReadExtendedProperties(connection, transaction, objectIds, cancellation);
-            var schema = new MssqlExportSchema(selected, views, dependencies, Snapshot(connection, transaction, cancellation), issues, extendedProperties: properties);
+            var capability = new MssqlSnapshotBackend(connection, transaction).ReadCapability(cancellation);
+            var schema = new MssqlExportSchema(selected, views, dependencies, capability.State, issues, extendedProperties: properties, snapshotCapability: capability);
             return PrepareViewReferences(schema, request, (database, ownerSchema, name) => ResolveViewReference(connection, transaction, database, ownerSchema, name, cancellation));
         }
         internal static MssqlExportSchema PrepareViewReferences(MssqlExportSchema schema, MssqlExportRequest request,
@@ -138,7 +140,7 @@ WHERE d.referenced_class=1", cancellation))
                     if (dependencies[j].ObjectId == view.Key.ObjectId && dependencies[j].Database != null)
                         dependencies[j] = dependencies[j].WithPreparedSameDatabaseReference();
             }
-            return changed ? new MssqlExportSchema(schema.Tables, views, dependencies, schema.SnapshotState, issues, schema.ExtendedProperties) : schema;
+            return changed ? new MssqlExportSchema(schema.Tables, views, dependencies, schema.SnapshotState, issues, schema.ExtendedProperties, schema.SnapshotCapability) : schema;
         }
         internal IReadOnlyList<MssqlExportIssue> Validate(MssqlExportSchema schema, MssqlExportRequest request)
         {
@@ -290,7 +292,6 @@ WHERE e.class=1 AND o.type IN ('U','V') AND e.major_id IN (" + ids + ") ORDER BY
             var row = Query(c, t, "SELECT HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') allowed", token)[0];
             if (!new MssqlNativeFacts(row).Flag("allowed")) throw new MssqlExportPrerequisiteException(MssqlPrerequisite.ViewDefinitionRequired);
         }
-        private static int Snapshot(SqlConnection c, SqlTransaction t, CancellationToken token) { return new MssqlNativeFacts(Query(c, t, "SELECT snapshot_isolation_state FROM sys.databases WHERE database_id=DB_ID()", token).Single()).Number("snapshot_isolation_state"); }
         private static bool HasCatalog(SqlConnection c, SqlTransaction t, string name, CancellationToken token)
         { return Query(c, t, "SELECT object_id FROM sys.all_objects WHERE name='" + name + "' AND schema_id=SCHEMA_ID('sys')", token).Count != 0; }
         private static List<MssqlTableDefinition> ReadTables(SqlConnection c, SqlTransaction t, CancellationToken token)
