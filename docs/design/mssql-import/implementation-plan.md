@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，使用者於 2026-10-13 回覆「好，進實作」核准書面規格。
 
-**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 準備中。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
+**Status:** 使用者已明確授權進實作，沿用分工逐項覆核；隔離分支 codex/mssql-import 的 Task1 已實作與覆核通過（0982548／3ebf6b3，修正兩項 P2）；Task2 開始。進度與技術裁決存於本 worktree 的 `.superpowers/sdd/implementation-plan/progress.md`；實際 DB 驗收仍待 Task6/7。
 
 **Execution:** 保留先前選定的「分工實作並逐項覆核」。一次一位 implementer，各 task 經獨立覆核後才接下一項；最後整體覆核。build、native UI 與 DB tests 由單一 owner 串行執行，避免共享輸出／fixture 衝突。
 
@@ -26,7 +26,7 @@
 - 所有走到 EOF 的作業都做 session／交易／digest／已初始化 LOB 終態檢查，包括已略過錯誤者。native LOB 結尾要求唯一 state row、Failed=0、Consumed=1、Sequence=ConsumedThrough。
 - error log 預設 `%LOCALAPPDATA%\mySQLPunk\ImportLogs\import-<timestamp>-<job>.log`；略過前落檔並 flush。UI 最近 100 筆或 64 KiB UTF-16 文字，先到者為準，完整路徑可見。
 - 進度與 batch／line／byte／error 統計為 Int64；command／result drain／狀態處理完成才更新確認邊界。affected rows 不能標為實際匯入筆數。
-- UI 約 200 ms 合併更新；ETA 約 10 秒窗口、至少 3 次樣本與 2 秒觀察，5 秒未確認或長指令／索引／核對中改為未知。
+- UI 約 200 ms 合併更新；ETA 約 10 秒窗口、至少 3 次樣本與 2 秒觀察，5 秒未確認或長指令／索引／核對中改為未知。樣本最多64筆、200ms合併，正速率CV>1也回未知；latest counts與lastAdvance不得被節流丟失。
 - Punky 自動 loop，聲音首輪一次、可靜音，沒有播放／暫停按鈕。取消、關閉與 late callback 沿用 job generation／owned resource 模式。
 - 測試用既有 `mySQLPunk.SmokeTests.exe`，不執行／重建 ReportExportTests.exe，不調整防毒，不 push／merge／release。
 - 大型 SQL、DB files、logs、manifest 與原始驗收證據只存 C 槽 local-only，不進 Git。使用者實檔／Transfer 不受 fixture 自動清除權限涵蓋。
@@ -70,8 +70,8 @@
 - `MssqlImportPreflight`：持有 Input／Scan／Target／LogPath／Passed／固定 Code 的 Issues；IDisposable，重選與關閉時釋放 input 及未用的 job log；Run 原子領取一次 execution ownership，重用同一預檢拒絕，重複 Dispose 安全。
 - `MssqlImportService(Func<IMssqlImportSession> openSession, Func<Guid,IMssqlImportLog> openLog)`；`Preflight(MssqlImportRequest, Action<MssqlImportProgress>, CancellationToken): MssqlImportPreflight`；`Run(MssqlImportRequest, MssqlImportPreflight, Action<MssqlImportProgress>, CancellationToken): MssqlImportResult`。Run 再核對 target；factory 每作業開一次專用 execution session。
 - `IMssqlImportLog : IDisposable`：`string Path`、`WriteStart(request,scan,target)`、`WriteError(batch,error,action)`、`Flush()`、`WriteEnd(result)`；failure 直接向 worker 冒泡，不能吞掉後繼續。`MssqlImportLogTail.Add(string)`／`Snapshot(): string`、`long TotalErrors`。
-- `MssqlImportProgress`：`Guid JobId`、`Stage { Scanning, Executing, Verifying, Stopping, Finished }`、`long ScannedBytes/ProcessedBytes/SuccessfulBytes/SkippedBytes/SuccessfulBatches/FailedBatches`、目前 Batch／固定 Phase／可選 TableName、TimeSpan Elapsed／TimeSpan? Remaining／DateTime? EstimatedFinish；bounded string RecentErrorText／LogPath、long TotalErrors、bool LogTruncated。`MssqlImportProgressEstimator.Observe(progress, DateTime utcNow)`／`Estimate(DateTime utcNow): MssqlImportEstimate`。
-- `MssqlImportResult`：`Status { Completed, CompletedWithErrors, Failed, Cancelled, CleanupUncertain }`、統計／LastAcknowledgedBatch／UncertainBatch／LogPath／Cleanup／ValidationSummary；`MssqlImportCounts(long tables,long rows)`。`MssqlImportCleanup` 記錄是否確認 command 結束、session 釋放、未提交交易 cleanup 與固定 issue code，不把 Dispose 呼叫等同伺服器 rollback 已完成。
+- `MssqlImportProgress`：`Guid JobId`、`Stage { Scanning, Executing, Verifying, Stopping, Finished }`、`long FileBytes/ScannedBytes/ProcessedBytes/SuccessfulBytes/SkippedBytes/SuccessfulBatches/FailedBatches`、`long BatchNumber/StartLine/EndLine/StartByte/EndByte`（無目前批次為0，不能帶Batch.Text進UI）／固定 Phase／可選 TableName、TimeSpan Elapsed／TimeSpan? Remaining／DateTime? EstimatedFinish；bounded string RecentErrorText／LogPath、long TotalErrors、bool LogTruncated。`MssqlImportProgressEstimator.Observe(progress, DateTime utcNow)`／`Estimate(DateTime utcNow): MssqlImportEstimate`、`ShouldReport(MssqlImportProgress, DateTime utcNow): bool`。Estimate含TimeSpan? Remaining／DateTime? EstimatedFinish（UTC）／bool IsReliable；phase固定None／Schema／Data／Indexes／Constraints，StageVerifying／Stopping／Finished不估。
+- `MssqlImportResult`：`Status { Completed, CompletedWithErrors, Failed, Cancelled, CleanupUncertain }`、統計／LastAcknowledgedBatch／UncertainBatch／LogPath／Cleanup／ValidationSummary／TimeSpan Elapsed；`MssqlImportCounts(long tables,long rows)`。`MssqlImportCleanup` 記錄是否確認 command 結束、session 釋放、未提交交易 cleanup 與固定 issue code，不把 Dispose 呼叫等同伺服器 rollback 已完成。
 
 ## Planning decisions that must remain explicit
 
@@ -86,22 +86,22 @@
 
 **Interfaces:** 產出上述 Batch／Scan／ScriptInfo／Input；inspector `Observe(MssqlImportBatch)`、`Complete(): MssqlImportScriptInfo`，保留有限 metadata，不保存完整 batches。其餘 models 在使用它的 task 補齊，不提前加入未使用的空架構。
 
-- [ ] **Step 1: 加入並跑失敗的 parser tests。** `MssqlImportParserPreservesContexts` 驗證字串／雙引號／方括號／巢狀 comment 中 GO 不拆；1／2／3／7-byte buffer 切在 UTF-8、BOM、CRLF、`''`、`]]` 中間仍原文相同。`MssqlImportParserLimits` 的斷言：16,777,216 code unit 的 Scan 成功且 MaxBatchCodeUnits 相等；16,777,217 時拋 MssqlImportInputException、Code="BatchTooLarge"。
-- [ ] **Step 2: 實作固定 byte／decoder buffer、bounded current batch 與 lexical line candidate。** 不用無界 ReadLine、ReadAllText／ReadAllBytes／ReadToEnd；strict decoder 的 EOF flush 要抓無效序列。明訂 EndByte 包含目前 batch 的 GO delimiter，但 SQL Text 不含 GO。純註解／空白尾段不送空 command，其 byte 覆蓋只在 EOF 驗證通過後才計入最終 ProcessedBytes=FileBytes。
-- [ ] **Step 3: 補 unsupported／native tests 並實作 inspector。** GO n、GO block comment、SQLCMD 真指令、跨庫直接 USE、未閉合 EOF、無效 encoding 拒絕；字串中的相同文字不拒絕。同 DB USE 在傳入 databaseName 且 decoded identifier 完全 Ordinal 相等時可接受；unknown target 或不同大小寫也保守拒絕，避免 case-sensitive server 的跨庫同批寫入。native Schema／DataOnly／無 LOB、正確／缺失／重複／溢位 footer、錯 job、偽造 GUID、header 不一致都要測；native candidate 不可因缺 footer 轉 generic。合法 Generic 不要求 footer。
-- [ ] **Step 4: 以同一 handle 掃描→rewind→執行第二輪，測 SHA 一致與 FileShare.Read 阻止一般寫入／刪除；檔案重選 Dispose 後可寫。** 原始 byte／line offset、無 GO 的最後批次、僅註解檔不產生可執行空 command；大檔統計使用 Int64。
-- [ ] **Step 5: 驗證並提交精確檔案。** `MYSQLPUNK_SMOKE_FILTER='MSSQL import parser'` 跑 `tests/Run-SmokeTests.ps1 -Configuration Debug`，必須 matched tests 全過；`git diff --check` 通過。Commit `feat: add bounded MSSQL GO input preflight`。
+- [x] **Step 1: 加入並跑失敗的 parser tests。** `MssqlImportParserPreservesContexts` 驗證字串／雙引號／方括號／巢狀 comment 中 GO 不拆；1／2／3／7-byte buffer 切在 UTF-8、BOM、CRLF、`''`、`]]` 中間仍原文相同。`MssqlImportParserLimits` 的斷言：16,777,216 code unit 的 Scan 成功且 MaxBatchCodeUnits 相等；16,777,217 時拋 MssqlImportInputException、Code="BatchTooLarge"。
+- [x] **Step 2: 實作固定 byte／decoder buffer、bounded current batch 與 lexical line candidate。** 不用無界 ReadLine、ReadAllText／ReadAllBytes／ReadToEnd；strict decoder 的 EOF flush 要抓無效序列。明訂 EndByte 包含目前 batch 的 GO delimiter，但 SQL Text 不含 GO。純註解／空白尾段不送空 command，其 byte 覆蓋只在 EOF 驗證通過後才計入最終 ProcessedBytes=FileBytes。
+- [x] **Step 3: 補 unsupported／native tests 並實作 inspector。** GO n、GO block comment、SQLCMD 真指令、跨庫直接 USE、未閉合 EOF、無效 encoding 拒絕；字串中的相同文字不拒絕。同 DB USE 在傳入 databaseName 且 decoded identifier 完全 Ordinal 相等時可接受；unknown target 或不同大小寫也保守拒絕，避免 case-sensitive server 的跨庫同批寫入。native Schema／DataOnly／無 LOB、正確／缺失／重複／溢位 footer、錯 job、偽造 GUID、header 不一致都要測；native candidate 不可因缺 footer 轉 generic。合法 Generic 不要求 footer。
+- [x] **Step 4: 以同一 handle 掃描→rewind→執行第二輪，測 SHA 一致與 FileShare.Read 阻止一般寫入／刪除；檔案重選 Dispose 後可寫。** 原始 byte／line offset、無 GO 的最後批次、僅註解檔不產生可執行空 command；大檔統計使用 Int64。
+- [x] **Step 5: 驗證並提交精確檔案。** `MYSQLPUNK_SMOKE_FILTER='MSSQL import parser'` 跑 `tests/Run-SmokeTests.ps1 -Configuration Debug`，必須 matched tests 全過；`git diff --check` 通過。Commit `feat: add bounded MSSQL GO input preflight`。
 
 ## Task 2: Durable error log、bounded tail 與進度／ETA
 
-**Files:** Create `MssqlImportLog.cs`, `MssqlImportProgressEstimator.cs`, `tests/SmokeTests.MssqlImport.Worker.cs`；補齊 Models 的 error／progress／result contracts，註冊 sources。
+**Files:** Create `MssqlImportLog.cs`, `MssqlImportProgressEstimator.cs`, `tests/SmokeTests.MssqlImport.Worker.cs`；補齊 Models 的 error／progress／result 與 log 實際消費的 Request／Target／Cleanup contracts，註冊 sources。
 
 **Interfaces:** 產出 IMssqlImportLog／Tail／Estimator 及 terminal DTO；log 可注入 Stream factory 與 clock，測 IO 失敗不需修改檔案權限。Estimator 僅消費已確認 progress，不推測 affected rows。
 
 - [ ] **Step 1: 加入失敗 tests。** `MssqlImportLogRetainsAllErrors` 寫入 1,283 個多 SqlError detail 的事件，磁碟都有、UI ≤100筆且 ≤32,768 chars；單筆 >64 KiB 不截完整 log。唯一檔名 CreateNew、UTF-8、包含 batch／line／byte／codes／path／job，沒有整個 SQL 或連線字串。
 - [ ] **Step 2: 實作串流 log 與 tail。** Start 必須在 DB 寫入前 flush；每次準備 skip 前 flush；create／append／flush／end／Dispose fault 均可被 worker 看見。TotalErrors 不隨 UI 淘汰減少；不累積所有失敗批次，log 存開啟／資料夾／複製可用的真實路徑。
 - [ ] **Step 3: 加入並實作 ETA tests。** 暖機少於 3樣本或2秒不估；約10秒窗口；5秒停滯／Indexes／Verifying 回未知；有 skip 時 Processed=Successful+Skipped、成功比例獨立；read-ahead 和執行中 batch 不算確認。測 Int64 >2 GiB／高 batch 序號、clock injected、200 ms throttle 不漏最終狀態。
-- [ ] **Step 4: 驗證 fault assertions。** `FlushFailsBeforeSkip` 預期 `NextBatchCalls==0`；密集錯誤10倍數量下 tail 記憶體固定；UI 文案顯示完整路徑且不冒稱所有資料成功。
+- [ ] **Step 4: 驗證 fault assertions。** Task2驗證Flush失敗實際向caller拋出；`FlushFailsBeforeSkip` 的 `NextBatchCalls==0` 排程斷言移交Task4真實worker，不能用test-only假worker驗證自己；密集錯誤10倍數量下 tail 記憶體固定；UI 文案顯示完整路徑且不冒稱所有資料成功。
 - [ ] **Step 5: 跑 worker filter、提交。** `MYSQLPUNK_SMOKE_FILTER='MSSQL import worker'`、Debug smoke 全 matched tests 通過。Commit `feat: add MSSQL import logging and progress estimates`。
 
 ## Task 3: Import-only owned session、target preflight 與 bounded result drain
@@ -122,7 +122,7 @@
 
 **Interfaces:** 完成 Service.Preflight／Run；Preflight 保留 input／scan／target identity／已建立 log；Run 在新專用 execution session 重查相同 server／DB id／create_date 與能力，所有 batches 同線。
 
-- [ ] **Step 1: 先寫失敗的 fake-session tests。** `DefaultStopsAtFirstError`、`SkipContinuesOnlySafeBatch`：未勾後續0calls；勾選一般class11–16、前後交易0／XactState0、same DB、無LOB pending、log flush成功才下一批。任何 SqlError 嚴重／timeout／傳輸／不明 outcome 不可 skip，不比對 message 語言。
+- [ ] **Step 1: 先寫失敗的 fake-session tests。** `DefaultStopsAtFirstError`、`SkipContinuesOnlySafeBatch`：未勾後續0calls；勾選一般class11–16、前後交易0／XactState0、same DB、無LOB pending、log flush成功才下一批。任何 SqlError 嚴重／timeout／傳輸／不明 outcome 不可 skip，不比對 message 語言。`FlushFailsBeforeSkip` 注入真實log flush fault，斷言 `NextBatchCalls==0`。
 - [ ] **Step 2: 實作預檢→確認→執行流程。** 所有 input encoding／batch／native／目標／log 可寫性問題於第一個 DB write 前阻擋，parser失敗時execution factory calls=0；不同檔案／target／skip設定令預檢失效，ReusedPreflightIsRejected 測試第二次 Run 不送 SQL。一次一批，結果與 state 查明後才確認 bytes；目前batch可能部分生效，分開成功、失敗與未知批次。
 - [ ] **Step 3: 實作 native batch role／state gate 及 EOF。** native LOB initialization／assemble／commit 任一 error fatal，即使 XACT_STATE0；普通batch遇錯也查已初始化 native state。每個走到 EOF 的作業都查交易、identity、digest、LOB唯一state／Failed0／Consumed1／Sequence=ConsumedThrough，包含 skip／DataOnly；pending／missing／wrongjob 不得 amber完成。無錯 NativeSchema 才逐表 COUNT_BIG 對 footer tables／rows，核對可取消。
 - [ ] **Step 4: 實作取消／cleanup terminal tests。** 先 Stopping、不排下一批；Cancel10秒無回應只關本 session；cleanup10秒限時。自然 EOF 未結交易、取消在成功回應邊界、狀態查詢／COUNT_BIG／log flush 中取消、cleanup未確認都測。已失敗的原始結果不能被 cleanup exception 覆蓋；若最後 log失敗要顯示存檔未完整。
