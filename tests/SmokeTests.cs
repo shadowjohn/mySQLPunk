@@ -68,6 +68,9 @@ public static partial class SmokeTests
         Run("MSSQL export routing legacy branches", Routing_LegacyBranches, ref passed);
         Run("MSSQL export routing seed resolution", Routing_SeedResolution, ref passed);
         Run("MSSQL export routing result status", Routing_ResultStatus, ref passed);
+        Run("MSSQL export snapshot wizard default disable and radio groups", SnapshotWizard_DefaultDisableAndRadioGroups, ref passed);
+        Run("MSSQL export snapshot wizard recheck and generation", SnapshotWizard_RecheckAndGeneration, ref passed);
+        Run("MSSQL export snapshot wizard recovery and terminal status", SnapshotWizard_RecoveryAndTerminalStatus, ref passed);
         Run("MSSQL export wizard selection", Wizard_Selection, ref passed);
         Run("MSSQL export wizard preflight", Wizard_Preflight, ref passed);
         Run("MSSQL export wizard issues scope and duration", Wizard_IssueScopeAndDuration, ref passed);

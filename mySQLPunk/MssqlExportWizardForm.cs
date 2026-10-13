@@ -22,6 +22,10 @@ namespace mySQLPunk
         private readonly Panel[] pages = new Panel[4];
         private readonly TextBox search = new TextBox(), output = new TextBox();
         private readonly DataGridView tables = new DataGridView(), queue = new DataGridView();
+        private readonly RadioButton snapshotYes = new RadioButton(), snapshotNo = new RadioButton();
+        private readonly Label snapshotReason = new Label(), snapshotWarning = new Label(), recoveryNotices = new Label();
+        private MssqlSnapshotCapability snapshotCapability;
+        private int snapshotState = -1;
         private readonly CheckBox views = new CheckBox();
         private readonly RadioButton schemaData = new RadioButton(), schemaOnly = new RadioButton(), dataOnly = new RadioButton();
         private readonly Label steps = new Label(), status = new Label(), selection = new Label(), confirmation = new Label();
@@ -168,13 +172,23 @@ namespace mySQLPunk
             Configure(retry, "mssqlRetry", T("重新檢查", "Recheck"), async (s, e) =>
             {
                 if (busy || closing) return;
-                if (step == 0 && !loaded) await LoadAsync();
+                if (step == 1 || (step == 0 && !loaded)) await LoadAsync();
                 else if (step == 2) await PreflightAsync();
             });
             Configure(openFile, "mssqlOpenFile", T("開啟檔案", "Open file"), (s, e) => Open(Result?.PublishedPath));
             Configure(openFolder, "mssqlOpenFolder", T("開啟資料夾", "Open folder"), (s, e) => Open(Result?.PublishedPath == null ? null : Path.GetDirectoryName(Result.PublishedPath)));
             footer.Controls.AddRange(new Control[] { cancel, next, back, retry, openFolder, openFile });
             root.Controls.Add(footer, 0, 3);
+            ClientSizeChanged += (s, e) => {
+                if (ClientSize.Width >= 800 && ClientSize.Height >= 600) return;
+                root.Padding = new Padding(12);
+                foreach (Control control in header.Controls) control.Margin = new Padding(0, 3, 0, 6);
+                foreach (var button in new[] { cancel, next, back, retry, openFolder, openFile }) {
+                    button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+                    button.MinimumSize = new Size(85, 32);
+                    button.Margin = new Padding(3);
+                }
+            };
             ThemeManager.MarkAsPrimary(next);
             AcceptButton = next;
             CancelButton = cancel;
@@ -382,6 +396,7 @@ namespace mySQLPunk
                     views.Enabled = !dataOnly.Checked;
                     if (dataOnly.Checked)
                         views.Checked = false;
+                    UpdateSnapshotOptions();
                     InvalidateRequest();
                     UpdateButtons();
                 };
@@ -398,6 +413,17 @@ namespace mySQLPunk
             };
             content.Controls.Add(views);
             radios[(int)options.Mode].Checked = true;
+            content.Controls.Add(Label(T("使用 SNAPSHOT 一致性讀取", "Use SNAPSHOT consistent read"), UiKit.Subtitle));
+            var snapshotOptions = new FlowLayoutPanel { Name = "mssqlSnapshotOptions", AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+            snapshotYes.Name = "mssqlSnapshotYes"; snapshotYes.Text = T("是", "Yes"); snapshotYes.AutoSize = true;
+            snapshotNo.Name = "mssqlSnapshotNo"; snapshotNo.Text = T("否（一般讀取）", "No (ordinary read)"); snapshotNo.AutoSize = true; snapshotNo.Checked = true;
+            snapshotOptions.Controls.AddRange(new Control[] { snapshotYes, snapshotNo }); content.Controls.Add(snapshotOptions);
+            snapshotYes.CheckedChanged += (s, e) => { InvalidateRequest(); UpdateSnapshotOptions(); UpdateButtons(); };
+            snapshotNo.CheckedChanged += (s, e) => { InvalidateRequest(); UpdateButtons(); };
+            foreach (var label in new[] { snapshotReason, snapshotWarning, recoveryNotices }) { label.AutoSize = true; label.MaximumSize = new Size(520, 0); content.Controls.Add(label); }
+            snapshotReason.Name = "mssqlSnapshotReason"; snapshotWarning.Name = "mssqlSnapshotWarning"; recoveryNotices.Name = "mssqlRecoveryNotices";
+            pages[1].SizeChanged += (s, e) => { foreach (var label in new[] { snapshotReason, snapshotWarning, recoveryNotices }) label.MaximumSize = new Size(Math.Max(120, Math.Min(700, pages[1].ClientSize.Width - 32)), 0); };
+            UpdateSnapshotOptions();
             content.Controls.Add(Label(T("SQL 輸出路徑", "SQL output path")));
             var path = new FlowLayoutPanel
             {
@@ -606,7 +632,7 @@ namespace mySQLPunk
             selection.Text = T("已選取 ", "Selected ") + selected.Count + " / " + catalog.Count;
             back.Visible = step > 0 && step < 3;
             back.Enabled = !busy;
-            retry.Visible = step == 2 || (step == 0 && !loaded);
+            retry.Visible = step == 1 || step == 2 || (step == 0 && !loaded);
             retry.Enabled = !busy && !closing;
             retry.Text = step == 0 ? T("重試讀取目錄", "Retry catalog") : T("重新檢查", "Recheck");
             retry.AccessibleName = retry.Text;
@@ -657,6 +683,9 @@ namespace mySQLPunk
                 cancellation.Token.ThrowIfCancellationRequested();
                 if (closing || cancelRequested || cancellation.IsCancellationRequested || version != generation)
                     return;
+                snapshotCapability = value.SnapshotCapability; snapshotState = value.SnapshotState;
+                UpdateSnapshotOptions();
+                RenderRecoveryNotices(service.LoadRecoveryNotices(snapshotCapability?.Identity));
                 catalog = value.Tables;
                 selected.Clear();
                 if (catalogInitialized)
@@ -705,6 +734,7 @@ namespace mySQLPunk
             var keys = catalog.Where(t => selected.Contains(t.Key.ObjectId)).Select(t => t.Key).ToList().AsReadOnly();
             var mode = Mode;
             var include = views.Checked;
+            bool useSnapshot = mode != MssqlExportMode.SchemaOnly && snapshotYes.Checked;
             var path = output.Text;
             BeginOperation();
             confirmation.Text = T("正在捕獲目的檔案狀態並預檢…", "Capturing destination and checking preflight…");
@@ -720,17 +750,20 @@ namespace mySQLPunk
                     return;
                 }
 
-                var request = new MssqlExportRequest(Guid.NewGuid(), database, keys, mode, include, path, stamp, options.Mirror);
+                var request = new MssqlExportRequest(Guid.NewGuid(), database, keys, mode, include, path, stamp, options.Mirror, useSnapshot);
                 var check = await Task.Run(() => service.Preflight(request, cancellation.Token));
                 cancellation.Token.ThrowIfCancellationRequested();
                 if (closing || cancelRequested || cancellation.IsCancellationRequested || version != generation)
                     return;
                 includedViews = check.Schema.Views.Count;
-                confirmation.Text = T("SQL 邏輯匯出；不包含登入帳號、作業、原生備份。", "Logical SQL export; excludes logins, jobs and native backups.") + "\r\n\r\n" + keys.Count + T(" 張資料表", " tables") + " · " + ModeText(mode) + "\r\n" + request.TargetPath + "\r\n" + (options.Mirror == null ? T("鏡像：未啟用", "Mirror: disabled") : T("鏡像：", "Mirror: ") + options.Mirror.Directory) + "\r\n" + (mode == MssqlExportMode.SchemaOnly ? T("僅結構：不開啟資料快照交易。", "Schema only: no data snapshot transaction.") : "SNAPSHOT: " + MssqlSnapshotState.Describe(check.SnapshotState) + T("；全部資料使用同一交易。", "; all data uses one transaction.")) + "\r\n" + ViewScope(mode, include, check.Schema.Views.Count) + "\r\n" + T("計算欄位與 rowversion 值由目標重新產生。", "Computed and rowversion values are regenerated by the target.") + (mode == MssqlExportMode.SchemaOnly ? "" : "\r\n" + T("長時間 SNAPSHOT 可能增加來源 version store 使用量。", "Long SNAPSHOT exports may increase source version-store usage.")) + "\r\n\r\n" + string.Join("\r\n", check.Issues.Select(FormatIssue));
-                if (mode != MssqlExportMode.SchemaOnly && check.SnapshotState != 1)
-                    confirmation.Text += "\r\n" + T("含資料匯出需要 ALLOW_SNAPSHOT_ISOLATION ON；請 DBA 評估設定，若正在轉換則完成後重新檢查。也可返回改選僅結構。程式不變更資料庫設定；已為 ON 時不需要 ALTER 權限。", "Data export requires ALLOW_SNAPSHOT_ISOLATION ON. Ask the DBA to review the setting; if transitioning, recheck after it completes. You may go back and choose schema only. The exporter does not change database settings; ALTER permission is not required when already ON.");
-                if (check.CanStart && (mode == MssqlExportMode.SchemaOnly || check.SnapshotState == 1))
-                    prepared = request;
+                snapshotCapability = check.SnapshotCapability; snapshotState = check.SnapshotState;
+                bool declined = useSnapshot && (snapshotCapability == null || !snapshotCapability.CanManage);
+                UpdateSnapshotOptions();
+                RenderRecoveryNotices(service.LoadRecoveryNotices(snapshotCapability?.Identity));
+                confirmation.Text = T("SQL 邏輯匯出；不包含登入帳號、作業、原生備份。", "Logical SQL export; excludes logins, jobs and native backups.") + "\r\n\r\n" + keys.Count + T(" 張資料表", " tables") + " · " + ModeText(mode) + "\r\n" + request.TargetPath + "\r\n" + (options.Mirror == null ? T("鏡像：未啟用", "Mirror: disabled") : T("鏡像：", "Mirror: ") + options.Mirror.Directory) + "\r\n" + ReadModeText(mode, useSnapshot && !declined) + "\r\nSNAPSHOT: " + MssqlSnapshotState.Describe(check.SnapshotState) + "\r\n" + ViewScope(mode, include, check.Schema.Views.Count) + "\r\n" + T("計算欄位與 rowversion 值由目標重新產生。", "Computed and rowversion values are regenerated by the target.") + "\r\n\r\n" + string.Join("\r\n", check.Issues.Select(FormatIssue));
+                if (declined)
+                    confirmation.Text += "\r\n" + T("SNAPSHOT 能力已變更，已改為否（一般讀取）。請重新檢查並確認一般讀取警語後開始。", "SNAPSHOT capability changed; switched to No (ordinary read). Recheck and review the ordinary-read warning before starting.");
+                if (check.CanStart && !declined) prepared = request;
                 status.Text = prepared != null ? T("預檢通過；開始時會再次檢查來源。", "Preflight passed; source is checked again at start.") : T("預檢未通過，無法開始。", "Preflight failed; start is blocked.");
             }
             catch (OperationCanceledException)
@@ -794,7 +827,7 @@ namespace mySQLPunk
             UpdateButtons();
             var progress = new Progress<MssqlExportProgress>(p =>
             {
-                if (!IsDisposed && !closing && busy && exporting && version == generation && p.JobId == request.JobId)
+                if (!IsDisposed && busy && exporting && version == generation && p.JobId == request.JobId)
                     RenderProgress(p);
             });
             try
@@ -804,13 +837,13 @@ namespace mySQLPunk
                 {
                     Result = result;
                     stage.Text = StageText(result.Stage);
-                    status.Text = StageText(result.Stage);
+                    status.Text = StageText(result.Stage) + (result.SnapshotCleanup?.State == MssqlSnapshotCleanupState.Unconfirmed ? T("；警告：資料庫設定尚未確認恢復。", "; warning: database setting restoration is unconfirmed.") : "");
                     foreach (DataGridViewRow row in queue.Rows)
                     {
                         bool done = processed.Contains((int)row.Tag) || result.RowCounts.Any(r => r.Key.ObjectId == (int)row.Tag) || result.Stage == MssqlExportStage.Completed;
                         row.Cells[2].Value = done ? T("已處理", "Processed") : result.Stage == MssqlExportStage.Canceled ? T("已取消", "Canceled") : T("未完成", "Incomplete");
                     }
-                    resultText.Text = T("已完成資料表：", "Completed tables: ") + (result.Stage == MssqlExportStage.Completed ? request.Tables.Count : Math.Max(processed.Count, result.RowCounts.Count)) + " / " + request.Tables.Count + T("；匯出列數：", "; exported rows: ") + result.RowCounts.Sum(r => r.Rows).ToString("N0") + "\r\n" + ViewScope(request.Mode, request.IncludeViews, includedViews) + "\r\n" + T("計算欄位與 rowversion 值由目標重新產生。", "Computed and rowversion values are regenerated by the target.") + (request.Mode == MssqlExportMode.SchemaOnly ? "" : "\r\n" + T("長時間 SNAPSHOT 可能增加來源 version store 使用量。", "Long SNAPSHOT exports may increase source version-store usage.")) + "\r\n" + (result.PublishedPath == null ? T("沒有已發布的本機檔案。", "No local file was published.") : T("已發布：", "Published: ") + result.PublishedPath) + "\r\n" + (result.MirrorPath ?? "") + "\r\n" + string.Join("\r\n", result.Warnings.Concat(result.ResidualPaths)) + "\r\n" + (result.ErrorMessage ?? "") + "\r\n" + T("檔案驗證不等同還原驗收。請使用支援此檔案大小的客戶端，以 UTF-8、停用變數替代、遇錯停止，於同一工作階段還原。詳見 docs/MSSQL_SQL_EXPORT.md。", "File verification is not restore acceptance. Use a client supporting this file size: UTF-8, variable substitution disabled, stop on error, and one restore session. See docs/MSSQL_SQL_EXPORT.md.");
+                    resultText.Text = T("已完成資料表：", "Completed tables: ") + (result.Stage == MssqlExportStage.Completed ? request.Tables.Count : Math.Max(processed.Count, result.RowCounts.Count)) + " / " + request.Tables.Count + T("；匯出列數：", "; exported rows: ") + result.RowCounts.Sum(r => r.Rows).ToString("N0") + "\r\n" + ViewScope(request.Mode, request.IncludeViews, includedViews) + "\r\n" + T("計算欄位與 rowversion 值由目標重新產生。", "Computed and rowversion values are regenerated by the target.") + "\r\n" + ReadModeText(request.Mode, request.UseSnapshot) + CleanupText(result.SnapshotCleanup) + "\r\n" + (result.PublishedPath == null ? T("沒有已發布的本機檔案。", "No local file was published.") : T("已發布：", "Published: ") + result.PublishedPath) + "\r\n" + (result.MirrorPath ?? "") + "\r\n" + string.Join("\r\n", result.Warnings.Concat(result.ResidualPaths)) + "\r\n" + (result.ErrorMessage ?? "") + "\r\n" + T("檔案驗證不等同還原驗收。請使用支援此檔案大小的客戶端，以 UTF-8、停用變數替代、遇錯停止，於同一工作階段還原。詳見 docs/MSSQL_SQL_EXPORT.md。", "File verification is not restore acceptance. Use a client supporting this file size: UTF-8, variable substitution disabled, stop on error, and one restore session. See docs/MSSQL_SQL_EXPORT.md.");
                     if (result.Stage == MssqlExportStage.Completed)
                     {
                         overall.Style = ProgressBarStyle.Continuous;
@@ -838,8 +871,8 @@ namespace mySQLPunk
             if (last?.CurrentTable != null && p.CompletedTables > last.CompletedTables)
                 processed.Add(last.CurrentTable.ObjectId);
             last = p;
-            stage.Text = cancelRequested ? StageText(MssqlExportStage.CancelRequested) : StageText(p.Stage);
-            if (!cancelRequested)
+            stage.Text = cancelRequested && p.Stage != MssqlExportStage.RestoringSnapshot ? StageText(MssqlExportStage.CancelRequested) : StageText(p.Stage);
+            if (!cancelRequested || p.Stage == MssqlExportStage.RestoringSnapshot)
                 status.Text = stage.Text;
             current.Text = p.CurrentTable == null ? "" : p.CurrentTable.Schema + "." + p.CurrentTable.Name;
             percent.Text = p.Percent.HasValue ? T("估計 ", "Estimated ") + Math.Min(99, p.Percent.Value).ToString("0") + "%" : T("估算中", "Estimating");
@@ -936,6 +969,10 @@ namespace mySQLPunk
         {
             switch (value)
             {
+                case MssqlExportStage.EnablingSnapshot:
+                    return T("啟用 SNAPSHOT（最多等待 60 秒）", "Enabling SNAPSHOT (up to 60 seconds)");
+                case MssqlExportStage.RestoringSnapshot:
+                    return T("恢復 SNAPSHOT 資料庫設定（最多等待 30 秒）", "Restoring SNAPSHOT database setting (up to 30 seconds)");
                 case MssqlExportStage.Preflight:
                     return T("準備與預檢", "Preparing and checking");
                 case MssqlExportStage.Schema:
@@ -959,6 +996,47 @@ namespace mySQLPunk
                 default:
                     return T("匯出失敗", "Export failed");
             }
+        }
+
+        private static string OrdinaryWarning() => T(MssqlSqlExportService.OrdinaryReadWarning, "Ordinary read (READ COMMITTED): rows may come from different times. Concurrent source writes can produce inconsistent relationships and foreign-key restore failures. File verification is not restore acceptance.");
+        private static string ReadModeText(MssqlExportMode mode, bool useSnapshot) => mode == MssqlExportMode.SchemaOnly ? T("僅結構：不開資料交易、不改 SNAPSHOT 設定。", "Schema only: no data transaction or SNAPSHOT setting changes.") : useSnapshot ? T("SNAPSHOT：全部資料使用同一快照交易。需要 ALTER；必要時暫時變更整個資料庫設定，結束後嘗試恢復原狀；原本 ON 保持 ON。其他程式同時使用可能互相影響；長時間匯出可能增加 version store。", "SNAPSHOT: all data uses one snapshot transaction. Requires ALTER; may temporarily change the whole database setting and attempt restoration afterward; originally ON stays ON. Other programs may be affected and long exports may increase version-store usage.") : OrdinaryWarning();
+        private void UpdateSnapshotOptions()
+        {
+            bool enabled = !schemaOnly.Checked && snapshotCapability != null && snapshotCapability.CanManage;
+            snapshotYes.Enabled = snapshotNo.Enabled = enabled;
+            if (!enabled) snapshotNo.Checked = true;
+            string reason = schemaOnly.Checked ? T("僅結構，不使用資料快照。", "Schema only; no data snapshot.") : snapshotCapability == null ? T("能力未知，固定一般讀取。", "Capability unknown; ordinary read required.") : snapshotCapability.CanManage ? T("可用；預設一般讀取。", "Available; ordinary read is the default.") : T("SNAPSHOT 管理不可用，固定一般讀取：", "SNAPSHOT management unavailable; ordinary read required: ") + CapabilityReason(snapshotCapability.UnavailableReason);
+            snapshotReason.Text = "SNAPSHOT: " + MssqlSnapshotState.Describe(snapshotState) + " · " + reason;
+            snapshotWarning.Text = ReadModeText(schemaOnly.Checked ? MssqlExportMode.SchemaOnly : MssqlExportMode.SchemaAndData, snapshotYes.Checked);
+        }
+        private static string CapabilityReason(MssqlSnapshotUnavailableReason reason)
+        {
+            switch (reason) {
+                case MssqlSnapshotUnavailableReason.IdentityUnknown: return T("來源資料庫識別未知。", "Source database identity is unknown.");
+                case MssqlSnapshotUnavailableReason.StateUnavailable: return T("設定正在轉換或狀態未知；可重新檢查。", "Setting is transitioning or unknown; recheck is available.");
+                case MssqlSnapshotUnavailableReason.AlterUnknown: return T("無法確認 ALTER 權限。", "ALTER permission could not be confirmed.");
+                case MssqlSnapshotUnavailableReason.AlterDenied: return T("沒有 ALTER 權限（即使原本 ON 也停用此管理選項）。", "ALTER permission is missing (management is disabled even when already ON).");
+                case MssqlSnapshotUnavailableReason.UpdateabilityUnknown: return T("無法確認資料庫可變更設定。", "Database updateability could not be confirmed.");
+                case MssqlSnapshotUnavailableReason.ReadOnly: return T("資料庫無法變更設定。", "Database settings cannot be changed.");
+                default: return "";
+            }
+        }
+        private void RenderRecoveryNotices(IReadOnlyList<MssqlSnapshotRecoveryNotice> notices)
+        {
+            var identity = snapshotCapability?.Identity;
+            var lines = new List<string>();
+            foreach (var notice in notices ?? new MssqlSnapshotRecoveryNotice[0]) {
+                var record = notice.Record;
+                if (record == null) { lines.Add(T("本機復原紀錄無法完整讀取：", "Local recovery records could not be fully read: ") + notice.ReadError + " · " + notice.Path); continue; }
+                string match = identity == null || !identity.IsComplete ? "IdentityUnknown" : identity.DatabaseId != record.Identity.DatabaseId || identity.DatabaseCreateDate != record.Identity.DatabaseCreateDate || identity.ServerName != record.Identity.ServerName || identity.DatabaseName != record.Identity.DatabaseName ? "IdentityChanged" : "IdentityMatched";
+                lines.Add("[" + match + "] " + record.Identity.ServerName + " / " + record.Identity.DatabaseName + " · id=" + record.Identity.DatabaseId + " · created=" + record.Identity.DatabaseCreateDate.ToString("O") + " · original=" + MssqlSnapshotState.Describe(record.OriginalState) + " · " + record.Phase + " · " + record.NoticeCode + " · SNAPSHOT=" + (record.ObservedState.HasValue ? MssqlSnapshotState.Describe(record.ObservedState.Value) : "UNKNOWN") + " · " + record.UpdatedUtc.ToString("u") + " · " + notice.Path);
+            }
+            recoveryNotices.Text = lines.Count == 0 ? "" : T("待人工確認的本機復原紀錄（歷史識別可能不同或未知；不自動修復或刪除）：", "Local recovery records requiring manual review (historical identity may differ or be unknown; no automatic repair or deletion): ") + "\r\n" + string.Join("\r\n", lines) + "\r\n" + T("請 DBA 核對原生伺服器、DB ID 與 create_date，再唯讀查詢：", "Ask the DBA to verify native server, database ID and create_date, then inspect read-only: ") + "SELECT name, database_id, create_date, snapshot_isolation_state_desc FROM sys.databases;";
+        }
+        internal static string CleanupText(MssqlSnapshotCleanupResult cleanup)
+        {
+            if (cleanup == null) return "";
+            return "\r\n" + T("資料庫設定復原：", "Database setting cleanup: ") + cleanup.State + (cleanup.State == MssqlSnapshotCleanupState.Unconfirmed ? T("；尚未確認恢復，請人工核對。", "; restoration is unconfirmed; manual review required.") : "") + " · SNAPSHOT=" + (cleanup.ObservedState.HasValue ? MssqlSnapshotState.Describe(cleanup.ObservedState.Value) : "UNKNOWN") + " · " + cleanup.WarningCode + " · " + cleanup.RecoveryRecordPath;
         }
 
         private void Open(string path)

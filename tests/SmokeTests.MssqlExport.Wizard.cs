@@ -10,6 +10,76 @@ using mySQLPunk.lib.MssqlExport;
 
 public static partial class SmokeTests
 {
+    private static MssqlSnapshotIdentity WIdentity() => new MssqlSnapshotIdentity("fixture-server", "fixture_db", 7, new DateTime(2020, 1, 1));
+    private static void SnapshotWizard_DefaultDisableAndRadioGroups()
+    {
+        foreach (var capability in new[] { new MssqlSnapshotCapability(WIdentity(), 0, true, true), new MssqlSnapshotCapability(WIdentity(), 1, false, true), new MssqlSnapshotCapability(WIdentity(), 1, null, true), new MssqlSnapshotCapability(WIdentity(), 3, true, true), null })
+        using (var form = WForm(new WizardService { CapabilityOverride = capability }, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"))) {
+            form.Show(); WPump(() => WControl<Button>(form, "mssqlStart").Enabled); WClick(form, "mssqlStart");
+            var yes = WControl<RadioButton>(form, "mssqlSnapshotYes"); var no = WControl<RadioButton>(form, "mssqlSnapshotNo");
+            Assert(no.Checked && !yes.Checked && yes.Enabled == (capability != null && capability.CanManage), "New wizard defaults No and gates capability");
+            Assert(yes.Parent.Name == "mssqlSnapshotOptions" && yes.Parent != WControl<RadioButton>(form, "mssqlSchemaAndData").Parent, "Independent radio groups");
+            if (yes.Enabled) { yes.Checked = true; Assert(WControl<RadioButton>(form, "mssqlSchemaAndData").Checked, "Snapshot Yes preserves export mode"); }
+            WControl<RadioButton>(form, "mssqlSchemaOnly").Checked = true;
+            Assert(no.Checked && !yes.Enabled, "SchemaOnly forces No");
+            WControl<RadioButton>(form, "mssqlDataOnly").Checked = true; Assert(no.Checked, "Returning to data never restores Yes");
+            WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+            Assert(WControl<Button>(form, "mssqlStart").Enabled, "Ordinary mode is not blocked by snapshot state or capability");
+            form.Close();
+        }
+    }
+    private static void SnapshotWizard_RecheckAndGeneration()
+    {
+        var service = new WizardService { CapabilityOverride = new MssqlSnapshotCapability(WIdentity(), 0, true, true) };
+        using (var form = WForm(service, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"))) {
+            form.Show(); WPump(() => WControl<Button>(form, "mssqlStart").Enabled); WClick(form, "mssqlStart");
+            WControl<RadioButton>(form, "mssqlDataOnly").Checked = true;
+            WClick(form, "mssqlRetry"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+            Assert(WControl<RadioButton>(form, "mssqlDataOnly").Checked && WControl<DataGridView>(form, "mssqlTableList").Rows.Count == 2, "Settings capability reload preserves mode and catalog selection");
+            WControl<RadioButton>(form, "mssqlSnapshotYes").Checked = true; WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+            Assert(service.Seen.UseSnapshot, "Immutable request captures Yes");
+            service.CapabilityOverride = new MssqlSnapshotCapability(WIdentity(), 1, false, true); WClick(form, "mssqlRetry"); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+            Assert(WControl<RadioButton>(form, "mssqlSnapshotNo").Checked && !WControl<Button>(form, "mssqlStart").Enabled, "Capability decline clears prepared Yes and requires another review");
+            WClick(form, "mssqlRetry"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled); Assert(!service.Seen.UseSnapshot, "Fresh review captures ordinary mode");
+            service.BlockPreflight = true; WClick(form, "mssqlRetry"); WPump(() => service.Inspecting);
+            WControl<TextBox>(form, "mssqlOutputPath").Text += ".changed"; service.Release.Set(); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+            Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Stale capability response cannot prepare request"); form.Close();
+        }
+    }
+    private static void SnapshotWizard_RecoveryAndTerminalStatus()
+    {
+        foreach (string theme in new[] { "light", "dark" }) {
+        ThemeManager.SetTheme(theme, false);
+        var record = new MssqlSnapshotRecoveryRecord(Guid.NewGuid(), new MssqlSnapshotIdentity("fixture-server", "fixture_db", 8, new DateTime(2021,1,1)), 0, MssqlSnapshotRecoveryPhase.Unconfirmed, 3, DateTime.UtcNow, MssqlSnapshotRecoveryCode.RestoreUnconfirmed);
+        var service = new WizardService { CapabilityOverride = new MssqlSnapshotCapability(WIdentity(), 0, true, true), Notices = new[] { new MssqlSnapshotRecoveryNotice(record, "fixture-only.json", MssqlSnapshotRecoveryReadError.None), new MssqlSnapshotRecoveryNotice(null, null, MssqlSnapshotRecoveryReadError.Overflow) }, Block = true, Cleanup = new MssqlSnapshotCleanupResult(MssqlSnapshotCleanupState.Unconfirmed, 3, "fixture-only.json", "RestoreUnconfirmed") };
+        using (var form = WForm(service, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"))) {
+            form.Show(); WPump(() => WControl<Button>(form, "mssqlStart").Enabled); WClick(form, "mssqlStart");
+            WSaveRender(form, "snapshot-full-output-" + theme);
+            string notices = WControl<Label>(form, "mssqlRecoveryNotices").Text;
+            AssertContains(notices, "IdentityChanged", "Historical same-name database is explicitly distinguished"); AssertContains(notices, "Overflow", "Unreadable/overflow journals are surfaced"); AssertContains(notices, "sys.databases", "Manual read-only inspection guidance");
+            WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled); WClick(form, "mssqlStart"); WPump(() => service.Exporting);
+            WClick(form, "mssqlCancel"); WPump(() => service.Canceled);
+            service.Progress.Report(new MssqlExportProgress(service.Seen.JobId, MssqlExportStage.RestoringSnapshot, null, 0, 0, 0, 0, 0, null, null, 0, 2, TimeSpan.Zero, TimeSpan.Zero, null, null, null, MssqlExportEstimationState.Measuring, 0, null, "restoring"));
+            WPump(() => WControl<Label>(form, "mssqlStage").Text.Contains("SNAPSHOT"));
+            service.Release.Set(); WPump(() => form.Result != null); AssertContains(WControl<Label>(form, "mssqlResult").Text, "Unconfirmed", "Result exposes cleanup independently of cancellation"); WSaveRender(form, "snapshot-full-canceled-unconfirmed-" + theme);
+            WControl<Panel>(form, "mssqlStep3").AutoScrollPosition = new System.Drawing.Point(0, WControl<Panel>(form, "mssqlStep3").Controls[0].Height); WSaveRender(form, "snapshot-full-cleanup-detail-" + theme);
+            var resultLabel = WControl<Label>(form, "mssqlResult"); var resultPage = WControl<Panel>(form, "mssqlStep3");
+            Assert(resultPage.ClientRectangle.IntersectsWith(new System.Drawing.Rectangle(resultPage.PointToClient(resultLabel.PointToScreen(System.Drawing.Point.Empty)), resultLabel.Size)), "Cleanup details are reachable by native scrolling"); form.Close();
+        }
+        }
+        ThemeManager.SetTheme("light", false);
+        Routing_ResultStatus();
+    }
+    private static void WSaveRender(Form form, string name)
+    {
+        string root = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_RENDER_DIR");
+        if (string.IsNullOrWhiteSpace(root)) return;
+        Directory.CreateDirectory(root); Application.DoEvents();
+        using (var bitmap = new System.Drawing.Bitmap(form.Width, form.Height)) {
+            form.DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, form.Width, form.Height));
+            bitmap.Save(Path.Combine(root, name + ".png"));
+        }
+    }
     private static void Diagnostic_WizardSnapshot()
     {
         foreach (int state in new[] { 0, 1, 2, 3, 9 })
@@ -19,7 +89,7 @@ public static partial class SmokeTests
             string text = WControl<Label>(form, "mssqlConfirmation").Text;
             string expected = state == 0 ? "OFF (0)" : state == 1 ? "ON (1)" : state == 2 ? "IN_TRANSITION_TO_OFF (2)" : state == 3 ? "IN_TRANSITION_TO_ON (3)" : "UNKNOWN (9)";
             AssertContains(text, expected, "Confirmation reports exact source state instead of treating transitions as OFF");
-            Assert(WControl<Button>(form, "mssqlStart").Enabled == (state == 1), "Non-ON states cannot prepare a data export");
+            Assert(WControl<Button>(form, "mssqlStart").Enabled, "Ordinary mode permits OFF, transitions and unknown snapshot states");
             form.Close();
         }
     }
@@ -142,6 +212,10 @@ public static partial class SmokeTests
         internal int UiThread, CatalogThread, PreflightThread, CatalogCalls, PreflightCalls;
         internal Exception CatalogFailure, PreflightFailure;
         internal int? SnapshotOverride;
+        internal MssqlSnapshotCapability CapabilityOverride;
+        internal MssqlSnapshotCleanupResult Cleanup;
+        internal IReadOnlyList<MssqlSnapshotRecoveryNotice> Notices = new MssqlSnapshotRecoveryNotice[0];
+        internal override IReadOnlyList<MssqlSnapshotRecoveryNotice> LoadRecoveryNotices(MssqlSnapshotIdentity identity) => Notices;
         internal bool IgnoreInspectionCancellation;
         internal WizardService() : base(() =>
         {
@@ -163,7 +237,7 @@ public static partial class SmokeTests
             if (CatalogFailure != null) throw CatalogFailure;
             if (BlockCatalog)
                 WaitInspection(token);
-            return new MssqlExportCatalog(CatalogOverride ?? new[] { Table(1, "dbo", "訂單主檔"), Table(2, "sales", "long comment searchable 測試搜尋") }, 1, null);
+            return new MssqlExportCatalog(CatalogOverride ?? new[] { Table(1, "dbo", "訂單主檔"), Table(2, "sales", "long comment searchable 測試搜尋") }, CapabilityOverride?.State ?? 1, null, CapabilityOverride);
         }
 
         internal override MssqlExportPreflight Preflight(MssqlExportRequest request, CancellationToken token)
@@ -175,7 +249,7 @@ public static partial class SmokeTests
                 WaitInspection(token);
             Seen = request;
             if (SnapshotOverride.HasValue) return new MssqlExportPreflight(new MssqlExportSchema(request.Tables.Select(k => Table(k.ObjectId, k.Schema, "")), null, null, SnapshotOverride.Value, null), null);
-            return new MssqlExportPreflight(new MssqlExportSchema(request.Tables.Select(k => Table(k.ObjectId, k.Schema, "")), null, null, Deny ? 0 : 1, null), IssueOverride ?? (Deny ? new[] { new MssqlExportIssue("snapshot", null, null, "SNAPSHOT unavailable") } : null));
+            return new MssqlExportPreflight(new MssqlExportSchema(request.Tables.Select(k => Table(k.ObjectId, k.Schema, "")), null, null, CapabilityOverride?.State ?? (Deny ? 0 : 1), null, null, CapabilityOverride), IssueOverride ?? (Deny ? new[] { new MssqlExportIssue("snapshot", null, null, "Required metadata unavailable") } : null));
         }
 
         internal override MssqlExportResult Export(MssqlExportRequest request, IProgress<MssqlExportProgress> progress, CancellationToken token)
@@ -199,7 +273,7 @@ public static partial class SmokeTests
                 Release.Wait();
             }
 
-            return new MssqlExportResult(request.JobId, token.IsCancellationRequested ? MssqlExportStage.Canceled : MssqlExportStage.Completed, null, null, null, TimeSpan.FromSeconds(2), null, null, null);
+            return new MssqlExportResult(request.JobId, token.IsCancellationRequested ? MssqlExportStage.Canceled : MssqlExportStage.Completed, null, null, null, TimeSpan.FromSeconds(2), null, null, null, request.UseSnapshot, Cleanup);
         }
 
         private void WaitInspection(CancellationToken token)
@@ -291,7 +365,7 @@ public static partial class SmokeTests
             WControl<RadioButton>(form, "mssqlSchemaOnly").Checked = true;
             Assert(WControl<CheckBox>(form, "mssqlIncludeViews").Enabled, "Schema mode restores views availability");
             WClick(form, "mssqlStart");
-            WPump(() => WControl<Button>(form, "mssqlBack").Enabled && WControl<Label>(form, "mssqlConfirmation").Text.Contains("SNAPSHOT unavailable"));
+            WPump(() => WControl<Button>(form, "mssqlBack").Enabled && WControl<Label>(form, "mssqlConfirmation").Text.Contains("Required metadata unavailable"));
             Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Failed preflight blocks start");
             form.Close();
         }
@@ -436,9 +510,11 @@ public static partial class SmokeTests
 
     private static void Wizard_Layout()
     {
+        foreach(string theme in new[]{"light", "dark"})
         foreach(float factor in new[]{1f,1.5f,2f})
         {
-            using(var form=WForm(new WizardService(),Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".sql")))
+            ThemeManager.SetTheme(theme, false);
+            using(var form=WForm(new WizardService { CapabilityOverride = new MssqlSnapshotCapability(WIdentity(), 0, true, true) },Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".sql")))
             {
                 form.Show(); WPump(()=>WControl<Button>(form,"mssqlStart").Enabled);
                 form.Scale(new System.Drawing.SizeF(factor,factor));
@@ -451,9 +527,32 @@ public static partial class SmokeTests
                     var bounds=new System.Drawing.Rectangle(form.PointToClient(button.PointToScreen(System.Drawing.Point.Empty)),button.Size);
                     Assert(form.ClientRectangle.Contains(bounds),"Fixed footer remains reachable under layout scaling: " + factor + " / " + name + " / " + bounds + " / " + form.ClientRectangle);
                 }
+                WClick(form, "mssqlStart");
+                var page = WControl<Panel>(form, "mssqlStep1");
+                Assert(page.ClientSize.Height >= 100, "Scaled compact layout retains scrollable content area: " + factor);
+                foreach (var name in new[] { "mssqlSnapshotYes", "mssqlSnapshotNo", "mssqlSnapshotReason", "mssqlSnapshotWarning", "mssqlRecoveryNotices" }) {
+                    var control = WControl<Control>(form, name); page.ScrollControlIntoView(control); Application.DoEvents();
+                    Assert(control.Visible && control.Height > 0, "Snapshot option/readout remains reachable: " + name);
+                    Assert(control.Width <= page.ClientSize.Width, "Snapshot readout wraps within page: " + name);
+                    var bounds = new System.Drawing.Rectangle(page.PointToClient(control.PointToScreen(System.Drawing.Point.Empty)), control.Size);
+                    Assert(page.ClientRectangle.IntersectsWith(bounds), "Scrolled readout intersects content viewport: " + name);
+                    string render = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_RENDER_DIR");
+                    if (!string.IsNullOrWhiteSpace(render) && (name == "mssqlSnapshotNo" || name == "mssqlSnapshotWarning")) {
+                        Directory.CreateDirectory(render);
+                        using (var bitmap = new System.Drawing.Bitmap(form.Width, form.Height)) { form.DrawToBitmap(bitmap, new System.Drawing.Rectangle(0,0,form.Width,form.Height)); bitmap.Save(Path.Combine(render, name + "-" + theme + "-" + factor.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".png")); }
+                    }
+                }
+                string renders = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_RENDER_DIR");
+                if (!string.IsNullOrWhiteSpace(renders)) {
+                    Directory.CreateDirectory(renders); page.AutoScrollPosition = System.Drawing.Point.Empty; Application.DoEvents();
+                    using (var bitmap = new System.Drawing.Bitmap(form.Width, form.Height)) { form.DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, form.Width, form.Height)); bitmap.Save(Path.Combine(renders, "snapshot-output-" + theme + "-" + factor.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".png")); }
+                    WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+                    using (var bitmap = new System.Drawing.Bitmap(form.Width, form.Height)) { form.DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, form.Width, form.Height)); bitmap.Save(Path.Combine(renders, "snapshot-confirm-" + theme + "-" + factor.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".png")); }
+                }
                 form.Close();
             }
         }
+        ThemeManager.SetTheme("light", false);
     }
     private static void Wizard_CancelTerminal()
     {
@@ -547,7 +646,7 @@ public static partial class SmokeTests
             ThemeManager.SetTheme("dark", false);
         var service = new WizardService
         {
-            Preview = true
+            Preview = true, CapabilityOverride = new MssqlSnapshotCapability(WIdentity(), 0, true, true)
         };
         using (var form = WForm(service, Path.Combine(Path.GetTempPath(), "fixture-preview-" + Guid.NewGuid().ToString("N") + ".sql")))
         {
