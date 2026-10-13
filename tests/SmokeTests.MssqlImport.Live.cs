@@ -244,7 +244,7 @@ public static partial class SmokeTests
         }
     }
 
-    // Future fixture usage after release ONLY:
+    // Live checkpoint usage (the normal importer retains its production constructor):
     // var owned = ConnectionOpenService.OpenMssqlImportSession(explicitFixtureSettings);
     // var connection = owned.Connection; // Capture before transferring this exact lifetime.
     // var adapter = new MssqlImportSqlSession(owned,
@@ -256,7 +256,7 @@ public static partial class SmokeTests
     // cancel; release lock in finally. Actual SQL started and actual CancelCalls>0 required.
     // State/Lob: OnRead cancellation after ReaderReady proves actual probe startup and
     // adapter callback path, not prolonged server execution; label that limited boundary.
-    // Drain: cancel after selected read count (extend checkpoint to configured read number),
+    // Drain: cancel after the configured selected read count,
     // next-result callback, and held Dispose; independent DB sentinel validates no next GO.
     // Timeout: unchanged WAITFOR fixture SQL+finite SqlCommand timeout; require error -2.
     // Transport: exact transferred owner.Dispose while command active; require uncertain
@@ -516,7 +516,7 @@ GO
         }
     }
 
-    // Future Lob workflow: apply fixed setup through separate fixture connection;
+    // Lob workflow: apply fixed setup through separate fixture connection;
     // export native full, import actual SUT; independent ordered byte projections:
     // SELECT CONVERT(varbinary(max),id),b,CONVERT(varbinary(max),n),
     // CONVERT(varbinary(max),CONVERT(nvarchar(max),x)) FROM dbo.ImportLob ORDER BY id.
@@ -528,7 +528,7 @@ GO
     // Missing state / duplicate state / pending EOF mutations must preserve native
     // header/footer and inspector role; SQL-corruption preflight failure is separate.
 
-    // Future Faults workflow: new case-specific tables/targets, run actual SUT skip=false
+    // Faults workflow: new case-specific tables/targets, run actual SUT skip=false
     // then skip=true; independent SELECT proves partial id1 remains, id2 only on safe
     // skip. Full actual log must contain both RAISERROR details before allowing skip.
     // Transaction error runs both policies: rollback cleanup should leave no committed
@@ -591,7 +591,7 @@ GO
         public long FirstPrivateBytes,FirstWorkingSet,PeakPrivateBytes,PeakWorkingSet,LastPrivateBytes,LastWorkingSet,Samples;
         internal ImportDraftMemoryStage Copy() { return (ImportDraftMemoryStage)MemberwiseClone(); }
     }
-    // Future child contract:
+    // Memory child contract:
     // - Parent saves/restores MYSQLPUNK_MSSQL_IMPORT_MEMORY_SCALE as well as five required
     //   import flags+fixed smoke filter. Scale accepts only1/10, no arbitrary child command.
     // - Child repeats exact manifest/endpoint/root/ownership guards, requires IntPtr.Size=8.
@@ -653,8 +653,85 @@ GO
     // Preflight failure for create/start, worker stop for append/flush/end; verify actual
     // DB next-GO sentinel absence and status, not merely seam exception count. Available
     // log bytes/hash and rejected stream operation counts survive into failure receipt.
+    // Provider unwind precedes watchdog owner publication; the actual worker must wait
+    // only within its bounded diagnostic window and never retry the owned Dispose.
+    private static void ImportInverseReleasePublication(bool beyondWindow)
+    {
+        using(var f=new ImportWorkerFixture("SELECT 'inverse-release';\r\nGO\r\n"))
+        using(var issued=new ManualResetEventSlim())using(var providerReturn=new ManualResetEventSlim())
+        using(var ownerEntered=new ManualResetEventSlim())using(var ownerReturn=new ManualResetEventSlim())
+        using(var cleanupEntered=new ManualResetEventSlim())using(var cancel=new CancellationTokenSource()) {
+            var owner=new ImportSessionOwner{Error=DiagnosticSql(2627,50001),BeforeReturn=()=>{ownerEntered.Set();Assert(ownerReturn.Wait(5000),"Inverse owner gate bounded.");}};
+            int opens=0;MssqlImportSqlSession execution=null;
+            f.Service=new MssqlImportService(()=>{
+                bool worker=++opens==2;
+                var adapter=new MssqlImportSqlSession(worker?owner:new ImportSessionOwner(),()=>{
+                    var command=new ImportSessionCommand(null);
+                    command.Start=(behavior,token)=>{
+                        if(command.CommandText.StartsWith("SELECT CONVERT(nvarchar(128),SERVERPROPERTY",StringComparison.Ordinal))return Task.FromResult<DbDataReader>(ImportValues(ImportIdentity(1)));
+                        if(command.CommandText=="SELECT COUNT_BIG(*) FROM sys.objects WHERE is_ms_shipped=0;")return Task.FromResult<DbDataReader>(ImportValues(0L));
+                        if(command.CommandText=="DECLARE @databaseId int=DB_ID(); SELECT @databaseId,@@TRANCOUNT,XACT_STATE();")return Task.FromResult<DbDataReader>(ImportValues(7,0,0));
+                        Assert(worker&&command.CommandText.Contains("inverse-release"),"Only unchanged source batch reaches provider gate.");
+                        issued.Set();Assert(providerReturn.Wait(5000),"Inverse provider gate bounded.");
+                        return Task.FromResult<DbDataReader>(new ImportSessionReader(new[]{0},true));
+                    };return command;
+                },()=>true,40,beyondWindow?150:2000);
+                if(!worker)return (IMssqlImportSession)adapter;
+                execution=adapter;return new ImportCleanupEnteredSession(adapter,cleanupEntered);
+            },job=>new MssqlImportLog(job,f.DirectoryPath));
+            Task<MssqlImportResult> run=null;
+            try {
+                using(var pre=f.Service.Preflight(f.Request,null,CancellationToken.None)) {
+                    Assert(pre.Passed,"Inverse release actual adapter preflight passes.");
+                    run=Task.Run(()=>f.Service.Run(f.Request,pre,null,cancel.Token));
+                    Assert(issued.Wait(2000),"Inverse worker command entered.");cancel.Cancel();
+                    Assert(ownerEntered.Wait(2000),"Watchdog enters owned Dispose before provider unwind.");
+                    providerReturn.Set();Assert(cleanupEntered.Wait(2000),"Provider unwinds first and actual worker enters Cleanup.");
+                    if(!beyondWindow) {
+                        Assert(!run.Wait(75),"Final worker log cannot precede an in-window owner publication.");
+                        ownerReturn.Set();Assert(run.Wait(3000),"Worker completes after delivered owner details.");
+                    }else Assert(run.Wait(2000),"Pending owner cannot hold final worker beyond bounded cleanup wait.");
+                    var result=run.Result;
+                    Assert(result.Status==MssqlImportStatus.CleanupUncertain&&result.Cleanup.CommandEnded&&!result.Cleanup.SessionReleased&&!result.Cleanup.TransactionCleanupConfirmed,
+                        "Inverse cancellation preserves command acknowledgement and uncertain release/rollback truth.");
+                    string log=File.ReadAllText(result.LogPath);
+                    if(!beyondWindow) {
+                        Assert(result.Cleanup.Errors.Select(x=>x.Number).SequenceEqual(new[]{2627,50001}),"In-window inverse publication retains both typed SqlError details.");
+                        foreach(int code in new[]{2627,50001})Assert(log.Split(new[]{"Number="+code+" "},StringSplitOptions.None).Length==2,"Actual worker log records delivered owner error exactly once.");
+                        Assert(log.IndexOf("Origin=Cleanup",StringComparison.Ordinal)<log.IndexOf("EndUtc=",StringComparison.Ordinal),"Inverse cleanup diagnostics precede terminal record.");
+                    }else {
+                        Assert(result.Cleanup.Errors.Count==0&&result.Cleanup.IssueCode.Contains("SessionReleasePending")&&log.Contains("SessionReleasePending"),"Expired release window is explicitly pending, not confirmed or silently complete.");
+                        ownerReturn.Set();
+                        var completed=typeof(MssqlImportSqlSession).GetField("releaseCompleted",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
+                        Assert(completed!=null&&SpinWait.SpinUntil(()=>{var publication=typeof(MssqlImportSqlSession).GetField("gate",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(execution);lock(publication)return (bool)completed.GetValue(execution);},2000),"Late publication is observed boundedly after terminal timeout.");
+                        Assert(log==File.ReadAllText(result.LogPath),"Late publication cannot append duplicate or post-terminal worker log entries.");
+                    }
+                    Assert(object.ReferenceEquals(result.Cleanup,execution.Cleanup())&&owner.Disposes==1,"Final snapshot remains one-shot; late owner completion cannot redispose or relog.");
+                    execution.Dispose();Assert(owner.Disposes==1,"Dispose after cached cleanup never retries owner.");
+                }
+            }finally {
+                ownerReturn.Set();providerReturn.Set();
+                if(run!=null)Assert(run.Wait(3000),"Inverse worker always unwinds before fixture release.");
+            }
+        }
+    }
+    private sealed class ImportCleanupEnteredSession : IMssqlImportSession
+    {
+        private readonly MssqlImportSqlSession inner;private readonly ManualResetEventSlim entered;
+        internal ImportCleanupEnteredSession(MssqlImportSqlSession inner,ManualResetEventSlim entered){this.inner=inner;this.entered=entered;}
+        public MssqlImportTarget ReadTarget(CancellationToken token){return inner.ReadTarget(token);}
+        public MssqlImportSessionState ReadState(CancellationToken token){return inner.ReadState(token);}
+        public MssqlImportLobState ReadLobState(Guid job,CancellationToken token){return inner.ReadLobState(job,token);}
+        public void ExecuteBatch(MssqlImportBatch batch,CancellationToken token){inner.ExecuteBatch(batch,token);}
+        public MssqlImportCounts CountTargetRows(Action<long,long> progress,CancellationToken token){return inner.CountTargetRows(progress,token);}
+        public void CancelActiveCommand(){inner.CancelActiveCommand();}
+        public MssqlImportCleanup Cleanup(){entered.Set();return inner.Cleanup();}
+        public void Dispose(){inner.Dispose();}
+    }
     private static void MssqlImportCleanupErrorDiagnostics()
     {
+        ImportInverseReleasePublication(false);
+        ImportInverseReleasePublication(true);
         var cleanupCommand=new ImportSessionCommand(ImportValues(0,0)){StartError=DiagnosticSql(547,50000)};
         using(var session=new MssqlImportSqlSession(new ImportSessionOwner(),()=>cleanupCommand,()=>true)) {
             var receipt=session.Cleanup();
@@ -752,15 +829,36 @@ GO
             created.Add(database); // CREATE succeeded: retain exact name even if marking fails.
             using(var connection=OpenAdmin(database))Exec(connection,"EXEC sys.sp_addextendedproperty @name=N'mysqlpunk_import_owner',@value="+L(owner)+";");
         }
-        private void DropOwned(string database)
+        private void RequireOwnedDatabaseFiles(string database)
         {
+            // Fresh ownership and exact physical-file evidence before any owned DB mutation.
             RequireOwnerFile();
+            if(!Databases.Contains(database)||!created.Contains(database))throw new InvalidOperationException("FixtureMutationNameNotOwned");
             string marker;var files=new List<string>();
             using(var connection=OpenAdmin(database)) {
                 marker=Convert.ToString(Scalar(connection,"SELECT value FROM sys.extended_properties WHERE class=0 AND name=N'mysqlpunk_import_owner';"));
                 using(var command=new SqlCommand("SELECT physical_name FROM sys.database_files;",connection))using(var reader=command.ExecuteReader())while(reader.Read())files.Add(reader.GetString(0));
             }
             ImportAssertCleanup(database,created.ToArray(),Databases,Root,owner,File.ReadAllText(Path.Combine(Root,"owner.token")),marker,files.ToArray(),ImportReadGuardPath);
+        }
+        internal void SetTargetReadOnly(bool readOnly)
+        {
+            RequireOwnedDatabaseFiles(Target);
+            // Fixed exact target/options; NO_WAIT fails rather than terminating other sessions.
+            using(var connection=OpenAdmin("master"))Exec(connection,"ALTER DATABASE "+Q(Target)+(readOnly?" SET READ_ONLY WITH NO_WAIT;":" SET READ_WRITE WITH NO_WAIT;"));
+        }
+        internal void RecordTargetProperties(string label)
+        {
+            using(var connection=OpenAdmin("master"))
+            using(var command=new SqlCommand("SELECT is_read_only,is_auto_close_on FROM sys.databases WHERE name="+L(Target)+";",connection))
+            using(var reader=command.ExecuteReader()) {
+                Assert(reader.Read(),"Exact owned target remains visible for lifecycle observation.");
+                File.WriteAllText(Path.Combine(Root,"target-"+label+".json"),JsonConvert.SerializeObject(new{label,database=Target,observationDatabase=connection.Database,isReadOnly=reader.GetBoolean(0),autoClose=reader.GetBoolean(1)},Formatting.Indented));
+            }
+        }
+        private void DropOwned(string database)
+        {
+            RequireOwnedDatabaseFiles(database);
             // Exact generated DB and physical paths + dual ownership rechecked immediately before mutation.
             using(var connection=OpenAdmin("master"))Exec(connection,"ALTER DATABASE "+Q(database)+" SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE "+Q(database)+";");
             created.Remove(database);
@@ -934,9 +1032,9 @@ GO
             cleanup=result.Cleanup==null?null:new{result.Cleanup.CommandEnded,result.Cleanup.SessionReleased,result.Cleanup.TransactionCleanupConfirmed,result.Cleanup.IssueCode}},Formatting.Indented));
     }    private sealed class ImportObservedSession : IMssqlImportSession
     {
-        private readonly IMssqlImportSession inner;private readonly string path;private readonly Queue<string> states=new Queue<string>();private long batch;private Guid job;
-        internal ImportObservedSession(IMssqlImportSession session,string tracePath){inner=session;path=tracePath;}
-        public MssqlImportTarget ReadTarget(CancellationToken token){return inner.ReadTarget(token);}
+        private readonly IMssqlImportSession inner;private readonly string path;private readonly Action<MssqlImportTarget> targetObserved;private readonly Queue<string> states=new Queue<string>();private long batch;private Guid job;
+        internal ImportObservedSession(IMssqlImportSession session,string tracePath,Action<MssqlImportTarget> targetObserved=null){inner=session;path=tracePath;this.targetObserved=targetObserved;}
+        public MssqlImportTarget ReadTarget(CancellationToken token){var target=inner.ReadTarget(token);if(targetObserved!=null)targetObserved(target);return target;}
         public MssqlImportSessionState ReadState(CancellationToken token){var state=inner.ReadState(token);states.Enqueue(batch+","+state.DatabaseId+","+state.TransactionCount+","+state.XactState+","+state.IsOpen);while(states.Count>64)states.Dequeue();return state;}
         public MssqlImportLobState ReadLobState(Guid identity,CancellationToken token){var state=inner.ReadLobState(identity,token);File.WriteAllText(path+".lob.json",JsonConvert.SerializeObject(new{batch,state.Exists,state.RowCount,state.Sequence,state.ConsumedThrough,state.Consumed,state.Failed}));return state;}
         public void ExecuteBatch(MssqlImportBatch value,CancellationToken token){batch=value.Number;if(job==Guid.Empty){var match=System.Text.RegularExpressions.Regex.Match(value.Text,@"#mp_([a-fA-F0-9]{32})_s");if(match.Success)job=Guid.ParseExact(match.Groups[1].Value,"N");}inner.ExecuteBatch(value,token);}
@@ -1247,8 +1345,51 @@ GO
         f.Case("faults.target-unavailable-boundary", () => {
             f.ResetTarget();
             string path = f.WriteScript("unavailable.sql", "CREATE TABLE dbo.NeverAfterCancel(id int);\nGO\n");
-            var service = new MssqlImportService(() => new MssqlImportSqlSession(ImportDraftOpenOwned(f.Server, f.Target, f.Databases)), job => new MssqlImportLog(job, Path.Combine(f.Root, "logs")));
+            int targetOpens=0;
+            Action<string> masterState=f.RecordTargetProperties;
+            var service=new MssqlImportService(()=>{
+                int ordinal=++targetOpens;var owned=ImportDraftOpenOwned(f.Server,f.Target,f.Databases);
+                try {
+                if(ordinal<=3)masterState("factory-open-"+ordinal);
+                return new ImportObservedSession(new MssqlImportSqlSession(owned),Path.Combine(f.Root,"target-trace-"+ordinal+".csv"),target=>{
+                    if(ordinal<=3)File.WriteAllText(Path.Combine(f.Root,"target-sut-"+ordinal+".json"),JsonConvert.SerializeObject(new{ordinal,target.ServerName,target.DatabaseName,target.DatabaseId,target.DatabaseCreateDate,target.Writable},Formatting.Indented));
+                });
+                }catch{owned.Dispose();throw;}
+            },job=>new MssqlImportLog(job,Path.Combine(f.Root,"logs")));
             var request = new MssqlImportRequest(Guid.NewGuid(), path, f.Target);
+            try {
+                f.SetTargetReadOnly(true);
+                using(var denied=service.Preflight(request,null,CancellationToken.None)) {
+                    Assert(!denied.Passed&&denied.Target!=null&&!denied.Target.Writable&&denied.Issues.Any(x=>x.Code=="TargetReadOnly"&&!x.IsWarning),"Actual readonly target rejects preflight without source SQL.");
+                    using(var c=f.Open(f.Target))Assert(ImportLiveFixture.Scalar(c,"SELECT OBJECT_ID(N'dbo.NeverAfterCancel')")==DBNull.Value,"Readonly preflight makes zero source writes.");
+                    File.WriteAllText(Path.Combine(f.Root,"target-readonly-preflight.json"),JsonConvert.SerializeObject(new{passed=denied.Passed,writable=denied.Target.Writable,issueCodes=denied.Issues.Select(x=>x.Code).ToArray(),sourceWrites=0},Formatting.Indented));
+                }
+            }finally{f.SetTargetReadOnly(false);masterState("restored-"+targetOpens);}
+            using(var checkedTarget=service.Preflight(request,null,CancellationToken.None)) {
+                Assert(checkedTarget.Passed&&checkedTarget.Target.Writable,"Read/write target passes before readonly transition.");
+                try {
+                    f.SetTargetReadOnly(true);
+                    using(var readonlyProbe=f.Open(f.Target)) {
+                        Assert(Convert.ToString(ImportLiveFixture.Scalar(readonlyProbe,"SELECT DATABASEPROPERTYEX(DB_NAME(),'Updateability')"))=="READ_ONLY","Fixture actual updateability transition completed.");
+                        masterState("probe-open");
+                        masterState("before-run");
+                        var rejected=service.Run(request,checkedTarget,null,CancellationToken.None);ImportRecordResult(f,"target-readonly-after-preflight",path,rejected);
+                        masterState("after-run");
+                        using(var c=f.Open(f.Target)) {
+                            bool sourceExists=ImportLiveFixture.Scalar(c,"SELECT OBJECT_ID(N'dbo.NeverAfterCancel')")!=DBNull.Value;
+                            bool directCreated=false;var directErrors=new List<int>();
+                            try{ImportLiveFixture.Exec(c,"CREATE TABLE dbo.NeverDirectReadonly(id int);");directCreated=true;}
+                            catch(SqlException error){foreach(SqlError detail in error.Errors)directErrors.Add(detail.Number);}
+                            File.WriteAllText(Path.Combine(f.Root,"target-readonly-effects.json"),JsonConvert.SerializeObject(new{sourceExists,directCreated,directErrors},Formatting.Indented));
+                            Assert(!directCreated&&directErrors.Contains(3906),"Fresh independent SqlConnection rejects equivalent CREATE in actual readonly target.");
+                        }
+                        Assert(rejected.Status==MssqlImportStatus.Failed&&rejected.ValidationSummary=="TargetReadOnly"&&rejected.ProcessedBytes==0&&rejected.SuccessfulBatches==0&&rejected.FailedBatches==0,"Actual run rechecks readonly target before source execution.");
+                        ImportFaultClean(rejected,true);
+                        using(var c=f.Open(f.Target))Assert(ImportLiveFixture.Scalar(c,"SELECT OBJECT_ID(N'dbo.NeverAfterCancel')")==DBNull.Value,"Readonly execution gate makes zero source writes.");
+                    }
+                }finally{try{masterState("probe-closed");}finally{f.SetTargetReadOnly(false);masterState("restored-"+targetOpens);}}
+            }
+            using(var c=f.Open(f.Target))Assert(Convert.ToString(ImportLiveFixture.Scalar(c,"SELECT DATABASEPROPERTYEX(DB_NAME(),'Updateability')"))=="READ_WRITE","Finally restores actual read/write before recreation/cleanup.");
             using (var preflight = service.Preflight(request, null, CancellationToken.None)) {
                 Assert(preflight.Passed, "Unavailable case initially passes actual preflight.");
                 // Guarded drop/recreate changes the exact owned target lifetime; no user DB/instance is touched.

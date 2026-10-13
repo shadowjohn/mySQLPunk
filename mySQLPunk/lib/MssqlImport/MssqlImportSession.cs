@@ -4,6 +4,7 @@ using System.Data;
 using System.Data.Common;
 using System.Data.SqlClient;
 using System.Globalization;
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using mySQLPunk.lib.MssqlExport;
@@ -26,10 +27,10 @@ namespace mySQLPunk.lib.MssqlImport
         private readonly object gate = new object();
         private readonly Func<DbCommand> createCommand;
         private readonly Func<bool> isOpen;
-        private readonly int cancelMilliseconds;
+        private readonly int cancelMilliseconds, cleanupReleaseWaitMilliseconds;
         private IDisposable owner;
         private ActiveCommand active;
-        private bool releaseStarted, sessionReleased, cleanupRunning;
+        private bool releaseStarted, releaseCompleted, sessionReleased, cleanupRunning;
         private MssqlImportCleanup cleanup;
         private IReadOnlyList<MssqlImportSqlError> releaseErrors;
 
@@ -46,7 +47,7 @@ namespace mySQLPunk.lib.MssqlImport
             : this(owner, () => owner.Connection.CreateCommand(), () => owner.Connection.State == ConnectionState.Open) { }
 
         // The test seam substitutes only this connection's command factory and lifetime, never a shared provider.
-        internal MssqlImportSqlSession(IDisposable owner, Func<DbCommand> createCommand, Func<bool> isOpen, int cancelMilliseconds = 10000)
+        internal MssqlImportSqlSession(IDisposable owner, Func<DbCommand> createCommand, Func<bool> isOpen, int cancelMilliseconds = 10000, int cleanupReleaseWaitMilliseconds = 10000)
         {
             try
             {
@@ -54,7 +55,8 @@ namespace mySQLPunk.lib.MssqlImport
                 if (createCommand == null) throw new ArgumentNullException(nameof(createCommand));
                 if (isOpen == null) throw new ArgumentNullException(nameof(isOpen));
                 if (cancelMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(cancelMilliseconds));
-                this.owner = owner; this.createCommand = createCommand; this.isOpen = isOpen; this.cancelMilliseconds = cancelMilliseconds;
+                if (cleanupReleaseWaitMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(cleanupReleaseWaitMilliseconds));
+                this.owner = owner; this.createCommand = createCommand; this.isOpen = isOpen; this.cancelMilliseconds = cancelMilliseconds; this.cleanupReleaseWaitMilliseconds = cleanupReleaseWaitMilliseconds;
             }
             catch { try { if (owner != null) owner.Dispose(); } catch { } throw; }
         }
@@ -217,7 +219,20 @@ WHERE p.state='D' AND p.grantee_principal_id IN (SELECT principal_id FROM sys.us
             finally { ReleaseOwner(null); }
             lock (gate)
             {
-                if (!sessionReleased) issue = issue == null ? "SessionReleaseFailed" : issue + ";SessionReleaseFailed";
+                // A watchdog may still be inside Dispose after the provider has unwound.
+                // Take the final diagnostic snapshot only after publication or this monotonic bound.
+                var releaseWait = Stopwatch.StartNew();
+                while (releaseStarted && !releaseCompleted)
+                {
+                    long remaining = cleanupReleaseWaitMilliseconds - releaseWait.ElapsedMilliseconds;
+                    if (remaining <= 0) break;
+                    Monitor.Wait(gate, (int)remaining);
+                }
+                if (!sessionReleased)
+                {
+                    string releaseIssue = releaseCompleted ? "SessionReleaseFailed" : "SessionReleasePending";
+                    issue = issue == null ? releaseIssue : issue + ";" + releaseIssue;
+                }
                 var errors = new List<MssqlImportSqlError>();
                 if (cleanupErrors != null) errors.AddRange(cleanupErrors);
                 if (releaseErrors != null) errors.AddRange(releaseErrors);
@@ -249,7 +264,7 @@ WHERE p.state='D' AND p.grantee_principal_id IN (SELECT principal_id FROM sys.us
                 details = errors.AsReadOnly();
             }
             catch { /* Non-SQL release failures retain the fixed receipt code, never raw exception text. */ }
-            finally { lock (gate) { sessionReleased = released; releaseErrors = details; } }
+            finally { lock (gate) { sessionReleased = released; releaseErrors = details; releaseCompleted = true; Monitor.PulseAll(gate); } }
         }
 
         private bool ConnectionUsable()
