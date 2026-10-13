@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 namespace mySQLPunk.lib.MssqlExport
 {
@@ -80,7 +81,13 @@ namespace mySQLPunk.lib.MssqlExport
                     if (!fresh.CanManage || fresh.State != 0) throw new InvalidOperationException("SnapshotCapabilityChanged");
                     deadline.Check(); attemptedEnable = true;
                     try { backend.SetEnabled(true, deadline.Token); }
-                    catch (MssqlSnapshotSettingNotAttemptedException) { attemptedEnable = false; throw; }
+                    catch (MssqlSnapshotSettingNotAttemptedException ex)
+                    {
+                        attemptedEnable = false;
+                        // Preserve the caller's cancellation/error semantics after discarding mutation ownership.
+                        if (ex.InnerException != null) ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                        throw;
+                    }
                     Confirm(deadline, 1);
                     Update(MssqlSnapshotRecoveryPhase.Enabled, MssqlSnapshotRecoveryCode.None);
                     deadline.Check();

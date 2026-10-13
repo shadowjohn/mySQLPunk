@@ -6,9 +6,9 @@ namespace mySQLPunk.lib.MssqlExport
 {
     // A positive statement that the setting command was NOT sent; other errors remain uncertain.
     internal sealed class MssqlSnapshotSettingNotAttemptedException : InvalidOperationException
-    { internal MssqlSnapshotSettingNotAttemptedException() : base("SnapshotSettingNotAttempted") { } }
+    { internal MssqlSnapshotSettingNotAttemptedException(Exception cause = null) : base("SnapshotSettingNotAttempted", cause) { } }
     // Borrows the caller's live connection/transaction. Never owns or opens a session.
-    internal sealed class MssqlSnapshotBackend : IMssqlSnapshotBackend, IMssqlSnapshotDeadlineBackend
+    internal class MssqlSnapshotBackend : IMssqlSnapshotBackend, IMssqlSnapshotDeadlineBackend
     {
         internal const string LockResource = "mySQLPunk.MssqlExport.SnapshotSetting.v1";
         private readonly SqlConnection connection;
@@ -63,28 +63,47 @@ SELECT @result;", cancellation))
         }
         public void SetEnabled(bool enabled, CancellationToken cancellation)
         {
+            SqlCommand command = null;
+            try
+            {
+                command = PrepareSettingCommand(enabled, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+            }
+            catch (MssqlSnapshotSettingNotAttemptedException) { command?.Dispose(); throw; }
+            catch (Exception ex) { command?.Dispose(); throw new MssqlSnapshotSettingNotAttemptedException(ex); }
+            using (command)
+            {
+                try { command.ExecuteNonQueryAsync(cancellation).GetAwaiter().GetResult(); }
+                catch (SqlException ex) when (ex.Number == 50000 && ex.Message == "SnapshotSessionIdentityChanged")
+                { throw new MssqlSnapshotSettingNotAttemptedException(); }
+            }
+        }
+        // Keep every operation which cannot send ALTER on this side of the dispatch boundary.
+        // Virtual only for deterministic adapter fault tests without a live SQL connection.
+        internal virtual SqlCommand PrepareSettingCommand(bool enabled, CancellationToken cancellation)
+        {
             if (!lockHeld || transaction != null || !IsUsable) throw new MssqlSnapshotSettingNotAttemptedException();
             var fresh = ReadCapability(cancellation);
             if (!MssqlSnapshotLifecycle.SameIdentity(lockedIdentity, fresh.Identity)) throw new MssqlSnapshotSettingNotAttemptedException();
             if (!fresh.CanManage || fresh.State != (enabled ? 0 : 1)) throw new MssqlSnapshotSettingNotAttemptedException();
             // Guard in the SAME batch as ALTER: transparent provider reconnect must not authorize an unlocked session.
-            using (var command = Command(@"IF ISNULL(APPLOCK_MODE('public',@resource,'Session'),'NoLock') <> 'Exclusive'
+            var command = Command(@"IF ISNULL(APPLOCK_MODE('public',@resource,'Session'),'NoLock') <> 'Exclusive'
  OR ISNULL(CONVERT(nvarchar(128),SERVERPROPERTY('ServerName')),'') COLLATE Latin1_General_100_BIN2 <> @server COLLATE Latin1_General_100_BIN2
  OR NOT EXISTS(SELECT 1 FROM sys.databases WHERE database_id=DB_ID() AND database_id=@id
  AND name COLLATE Latin1_General_100_BIN2=@name COLLATE Latin1_General_100_BIN2 AND create_date=@created)
  THROW 50000,'SnapshotSessionIdentityChanged',1;
 ALTER DATABASE " + MssqlExportMetadataReader.Quote(fresh.Identity.DatabaseName) +
-                " SET ALLOW_SNAPSHOT_ISOLATION " + (enabled ? "ON" : "OFF"), cancellation))
+                " SET ALLOW_SNAPSHOT_ISOLATION " + (enabled ? "ON" : "OFF"), cancellation);
+            try
             {
                 command.Parameters.Add("@resource", SqlDbType.NVarChar, 255).Value = LockResource;
                 command.Parameters.Add("@server", SqlDbType.NVarChar, 128).Value = lockedIdentity.ServerName;
                 command.Parameters.Add("@name", SqlDbType.NVarChar, 128).Value = lockedIdentity.DatabaseName;
                 command.Parameters.Add("@id", SqlDbType.Int).Value = lockedIdentity.DatabaseId;
                 command.Parameters.Add("@created", SqlDbType.DateTime).Value = lockedIdentity.DatabaseCreateDate;
-                try { command.ExecuteNonQueryAsync(cancellation).GetAwaiter().GetResult(); }
-                catch (SqlException ex) when (ex.Number == 50000 && ex.Message == "SnapshotSessionIdentityChanged")
-                { throw new MssqlSnapshotSettingNotAttemptedException(); }
+                return command;
             }
+            catch { command.Dispose(); throw; }
         }
         public void ReleaseLock(CancellationToken cancellation)
         {

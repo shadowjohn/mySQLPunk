@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Threading;
+using System.Data.SqlClient;
 using mySQLPunk.lib.MssqlExport;
 public static partial class SmokeTests
 {
@@ -38,6 +39,46 @@ public static partial class SmokeTests
         backend = new SnapshotFakeBackend(new List<string>()) { ThrowAfterOff = true }; store = new SnapshotFakeStore(backend.Events);
         lifecycle = new MssqlSnapshotLifecycle(backend, store, Guid.NewGuid()); lifecycle.Prepare(null, CancellationToken.None);
         Assert(lifecycle.Restore(null).State == MssqlSnapshotCleanupState.RestoredOff && !store.Exists, "Lost OFF response resolved by actual readback");
+    }
+    private static void SnapshotLifecycle_AdapterPreDispatchFailures()
+    {
+        foreach (int fault in new[] { 0, 1, 2 })
+        using (var connection = new SqlConnection())
+        using (var cancellation = new CancellationTokenSource())
+        {
+            Exception expected = fault == 0 ? (Exception)new TimeoutException("PreliminaryReadTimedOut") :
+                fault == 1 ? new OperationCanceledException(cancellation.Token) : new InvalidOperationException("CommandPreparationFailed");
+            var adapter = new SnapshotPreparationFaultAdapter(connection, expected);
+            var backend = new SnapshotFakeBackend(new List<string>()) { SettingAdapter = adapter };
+            var store = new SnapshotFakeStore(backend.Events);
+            var job = new MssqlSnapshotLifecycle(backend, store, Guid.NewGuid());
+            Exception caught = null;
+            try { job.Prepare(null, cancellation.Token); } catch (Exception ex) { caught = ex; }
+            Assert(object.ReferenceEquals(expected, caught), "Original pre-dispatch cause and cancellation type preserved");
+            backend.State = 1; // External actor enables after the adapter's preliminary phase failed.
+            var cleanup = job.Restore(null);
+            Assert(cleanup.State == MssqlSnapshotCleanupState.NotRequired && backend.State == 1 && backend.AlterCalls.Count == 0,
+                "Adapter pre-dispatch failure never claims external ON or sends OFF");
+            Assert(adapter.PreparationCalls == 1 && !store.Exists && connection.State == System.Data.ConnectionState.Closed,
+                "Actual SetEnabled preparation boundary exercised without opening SQL connection");
+        }
+        using (var connection = new SqlConnection())
+        {
+            // Reaching the execution call is a different boundary: its failure must stay uncertain.
+            var adapter = new SnapshotPreparationFaultAdapter(connection, null);
+            Exception caught = null; try { adapter.SetEnabled(true, CancellationToken.None); } catch (Exception ex) { caught = ex; }
+            Assert(caught is InvalidOperationException && !(caught is MssqlSnapshotSettingNotAttemptedException),
+                "Exceptions from the actual SqlCommand execution call are not relabeled as pre-dispatch");
+            Assert(connection.State == System.Data.ConnectionState.Closed, "Execution boundary test never opens a database connection");
+        }
+    }
+    private sealed class SnapshotPreparationFaultAdapter : MssqlSnapshotBackend
+    {
+        private readonly Exception failure;
+        internal int PreparationCalls;
+        internal SnapshotPreparationFaultAdapter(SqlConnection connection, Exception failure) : base(connection) { this.failure = failure; }
+        internal override SqlCommand PrepareSettingCommand(bool enabled, CancellationToken cancellation)
+        { PreparationCalls++; if (failure != null) throw failure; return new SqlCommand(); }
     }
     private static void SnapshotLifecycle_CancelDeadlineAndResidual()
     {
@@ -140,6 +181,7 @@ public static partial class SmokeTests
         internal int State, ReleaseCalls; internal bool ThrowAfterOn, ThrowOff, ThrowAfterOff, NotAttemptedOn, OffTokenCanceled, Closed, FailRelease, TransitionAfterOn;
         internal HashSet<string> Locks; internal string Database = "fixture";
         internal Action OnEnabled;
+        internal MssqlSnapshotBackend SettingAdapter;
         private IMssqlSnapshotDeadline deadline;
         internal readonly List<IMssqlSnapshotDeadline> SeenDeadlines = new List<IMssqlSnapshotDeadline>();
         public IMssqlSnapshotDeadline Deadline { set { deadline = value; } }
@@ -152,6 +194,7 @@ public static partial class SmokeTests
         public MssqlSnapshotCapability ReadCapability(CancellationToken token) { token.ThrowIfCancellationRequested(); Events.Add("read"); SeenDeadlines.Add(deadline); OnRead?.Invoke(); return new MssqlSnapshotCapability(Identity, State, CanAlter, Writable); }
         public void SetEnabled(bool enabled, CancellationToken token)
         {
+            if (enabled && SettingAdapter != null) { SettingAdapter.SetEnabled(enabled, token); return; }
             if (enabled && NotAttemptedOn) { State = 1; throw new MssqlSnapshotSettingNotAttemptedException(); }
             if (!enabled) OffTokenCanceled = token.IsCancellationRequested;
             token.ThrowIfCancellationRequested(); Events.Add(enabled ? "ON" : "OFF"); AlterCalls.Add(enabled);

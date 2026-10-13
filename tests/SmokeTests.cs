@@ -31,6 +31,7 @@ public static partial class SmokeTests
         int passed = 0;
         Run("MSSQL export snapshot lifecycle preserve", SnapshotLifecycle_PreserveOnAndRestoreOwnedOff, ref passed);
         Run("MSSQL export snapshot lifecycle unknown", SnapshotLifecycle_UnknownEnableAndIdentity, ref passed);
+        Run("MSSQL export snapshot lifecycle adapter preparation", SnapshotLifecycle_AdapterPreDispatchFailures, ref passed);
         Run("MSSQL export snapshot lifecycle cancellation", SnapshotLifecycle_CancelDeadlineAndResidual, ref passed);
         Run("MSSQL export snapshot lifecycle journal", SnapshotLifecycle_NoJournalNoAlter, ref passed);
         Run("MSSQL export snapshot lifecycle capability", SnapshotLifecycle_CapabilityAndCooperation, ref passed);
