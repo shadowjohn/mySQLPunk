@@ -10,7 +10,7 @@
 
 **Spec:** [design.md](design.md)，使用者於 2026-10-13 回覆「好，進實作」核准書面規格。
 
-**Status:** 隔離分支 codex/mssql-import 的 Task1–5 已實作並通過逐項獨立覆核；Task6 進入隔離驗收，先驗證 runner 與 fixture ownership guards，再啟動已核准的專用 LocalDB。實際 Transfer 試跑仍待 Task7。進度與裁決存於 `.superpowers/sdd/implementation-plan/progress.md`。
+**Status:** Task1–7 的實作、逐項與整體覆核、建置及授權試跑已執行。隔離 DB 驗證通過；SQL2019 使用者實檔於第1481批 SQL241停止，獨立核對僅126表／46筆，完整還原驗收未通過。舊匯出器日期格式已修正並通過小型 Core 還原；原檔、部分 Transfer、marker與log保留，未清庫或重跑。進度與裁決存於 `.superpowers/sdd/implementation-plan/progress.md`。
 
 **Execution:** 保留先前選定的「分工實作並逐項覆核」。一次一位 implementer，各 task 經獨立覆核後才接下一項；最後整體覆核。build、native UI 與 DB tests 由單一 owner 串行執行，避免共享輸出／fixture 衝突。
 
@@ -158,11 +158,13 @@
 
 **Interfaces:** trial runner 必須明確 `-Run -Server localhost -Database Transfer -InputFile C:\Users\johnho\Desktop\Transfer_dump_20261013_165730.sql -OutputDirectory <C-path>`；Windows整合登入，實際server必須`JOHN\MSSQL2019`、version15.x、compat150、ONLINE／READ_WRITE且NativeSchema空庫。無fixture drop／cleanup／recovery設定入口。runner 設定並還原 `MYSQLPUNK_MSSQL_IMPORT_TRIAL/SERVER/DATABASE/INPUT/OUTPUT`，由 Integration partial 中註冊的 `MssqlImportTransferTrial` 執行，filter `MSSQL import Transfer trial`；沒有 trial opt-in 時明確 skipped，-Run 時必須驗證真正執行 receipt，不能以 skipped 當驗收。
 
-- [ ] **Step 1: 先測trial guard再唯讀重查。** 目標已非空、身份／DB create_date變化、檔案不符、空間不足或權限不足時只呈現實際狀態，不能自動清庫、換帳號或重試。記錄source完整預掃描／SHA、batch數／最大batch；不要複製或公開服務這份4.17GiB檔案。
-- [ ] **Step 2: 依使用者已有授權執行一次本機實檔。** default-stop，log與監測在C；記錄耗時、CPU／peakmemory、DBdata/log成長、最後位置、實際完成數／錯誤；READCOMMITTED來源的FK失敗不得改NOCHECK。失敗部分保留，先回報具體狀態，額外清除／重跑需使用者針對該狀態授權。
-- [ ] **Step 3: 核對結果。** 126 tables／3,247,785 rows為檔案footer預期，COUNT_BIG與實際objects／indexes／constraints／views／comments狀態獨立記錄；不把job完成當資料落地、不把count相同當逐欄hash相同。使用者未人工確認的聲音與操作體驗列pending。
-- [ ] **Step 4: 跑最終建置與既有回歸。** 清除本task filter後 `powershell.exe -NoProfile -File tests/Run-SmokeTests.ps1 -Configuration Release`；`./build.bat debug`、`./build.bat release`；AutoReleasePolicy通過。僅在新修正／失敗才重跑相關profiles；不反覆無理由全量還原。全分支一次fresh reviewer，再對實質fix做一次scoped覆核。
-- [ ] **Step 5: 文件、歷程與分支checkpoint。** docs說明支援GO/encoding/32MiB batch與LOB無關、generic intrinsics限制、skip／partial effects／logs／取消／ETA／需信任來源；列實際本機證據與未驗證production邊界。保留隔離worktree，精確stage，未獲本次授權前不push／merge／release。Commit `docs: document MSSQL SQL import and acceptance evidence`。
+**驗收結果：FAILED。** 一次實檔試跑已停止並完成唯讀核對；勾選代表下列執行與記錄工作已完成，不代表3247785筆已完整還原。成功重匯仍需修正後的新來源，以及使用者對清理／重跑的額外授權。詳見 [verification.md](verification.md)。
+
+- [x] **Step 1: 先測trial guard再唯讀重查。** 目標已非空、身份／DB create_date變化、檔案不符、空間不足或權限不足時只呈現實際狀態，不能自動清庫、換帳號或重試。記錄source完整預掃描／SHA、batch數／最大batch；不要複製或公開服務這份4.17GiB檔案。
+- [x] **Step 2: 依使用者已有授權執行一次本機實檔。** default-stop，log與監測在C；記錄耗時、CPU／peakmemory、DBdata/log成長、最後位置、實際完成數／錯誤；READCOMMITTED來源的FK失敗不得改NOCHECK。失敗部分保留，先回報具體狀態，額外清除／重跑需使用者針對該狀態授權。
+- [x] **Step 3: 核對結果。** 126 tables／3,247,785 rows為檔案footer預期，COUNT_BIG與實際objects／indexes／constraints／views／comments狀態獨立記錄；不把job完成當資料落地、不把count相同當逐欄hash相同。使用者未人工確認的聲音與操作體驗列pending。
+- [x] **Step 4: 跑最終建置與既有回歸。** 清除本task filter後 `powershell.exe -NoProfile -File tests/Run-SmokeTests.ps1 -Configuration Release`；`./build.bat debug`、`./build.bat release`；AutoReleasePolicy通過。僅在新修正／失敗才重跑相關profiles；不反覆無理由全量還原。全分支一次fresh reviewer，再對實質fix做一次scoped覆核。
+- [x] **Step 5: 文件、歷程與分支checkpoint。** docs說明支援GO/encoding/32MiB batch與LOB無關、generic intrinsics限制、skip／partial effects／logs／取消／ETA／需信任來源；列實際本機證據與未驗證production邊界。保留隔離worktree，精確stage，未獲本次授權前不push／merge／release。Commit `docs: document MSSQL SQL import and acceptance evidence`。
 
 ## Commands and execution setup
 
