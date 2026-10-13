@@ -19,7 +19,7 @@
 - 保留既有編碼／BOM／換行；不碰 unrelated `mySQLPunk.Desktop/Properties/`，不讀取帳號 token／瀏覽器 session／已存連線或登入設定。
 - 只替換 MSSQL 的檔案執行入口；其他 DB 引擎及查詢編輯器不改，`IDatabase` 公開契約不擴張。
 - 單一 GO 批次上限為解碼後 32 MiB，即 16,777,216 個 UTF-16 code unit；不是欄位大小上限。不能插 GO／依分號硬切。禁止整檔 bytes／string／AST／batch list。
-- 嚴格 UTF-8 有／無 BOM、UTF-16 LE／BE 有 BOM；保留原文及同一 session。支援獨立 GO／GO -- 註解，拒絕 GO n、同分隔行 block comment、SQLCMD 指令與跨 DB 的直接 USE。
+- 嚴格 UTF-8 有／無 BOM、UTF-16 LE／BE 有 BOM；解碼後 U+0000 回報 EmbeddedNul，明示 v1 literal-NUL 相容邊界，不能誤稱 UTF-8 NUL 一定是無效編碼；保留原文及同一 session。支援獨立 GO／GO -- 註解，拒絕 GO n、同分隔行 block comment、SQLCMD 指令與跨 DB 的直接 USE。
 - 預設不略過錯誤；略過對象為失敗 GO batch，不是單筆 row。timeout／斷線／log IO／未知交易／native LOB 失敗仍停止，不重連、重試、重播或續傳。
 - 專用連線明確指定 Initial Catalog；ConnectRetryCount=0，單一 command，CommandTimeout=0。狀態查詢 5 秒、cleanup 10 秒，取消 10 秒無回應後只嘗試關閉本次 owned connection。
 - 不新增全檔外層 transaction、不自動清庫／DROP 使用者物件、不改 SNAPSHOT／recovery model／constraint trust、不 GRANT／KILL。

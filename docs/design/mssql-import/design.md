@@ -48,7 +48,7 @@ Punky 預設自動循環播放，不設播放或暫停按鈕；聲音僅首輪�
 
 採兩次順序讀取：先完整掃描取得總 bytes／批次數／最大批次／SHA-256／格式資訊，再 rewind 同一個 handle 執行。兩次都用固定 buffer，不保存所有 batch 或全部行號索引。更換檔案、目標或關鍵設定會使預檢失效；開始前再次讀取目標狀態。
 
-- v1 支援嚴格 UTF-8（有／無 BOM）及有 BOM 的 UTF-16 LE／BE；拒絕無法判定或有無效序列的編碼，不能以替代字元默默執行。來源檔案不改寫。
+- v1 支援嚴格 UTF-8（有／無 BOM）及有 BOM 的 UTF-16 LE／BE；拒絕無法判定或有無效序列的編碼，不能以替代字元默默執行。來源檔案不改寫。 解碼後的 U+0000 在 v1 SQL 文字中不支援，回報 EmbeddedNul；它可能來自沒有 BOM 的 UTF-16，也可能是合法 UTF-8 的 literal NUL，不誤稱必然是錯誤編碼。這是腳本文字相容邊界，既有 exporter 的資料值採 binary 表達，不新增欄位限制。
 - GO 不分大小寫，須位於字串、quoted identifier、bracket identifier 與註解之外的獨立一行。支援前後空白及 `GO -- 註解`；GO 不送給 SQL Server。v1 不支援 GO 重複次數與同一分隔行的 block comment，預掃描發現這類 GO 語法時明確拒絕。
 - lexer 跨 buffer 維持狀態，處理單引號／N 字串與 `''`、雙引號與 `""`、方括號與 `]]`、單行註解、巢狀 block comment、CRLF／LF 及多位元字元。字串／註解中的 GO 保留原文。行本身也不得以無上限 ReadLine 累積。
 - EOF 的最後一個非空批次照常執行；未閉合的字串、identifier 或 block comment 在預掃描擋下。空批次不送出，不用分號拆解任意 T-SQL。
