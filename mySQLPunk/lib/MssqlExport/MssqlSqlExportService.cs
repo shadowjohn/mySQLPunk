@@ -65,6 +65,11 @@ namespace mySQLPunk.lib.MssqlExport
             var estimator = new MssqlExportProgressEstimator(request.JobId, new MssqlExportSchema(null, null, null, 0, null), request.Mirror != null);
             var stage = MssqlExportStage.Preflight; bool succeeded = false; bool canceled = false; string error = null;
             MssqlSnapshotCleanupResult cleanup = null;
+            Exception sourceError = null; bool sourceCanceled = false;
+            Action<Exception> captureSourceFailure = ex => {
+                if (sourceError != null) return;
+                sourceError = ex; sourceCanceled = cancellation.IsCancellationRequested;
+            };
             if (request.Mode != MssqlExportMode.SchemaOnly && !request.UseSnapshot) warnings.Add(OrdinaryReadWarning);
             long written = 0;
             Action<MssqlExportProgress> report = p => { if (p != null && progress != null) { try { progress.Report(p); } catch { /* Observer failure must not change publication truth. */ } } };
@@ -102,12 +107,20 @@ namespace mySQLPunk.lib.MssqlExport
                             report(estimator.Sample(stage, table.Key, 0, 0, artifact.Output.Position, clock.Elapsed, true));
                             if (request.Mode != MssqlExportMode.SchemaOnly)
                             {
-                                using (var reader = source.OpenRows(table, cancellation))
+                                var reader = source.OpenRows(table, cancellation);
+                                bool readFailed = false;
+                                try
                                 {
                                     rows = data.WriteTable(reader.Reader, table, writer, (r, b) => {
                                         rows = r; sourceBytes = b; written = artifact.Output.Position;
                                         report(estimator.Sample(stage, table.Key, r, b, written, clock.Elapsed, false));
                                     }, cancellation);
+                                }
+                                catch (Exception ex) { readFailed = true; captureSourceFailure(ex); throw; }
+                                finally
+                                {
+                                    try { reader.Dispose(); }
+                                    catch (Exception) when (readFailed) { /* FinishRead still sees DisposeSucceeded=false; keep the read failure. */ }
                                 }
                             }
                             counts.Add(new MssqlTableRowCount(table.Key, rows));
@@ -121,6 +134,7 @@ namespace mySQLPunk.lib.MssqlExport
                     }
                     source.CompleteRead(schema, cancellation);
                 }
+                catch (Exception ex) { captureSourceFailure(ex); throw; }
                 finally
                 {
                     try { cleanup = source.FinishRead(cleanupPhase); }
@@ -149,10 +163,13 @@ namespace mySQLPunk.lib.MssqlExport
             }
             catch (Exception ex)
             {
-                canceled = cancellation.IsCancellationRequested;
+                // Cleanup can observe a later cancellation or throw another exception. The original source
+                // outcome is immutable; cancellation after successful reading still stops local publication.
+                var primary = sourceError ?? ex;
+                canceled = sourceError != null ? sourceCanceled : cancellation.IsCancellationRequested;
                 // SQL/provider messages can contain credentials or row values. Return only a safe category.
-                var prerequisite = canceled ? null : MssqlExportPrerequisiteException.From(ex);
-                error = canceled ? "Export canceled." : prerequisite != null ? "Export failed during " + stage + ". " + prerequisite.Message : "Export failed during " + stage + " (" + ex.GetType().Name + ").";
+                var prerequisite = canceled ? null : MssqlExportPrerequisiteException.From(primary);
+                error = canceled ? "Export canceled." : prerequisite != null ? "Export failed during " + stage + ". " + prerequisite.Message : "Export failed during " + stage + " (" + primary.GetType().Name + ").";
             }
             finally
             {

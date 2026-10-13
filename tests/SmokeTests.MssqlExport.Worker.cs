@@ -60,6 +60,45 @@ public static partial class SmokeTests
             Assert(!safe.Message.Contains("SqlPermissionDenied") && !safe.Message.Contains("LoginRejected"), "Unknown failure does not invent a permission cause");
         }
     }
+    private static void SnapshotWorker_CancellationDuringCleanup()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "snapshot-primary-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        try {
+            foreach (string fault in new[] { "rows", "complete", "cancel-read", "" })
+            using (var cancel = new CancellationTokenSource()) {
+                var schema = WorkerSchema(); var calls = new List<string>();
+                var source = new WorkerSource(schema,calls) { Fault = fault, Cancel = cancel, DuringFinish = cancel.Cancel };
+                source.Cleanup = new MssqlSnapshotCleanupResult(MssqlSnapshotCleanupState.Unconfirmed,1,Path.Combine(root,"journal.json"),"RestoreUnconfirmed");
+                string target = Path.Combine(root,fault+".sql"); File.WriteAllText(target,"original");
+                var result = new MssqlSqlExportService(() => source).Export(WorkerRequest(target,schema,MssqlExportMode.DataOnly,null),null,cancel.Token);
+                bool canceled = fault == "" || fault == "cancel-read";
+                Assert(result.Stage == (canceled ? MssqlExportStage.Canceled : MssqlExportStage.Failed), "Cleanup cancellation must not replace primary source failure: " + fault + " -> " + result.Stage);
+                if (!canceled) AssertContains(result.ErrorMessage,fault == "rows" ? "Data (IOException)" : "Schema (InvalidOperationException)","Original category survives cleanup cancellation");
+                Assert(result.PublishedPath == null && File.ReadAllText(target) == "original", "Cancellation after successful reading still stops publication");
+                Assert(ReferenceEquals(result.SnapshotCleanup,source.Cleanup) && result.ResidualPaths.Contains(source.Cleanup.RecoveryRecordPath),"Independent cleanup outcome retained");
+                Assert(calls.Count(x=>x=="restore")==1 && calls.Count(x=>x=="source.dispose")==1,"Both release boundaries run once");
+            }
+        } finally { Directory.Delete(root,true); }
+    }
+    private static void SnapshotWorker_ReadAndDisposeFailures()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "snapshot-reader-primary-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        try {
+            foreach (string fault in new[] { "read", "dispose", "read-dispose-cancel", "cancel-read" })
+            using (var cancel = new CancellationTokenSource()) {
+                var schema=WorkerSchema(); var calls=new List<string>();
+                var source = new WorkerSource(schema,calls) { FailReaderRead = fault != "dispose", FailReaderDispose = true, Cancel = cancel,
+                    CancelOnReaderDispose = fault == "read-dispose-cancel", CancelOnReaderRead = fault == "cancel-read" };
+                string target=Path.Combine(root,fault+".sql"); File.WriteAllText(target,"original");
+                var result = new MssqlSqlExportService(() => source).Export(WorkerRequest(target,schema,MssqlExportMode.DataOnly,null),null,cancel.Token);
+                Assert(result.Stage == (fault == "cancel-read" ? MssqlExportStage.Canceled : MssqlExportStage.Failed), "Reader cleanup preserves failure-time cancellation status: " + fault);
+                if(fault != "cancel-read") AssertContains(result.ErrorMessage, fault == "dispose" ? "Data (InvalidOperationException)" : "Data (IOException)", "Read failure takes precedence, disposal-only failure still propagates: " + fault);
+                Assert(source.LastReader.IsDisposed && !source.LastReader.DisposeSucceeded,"Failed command disposal remains uncertain for source FinishRead");
+                Assert(result.PublishedPath==null && File.ReadAllText(target)=="original" && !calls.Contains("source.complete"),"Neither failed read nor failed disposal can complete source or publish");
+                Assert(calls.Count(x=>x=="command.dispose")==1 && calls.Count(x=>x=="restore")==1 && calls.Count(x=>x=="source.dispose")==1,"Reader and source cleanup run once");
+            }
+        } finally { Directory.Delete(root,true); }
+    }
     private static void SnapshotWorker_RecoveryNotices()
     {
         string root = Path.Combine(Path.GetTempPath(), "snapshot-notices-" + Guid.NewGuid().ToString("N"));
@@ -304,6 +343,7 @@ public static partial class SmokeTests
     {
         private readonly MssqlExportSchema schema; private readonly List<string> calls; private readonly Action disposed; private bool closed;
         internal string Fault; internal CancellationTokenSource Cancel; internal bool ThrowFinish;
+        internal Action DuringFinish; internal bool FailReaderRead, FailReaderDispose, CancelOnReaderRead, CancelOnReaderDispose; internal MssqlRowReader LastReader;
         internal WorkerSource(MssqlExportSchema schema, List<string> calls, Action disposed = null) { this.schema = schema; this.calls = calls; this.disposed = disposed; calls.Add("source.open"); }
         public MssqlExportCatalog ReadCatalog(string db, CancellationToken c) { c.ThrowIfCancellationRequested(); return new MssqlExportCatalog(schema.Tables, 1, null); }
         public MssqlExportPreflight Inspect(MssqlExportRequest r, CancellationToken c) { calls.Add("source.inspect"); return new MssqlExportPreflight(schema, Fault == "inspect" ? new[] { new MssqlExportIssue("Denied", null, null, "denied") } : null); }
@@ -312,12 +352,51 @@ public static partial class SmokeTests
             calls.Add("source.rows"); if (Fault == "rows") throw new IOException("DB disconnected private connection-string");
             if (Fault == "cancel-read") { Cancel.Cancel(); c.ThrowIfCancellationRequested(); }
             var data = new DataTable(); data.Columns.Add("id", typeof(int)); data.Rows.Add(1); data.Rows.Add(2); data.Rows.Add(3);
-            var reader = data.CreateDataReader(); return new MssqlRowReader(reader, new WorkerDispose(() => { Assert(reader.IsClosed, "Reader closes before command"); calls.Add("command.dispose"); }));
+            System.Data.Common.DbDataReader reader = FailReaderRead ? (System.Data.Common.DbDataReader)new WorkerReadFailure(() => { if(CancelOnReaderRead) { Cancel.Cancel(); c.ThrowIfCancellationRequested(); } }) : data.CreateDataReader();
+            LastReader = new MssqlRowReader(reader, new WorkerDispose(() => { Assert(reader.IsClosed, "Reader closes before command"); calls.Add("command.dispose"); if(CancelOnReaderDispose) Cancel.Cancel(); if(FailReaderDispose) throw new InvalidOperationException("private cleanup"); }));
+            return LastReader;
         }
         public void CompleteRead(MssqlExportSchema s, CancellationToken c) { calls.Add("source.complete"); if (Fault == "complete") throw new InvalidOperationException("schema fingerprint changed"); }
         internal MssqlSnapshotCleanupResult Cleanup = new MssqlSnapshotCleanupResult(MssqlSnapshotCleanupState.NotRequired, null, null, null);
-        public MssqlSnapshotCleanupResult FinishRead(Action<MssqlExportStage> report) { calls.Add("restore"); if (ThrowFinish) throw new IOException("private cleanup"); report?.Invoke(MssqlExportStage.RestoringSnapshot); return Cleanup; }
+        public MssqlSnapshotCleanupResult FinishRead(Action<MssqlExportStage> report) { calls.Add("restore"); DuringFinish?.Invoke(); if (ThrowFinish) throw new IOException("private cleanup"); report?.Invoke(MssqlExportStage.RestoringSnapshot); return Cleanup; }
         public void Dispose() { if (closed) return; closed = true; calls.Add("source.dispose"); disposed?.Invoke(); }
+    }
+    private sealed class WorkerReadFailure : System.Data.Common.DbDataReader
+    {
+        private readonly Action beforeRead; private bool closed;
+        internal WorkerReadFailure(Action beforeRead) { this.beforeRead = beforeRead; }
+        public override bool Read() { beforeRead(); throw new IOException("private provider read"); }
+        public override void Close() { closed = true; }
+        public override bool IsClosed => closed;
+        public override int FieldCount => 1;
+        public override bool HasRows => true;
+        public override int Depth => 0;
+        public override int RecordsAffected => -1;
+        public override bool NextResult() => false;
+        public override object this[int i] => throw new NotSupportedException();
+        public override object this[string name] => throw new NotSupportedException();
+        public override string GetName(int i) => throw new NotSupportedException();
+        public override int GetOrdinal(string name) => throw new NotSupportedException();
+        public override string GetDataTypeName(int i) => throw new NotSupportedException();
+        public override Type GetFieldType(int i) => throw new NotSupportedException();
+        public override object GetValue(int i) => throw new NotSupportedException();
+        public override int GetValues(object[] values) => throw new NotSupportedException();
+        public override bool IsDBNull(int i) => throw new NotSupportedException();
+        public override bool GetBoolean(int i) => throw new NotSupportedException();
+        public override byte GetByte(int i) => throw new NotSupportedException();
+        public override long GetBytes(int i,long offset,byte[] buffer,int start,int count) => throw new NotSupportedException();
+        public override char GetChar(int i) => throw new NotSupportedException();
+        public override long GetChars(int i,long offset,char[] buffer,int start,int count) => throw new NotSupportedException();
+        public override Guid GetGuid(int i) => throw new NotSupportedException();
+        public override short GetInt16(int i) => throw new NotSupportedException();
+        public override int GetInt32(int i) => throw new NotSupportedException();
+        public override long GetInt64(int i) => throw new NotSupportedException();
+        public override float GetFloat(int i) => throw new NotSupportedException();
+        public override double GetDouble(int i) => throw new NotSupportedException();
+        public override string GetString(int i) => throw new NotSupportedException();
+        public override decimal GetDecimal(int i) => throw new NotSupportedException();
+        public override DateTime GetDateTime(int i) => throw new NotSupportedException();
+        public override System.Collections.IEnumerator GetEnumerator() => throw new NotSupportedException();
     }
     private sealed class WorkerFiles : MssqlArtifactFiles
     {

@@ -29,6 +29,8 @@ public static partial class SmokeTests
     {
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL export snapshot worker cleanup cancellation", SnapshotWorker_CancellationDuringCleanup, ref passed);
+        Run("MSSQL export snapshot worker reader disposal", SnapshotWorker_ReadAndDisposeFailures, ref passed);
         Run("MSSQL export snapshot worker notices", SnapshotWorker_RecoveryNotices, ref passed);
         Run("MSSQL export snapshot worker modes", SnapshotWorker_ModeAndCleanupOrder, ref passed);
         Run("MSSQL export snapshot worker outcomes", SnapshotWorker_PrimaryFailureAndRecovery, ref passed);
