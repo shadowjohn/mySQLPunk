@@ -366,6 +366,7 @@
     <Compile Include="lib\ConnectionOpenService.cs" />
     <Compile Include="lib\MssqlExport\MssqlExportModels.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotModels.cs" />
+    <Compile Include="lib\MssqlExport\MssqlSnapshotRecoveryStore.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotBackend.cs" />
     <Compile Include="lib\MssqlExport\MssqlExportProgressEstimator.cs" />
     <Compile Include="lib\MssqlExport\MssqlSqlExportService.cs" />

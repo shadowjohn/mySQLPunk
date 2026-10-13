@@ -45,4 +45,28 @@ namespace mySQLPunk.lib.MssqlExport
         void ReleaseLock(CancellationToken cancellation);
         bool IsUsable { get; }
     }
+    internal enum MssqlSnapshotRecoveryPhase { Prepared, Enabled, Restoring, Unconfirmed }
+    internal enum MssqlSnapshotRecoveryCode { None, EnableUnconfirmed, RestoreUnconfirmed }
+    internal enum MssqlSnapshotRecoveryReadError { None, InvalidRecord, UnsupportedVersion, TooLarge, UnsafePath, ReadFailed, Overflow }
+    internal sealed class MssqlSnapshotRecoveryRecord
+    {
+        public int Version => 1;
+        public Guid JobId { get; }
+        public MssqlSnapshotIdentity Identity { get; }
+        public int OriginalState { get; }
+        public MssqlSnapshotRecoveryPhase Phase { get; }
+        public int? ObservedState { get; }
+        public DateTime UpdatedUtc { get; }
+        public MssqlSnapshotRecoveryCode NoticeCode { get; }
+        internal MssqlSnapshotRecoveryRecord(Guid jobId, MssqlSnapshotIdentity identity, int originalState, MssqlSnapshotRecoveryPhase phase, int? observedState, DateTime updatedUtc, MssqlSnapshotRecoveryCode noticeCode)
+        { JobId = jobId; Identity = identity; OriginalState = originalState; Phase = phase; ObservedState = observedState; UpdatedUtc = updatedUtc; NoticeCode = noticeCode; }
+    }
+    internal sealed class MssqlSnapshotRecoveryNotice
+    {
+        public MssqlSnapshotRecoveryRecord Record { get; }
+        public string Path { get; }
+        public MssqlSnapshotRecoveryReadError ReadError { get; }
+        internal MssqlSnapshotRecoveryNotice(MssqlSnapshotRecoveryRecord record, string path, MssqlSnapshotRecoveryReadError error)
+        { Record = record; Path = path; ReadError = error; }
+    }
 }
