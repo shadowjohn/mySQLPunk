@@ -113,9 +113,10 @@ Generic／DataOnly 無同等內容 manifest；成功只聲明批次完成與必�
 專用 LocalDB 上已匹配 65 個實際 PASS case receipts，包含大 LOB／Geometry、錯誤與取消邊界。
 已測 64 MiB binary、18 MiB Unicode、>16 MiB Geometry；測試資料另有 bytes／hash／metadata 比對。
 約 256 MiB／2.5 GiB 相同批次形狀檔案已量測記憶體；這是該 fixture 的觀測值，不是通用上限。
-SQL Server 2019／Transfer 實際一次試跑仍待驗收，不能由 LocalDB 結果推定使用者大檔成功。
-SQL2019 試跑目前尚未執行，因此沒有可回報的耗時、峰值記憶體或執行 receipt。
-Transfer 的物件／筆數／約束及實際清理狀態，須由該次試跑與獨立核對取得。
+SQL Server 2019／Transfer 已實際試跑一次，於第 1,481 批因日期字串轉換錯誤 241 停止；未完整還原。
+已確認前 1,480 批成功；停止後唯讀獨立核對為 126 張表／46 筆，不符合來源摘要 3,247,785 筆。
+既有匯出器將 legacy datetime／smalldatetime 寫成七位小數；現已修正為三位，並通過獨立 Core 日期 bytes 比對。
+原始大檔與 Transfer 部分狀態、一次性 marker／log 均保留，沒有修改來源、清庫或重跑；修正不代表原始大檔已通過。
 實際音訊聽感、實體高 DPI／鍵盤操作與 production 驗收仍未確認；本機證據不延伸為 IIS／DB 生產驗收。
 
 註：Task7 一次試跑 harness 的 64 GiB 可用空間入口、<20 GiB 時取消與固定 marker 是該試驗的防護條件。
