@@ -31,6 +31,13 @@ public static partial class SmokeTests
         if (args.Length != 0) return SnapshotCrashChild(args);
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL import worker service boundaries", MssqlImportWorkerAdditionalBoundaries, ref passed);
+        Run("MSSQL import worker service stop and skip", MssqlImportWorkerStopAndSkip, ref passed);
+        Run("MSSQL import worker service log faults", MssqlImportWorkerFlushAndLogFaults, ref passed);
+        Run("MSSQL import worker service ownership", MssqlImportWorkerPreflightOwnership, ref passed);
+        Run("MSSQL import worker service EOF", MssqlImportWorkerEofAndNative, ref passed);
+        Run("MSSQL import worker service cancellation", MssqlImportWorkerCancellationAndCleanup, ref passed);
+        Run("MSSQL import worker service phases", MssqlImportWorkerPhaseAndBoundaries, ref passed);
         Run("MSSQL import worker session options", MssqlImportConnectionOptions, ref passed);
         Run("MSSQL import worker session drain", MssqlImportSessionDrainsResults, ref passed);
         Run("MSSQL import worker session cancellation", MssqlImportSessionCancellationOwnership, ref passed);

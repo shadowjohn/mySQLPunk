@@ -104,7 +104,7 @@ namespace mySQLPunk.lib.MssqlImport
                 " OutcomeUncertain=" + error.OutcomeUncertain + " Action=" + action + "\r\n";
             foreach (var detail in error.Errors)
             {
-                long? sourceLine = detail.RelativeLine > 0 && batch.StartLine <= long.MaxValue - detail.RelativeLine + 1
+                long? sourceLine = batch.StartLine > 0 && detail.RelativeLine > 0 && batch.StartLine <= long.MaxValue - detail.RelativeLine + 1
                     ? (long?)(batch.StartLine + ((long)detail.RelativeLine - 1)) : null;
                 yield return "Number=" + detail.Number.ToString(CultureInfo.InvariantCulture) + " State=" + detail.State.ToString(CultureInfo.InvariantCulture) +
                     " Class=" + detail.Class.ToString(CultureInfo.InvariantCulture) + " RelativeLine=" + detail.RelativeLine.ToString(CultureInfo.InvariantCulture) +

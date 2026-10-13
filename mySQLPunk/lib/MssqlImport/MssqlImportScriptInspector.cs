@@ -18,12 +18,16 @@ namespace mySQLPunk.lib.MssqlImport
         private MssqlImportBatch current;
         private int currentIndex;
         private bool complete;
+        internal bool UsesNativeLob { get; private set; }
+        internal bool InitializesNativeLob { get; private set; }
+        internal MssqlImportPhase Phase { get; private set; }
         internal MssqlImportScriptInspector(string databaseName = null) { this.databaseName = databaseName; }
 
         internal void Observe(MssqlImportBatch batch)
         {
             if (complete) throw new InvalidOperationException("Inspector is complete.");
             current = batch ?? throw new ArgumentNullException(nameof(batch));
+            UsesNativeLob = false; InitializesNativeLob = false; Phase = MssqlImportPhase.None;
             string text = batch.Text;
             bool lineHasCode = false;
             int i = 0;
@@ -135,15 +139,25 @@ namespace mySQLPunk.lib.MssqlImport
                 return;
             }
             if (!quoted && token.Equals("USE", StringComparison.OrdinalIgnoreCase)) { usePending = true; return; }
-            if (!quoted && token.StartsWith("#mp_", StringComparison.OrdinalIgnoreCase))
+            if ((!quoted || header) && token.StartsWith("#mp_", StringComparison.OrdinalIgnoreCase))
             {
                 candidate = true; lob = true;
                 Guid parsed;
                 if (token.Length != 38 || token[36] != '_' || (token[37] != 's' && token[37] != 'v' && token[37] != 'c') || !Guid.TryParseExact(token.Substring(4, 32), "N", out parsed) || parsed == Guid.Empty) throw Error("NativeFormat");
                 if (lobJob.HasValue && lobJob != parsed) throw Error("NativeFormat");
                 lobJob = parsed;
+                UsesNativeLob = true;
+                if (createKind == "object" && token[37] == 's') InitializesNativeLob = true;
                 createKind = null;
                 return;
+            }
+            if (!quoted)
+            {
+                if (token.Equals("CONSTRAINT", StringComparison.OrdinalIgnoreCase) || token.Equals("FOREIGN", StringComparison.OrdinalIgnoreCase)) Phase = MssqlImportPhase.Constraints;
+                else if (createKind == "create" && token.Equals("INDEX", StringComparison.OrdinalIgnoreCase) && Phase != MssqlImportPhase.Constraints) Phase = MssqlImportPhase.Indexes;
+                else if (Phase == MssqlImportPhase.None && token.Equals("CREATE", StringComparison.OrdinalIgnoreCase)) Phase = MssqlImportPhase.Schema;
+                else if ((Phase == MssqlImportPhase.None || Phase == MssqlImportPhase.Schema) && (token.Equals("INSERT", StringComparison.OrdinalIgnoreCase) || token.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || token.Equals("DELETE", StringComparison.OrdinalIgnoreCase))) Phase = MssqlImportPhase.Data;
+                if (createKind == "create" && (token.Equals("UNIQUE", StringComparison.OrdinalIgnoreCase) || token.Equals("CLUSTERED", StringComparison.OrdinalIgnoreCase) || token.Equals("NONCLUSTERED", StringComparison.OrdinalIgnoreCase))) return;
             }
             if (createKind == "object")
             {

@@ -232,3 +232,327 @@ public static partial class SmokeTests
     }
 
 }
+
+// These tests drive the actual importer service with real bounded input/log and no database.
+public static partial class SmokeTests
+{
+    private sealed class ImportWorkerSession : IMssqlImportSession
+    {
+        internal int Executes, States, Targets, Lobs, Counts, Cleanups, Disposes, Effects;
+        internal Action<MssqlImportBatch, System.Threading.CancellationToken> Execute;
+        internal Func<MssqlImportSessionState> State;
+        internal Func<MssqlImportTarget> Target;
+        internal Func<Guid, MssqlImportLobState> Lob;
+        internal Func<MssqlImportCleanup> Finish;
+        internal Action<System.Threading.CancellationToken> Counting;
+        internal MssqlImportCounts CountValue = new MssqlImportCounts(1, 0);
+        public MssqlImportTarget ReadTarget(System.Threading.CancellationToken token)
+        { token.ThrowIfCancellationRequested(); Targets++; return Target == null ? WorkerTarget() : Target(); }
+        public MssqlImportSessionState ReadState(System.Threading.CancellationToken token)
+        { token.ThrowIfCancellationRequested(); States++; return State == null ? WorkerState() : State(); }
+        public MssqlImportLobState ReadLobState(Guid job, System.Threading.CancellationToken token)
+        { token.ThrowIfCancellationRequested(); Lobs++; return Lob == null ? new MssqlImportLobState(true, 1, 1, 1, true, false) : Lob(job); }
+        public void ExecuteBatch(MssqlImportBatch batch, System.Threading.CancellationToken token)
+        { token.ThrowIfCancellationRequested(); Executes++; if (Execute != null) Execute(batch, token); }
+        public MssqlImportCounts CountTargetRows(Action<long, long> progress, System.Threading.CancellationToken token)
+        { Counts++; if (Counting != null) Counting(token); token.ThrowIfCancellationRequested(); progress(CountValue.Tables, CountValue.Rows); return CountValue; }
+        public void CancelActiveCommand() { }
+        public MssqlImportCleanup Cleanup()
+        { Cleanups++; return Finish == null ? new MssqlImportCleanup(true, true, true, null) : Finish(); }
+        public void Dispose() { Disposes++; }
+    }
+    private sealed class ImportWorkerFixture : IDisposable
+    {
+        internal readonly string DirectoryPath, Source;
+        internal readonly ImportWorkerSession Session = new ImportWorkerSession();
+        internal readonly System.Collections.Generic.List<MssqlImportProgress> Progress = new System.Collections.Generic.List<MssqlImportProgress>();
+        internal MssqlImportService Service;
+        internal MssqlImportRequest Request;
+        internal int Opens;
+        internal Func<Guid, IMssqlImportLog> LogFactory;
+        internal ImportWorkerFixture(string sql = "SELECT 1;\r\nGO\r\nSELECT 2;\r\nGO\r\n", bool skip = false)
+        {
+            DirectoryPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "mySQLPunk", "ImportTestFixtures", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(DirectoryPath); Source = Path.Combine(DirectoryPath, "worker.sql");
+            File.WriteAllText(Source, sql, new UTF8Encoding(false, true));
+            Request = new MssqlImportRequest(Guid.NewGuid(), Source, "fixture", skip);
+            Service = new MssqlImportService(() => { Opens++; return Opens == 1 ? new ImportWorkerSession() : Session; },
+                job => LogFactory == null ? new MssqlImportLog(job, DirectoryPath) : LogFactory(job));
+        }
+        internal MssqlImportResult Run(System.Threading.CancellationToken token = default(System.Threading.CancellationToken))
+        { using (var preflight = Service.Preflight(Request, Progress.Add, token)) { Assert(preflight.Passed, "Valid fixture preflight passes."); return Service.Run(Request, preflight, Progress.Add, token); } }
+        public void Dispose()
+        { foreach (string file in Directory.GetFiles(DirectoryPath)) File.Delete(file); Directory.Delete(DirectoryPath); }
+    }
+    private static MssqlImportTarget WorkerTarget(int id = 7, bool writable = true, bool visible = true, long? objects = 0, bool? create = true, DateTime? date = null)
+    { return new MssqlImportTarget("fixture-server", "fixture", id, date ?? new DateTime(2026, 10, 13), "15.0", writable, visible, objects, create); }
+    private static MssqlImportSessionState WorkerState(int transaction = 0, int xact = 0, int id = 7, bool open = true)
+    { return new MssqlImportSessionState(open, id, transaction, xact); }
+    private static MssqlImportBatchException WorkerSqlError(int number = 547, int severity = 16, bool uncertain = false)
+    { return new MssqlImportBatchException(new[] { new MssqlImportSqlError(number, 1, severity, 1, "完整 detail 一"), new MssqlImportSqlError(50000, 2, 16, 2, "detail two") }, uncertain); }
+    private static readonly Guid WorkerNativeJob = new Guid("10000000-0000-0000-0000-000000000009");
+    private static string WorkerNative(string body, bool schema = false, long tables = 0, long rows = 0)
+    { return "-- Source read mode: READ COMMITTED\r\n" + (schema ? "-- Restore into an empty, compatible target selected by the caller; existing objects fail.\r\n" : "") + body + "-- mysqlpunk-export-complete job=" + WorkerNativeJob.ToString("N") + " tables=" + tables + " rows=" + rows + "\r\n"; }
+    private static string WorkerLobInit()
+    { return "CREATE TABLE #mp_" + WorkerNativeJob.ToString("N") + "_s ([Sequence] bigint);\r\nGO\r\n"; }
+
+    private static void MssqlImportWorkerStopAndSkip()
+    {
+        using (var f = new ImportWorkerFixture()) {
+            f.Session.Execute = (b, t) => { f.Session.Effects++; throw WorkerSqlError(); };
+            var r = f.Run();
+            Assert(r.Status == MssqlImportStatus.Failed && f.Session.Executes == 1 && f.Opens == 2, "DefaultStopsAtFirstError: no next batch, reconnect or replay.");
+            Assert(r.SuccessfulBatches == 0 && r.FailedBatches == 1 && r.ProcessedBytes == 0 && f.Session.Effects == 1, "PartialBatchEffectsAreNotReportedAsRows or successful coverage.");
+            string log = File.ReadAllText(r.LogPath);
+            Assert(log.Contains("完整 detail 一") && log.Contains("detail two"), "All provider SQL details survive default stop.");
+        }
+        using (var f = new ImportWorkerFixture(skip: true)) {
+            f.Session.Execute = (b, t) => { if (b.Number == 1) throw WorkerSqlError(); };
+            var r = f.Run();
+            Assert(r.Status == MssqlImportStatus.CompletedWithErrors && f.Session.Executes == 2 && r.SuccessfulBatches == 1 && r.FailedBatches == 1,
+                "SkipContinuesOnlySafeBatch executes actual next SQL.");
+            Assert(r.SkippedBytes > 0 && r.ProcessedBytes == new FileInfo(f.Source).Length && r.LastAcknowledgedBatch == 2 && f.Session.Counts == 0, "Skipped EOF coverage and summary remain distinct.");
+        }
+        foreach (int code in new[] { -2, 0, 11, 20, 64, 233, 10053, 10054, 10060 }) using (var f = new ImportWorkerFixture(skip: true)) {
+            f.Session.Execute = (b, t) => { throw WorkerSqlError(code); };
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Executes == 1, "Never skip transport/timeout/attention code " + code);
+        }
+        foreach (int severity in new[] { 10, 17, 20 }) using (var f = new ImportWorkerFixture(skip: true)) {
+            f.Session.Execute = (b, t) => { throw WorkerSqlError(severity: severity); };
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Executes == 1, "Every detail must be ordinary severity.");
+        }
+        using (var f = new ImportWorkerFixture(skip: true)) {
+            f.Session.Execute = (b, t) => { throw WorkerSqlError(uncertain: true); };
+            var r = f.Run(); Assert(r.UncertainBatch == 1 && f.Session.Executes == 1, "Unknown outcome is separate and never replayed.");
+        }
+        foreach (var unsafeState in new[] { WorkerState(1), WorkerState(0, -1), WorkerState(id: 8), WorkerState(open: false) }) using (var f = new ImportWorkerFixture(skip: true)) {
+            f.Session.State = () => f.Session.Executes == 0 ? WorkerState() : unsafeState;
+            f.Session.Execute = (b, t) => { throw WorkerSqlError(); };
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Executes == 1, "Unsafe post-state blocks skip.");
+        }
+    }
+    private sealed class WorkerFlushStream : MemoryStream
+    {
+        internal bool Fail, CancelOnFlush;
+        internal System.Threading.CancellationTokenSource Cancellation;
+        public override void Flush()
+        { if (CancelOnFlush) { CancelOnFlush = false; Cancellation.Cancel(); } if (Fail) throw new IOException("fixture flush fault"); base.Flush(); }
+    }
+    private static void MssqlImportWorkerFlushAndLogFaults()
+    {
+        using (var f = new ImportWorkerFixture(skip: true)) {
+            var stream = new WorkerFlushStream();
+            f.LogFactory = job => new MssqlImportLog(job, f.DirectoryPath, p => stream);
+            f.Session.Execute = (b, t) => { stream.Fail = true; throw WorkerSqlError(); };
+            var r = f.Run();
+            Assert(f.Session.Executes == 1 && r.Status == MssqlImportStatus.Failed && r.SkippedBytes == 0 && r.ValidationSummary.Contains("LogIncomplete"), "FlushFailsBeforeSkip actual log stream prevents NextBatchCalls.");
+        }
+        using (var f = new ImportWorkerFixture()) {
+            var stream = new WorkerFlushStream(); f.LogFactory = job => new MssqlImportLog(job, f.DirectoryPath, p => stream);
+            f.Session.Counting = t => { stream.Fail = true; };
+            f.Session.Execute = (b, t) => { if (b.Number == 2) stream.Fail = true; };
+            var r = f.Run(); Assert(r.Status == MssqlImportStatus.Failed && r.ValidationSummary.Contains("LogIncomplete"), "Terminal logging failure cannot claim successful saved log.");
+        }
+    }
+    private static void MssqlImportWorkerPreflightOwnership()
+    {
+        using (var f = new ImportWorkerFixture("SELECT '\u0000';")) {
+            using (var p = f.Service.Preflight(f.Request, null, default(System.Threading.CancellationToken))) {
+                Assert(!p.Passed && f.Opens == 0 && p.Issues[0].Code == "EmbeddedNul" && p.Issues[0].Line > 0, "Parser preflight failure precedes any session and exposes safe coordinates.");
+            }
+        }
+        using (var f = new ImportWorkerFixture()) {
+            using (var p = f.Service.Preflight(f.Request, null, default(System.Threading.CancellationToken))) {
+                Assert(p.Passed && File.Exists(p.LogPath), "Preflight retains real established log.");
+                var wrong = new MssqlImportRequest(f.Request.JobId, f.Source, "fixture", true);
+                Assert(f.Service.Run(wrong, p, null, default(System.Threading.CancellationToken)).Status == MssqlImportStatus.Failed && f.Session.Executes == 0, "Changed skip policy invalidates preflight.");
+                var r = f.Service.Run(f.Request, p, null, default(System.Threading.CancellationToken));
+                Assert(r.Status == MssqlImportStatus.Completed, "Matching request claims once.");
+                int calls = f.Session.Executes;
+                Assert(f.Service.Run(f.Request, p, null, default(System.Threading.CancellationToken)).Status == MssqlImportStatus.Failed && f.Session.Executes == calls && f.Opens == 2, "ReusedPreflightIsRejected before new session.");
+            }
+        }
+        using (var f = new ImportWorkerFixture()) {
+            f.Session.Target = () => WorkerTarget(date: new DateTime(2026, 10, 14));
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Executes == 0, "Recreated target fails identity before first write.");
+        }
+        using (var f = new ImportWorkerFixture()) {
+            var p = f.Service.Preflight(f.Request, null, default(System.Threading.CancellationToken)); p.Dispose(); p.Dispose();
+            Assert(f.Service.Run(f.Request, p, null, default(System.Threading.CancellationToken)).Status == MssqlImportStatus.Failed && f.Opens == 1, "Disposed preflight cannot execute.");
+        }
+        using (var f = new ImportWorkerFixture()) {
+            var missing = new MssqlImportRequest(Guid.NewGuid(), f.Source, " ");
+            using (var p = f.Service.Preflight(missing, null, default(System.Threading.CancellationToken))) Assert(!p.Passed && f.Opens == 0, "Missing target rejects pre-IO/session.");
+        }
+    }
+    private static void MssqlImportWorkerEofAndNative()
+    {
+        using (var f = new ImportWorkerFixture(skip: true)) {
+            f.Session.Execute = (b, t) => { if (b.Number == 1) throw WorkerSqlError(); };
+            f.Session.State = () => f.Session.States >= 5 ? WorkerState(1, 1) : WorkerState();
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Executes == 2, "SkippedRunStillChecksEofState.");
+        }
+        using (var f = new ImportWorkerFixture()) {
+            f.Session.State = () => WorkerState(f.Session.Executes == 1 ? 1 : 0, f.Session.Executes == 1 ? 1 : 0);
+            Assert(f.Run().Status == MssqlImportStatus.Completed, "Successful generic transaction may span GO then commit.");
+        }
+        string lobSql = WorkerNative(WorkerLobInit() + "SELECT 2;\r\nGO\r\n");
+        foreach (var state in new[] { new MssqlImportLobState(true, 1, 2, 1, false, false), new MssqlImportLobState(false, 0, 0, 0, false, false), new MssqlImportLobState(true, 2, 1, 1, true, false), new MssqlImportLobState(true, 1, 1, 1, true, true) }) using (var f = new ImportWorkerFixture(lobSql)) {
+            f.Session.Lob = job => { Assert(job == WorkerNativeJob, "LOB query receives validated exact job."); return state; };
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Counts == 0, "NativeData missing/duplicate/failed/pending EOF cannot complete.");
+        }
+        using (var f = new ImportWorkerFixture(lobSql, true)) {
+            f.Session.Execute = (b, t) => { throw WorkerSqlError(); };
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Executes == 1, "Native init error fatal even transaction0.");
+        }
+        using (var f = new ImportWorkerFixture(WorkerNative(WorkerLobInit() + "UPDATE #mp_" + WorkerNativeJob.ToString("N") + "_s SET [Sequence]=1;\r\nGO\r\nSELECT 1;\r\nGO\r\n"), true)) {
+            f.Session.Execute = (b, t) => { if (b.Number == 2) throw WorkerSqlError(); };
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Executes == 2, "Native assembly/commit error cannot skip.");
+        }
+        string nativeSchema = WorkerNative("CREATE TABLE dbo.t(i int);\r\nGO\r\n", true, 1, 0);
+        using (var f = new ImportWorkerFixture(nativeSchema)) {
+            var r = f.Run(); Assert(r.Status == MssqlImportStatus.Completed && f.Session.Counts == 1 && r.ProcessedBytes == new FileInfo(f.Source).Length, "NativeSchema summary count and trailing footer coverage.");
+        }
+        using (var f = new ImportWorkerFixture(nativeSchema)) {
+            f.Session.CountValue = new MssqlImportCounts(1, 9);
+            Assert(f.Run().Status == MssqlImportStatus.Failed, "Footer row mismatch blocks success.");
+        }
+        foreach (var target in new[] { WorkerTarget(visible: false, objects: null), WorkerTarget(objects: 1), WorkerTarget(create: false) }) using (var f = new ImportWorkerFixture(nativeSchema)) {
+            f.Session.Target = () => target;
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Executes == 0, "Execution target native capabilities rechecked.");
+        }
+    }
+    private static void MssqlImportWorkerCancellationAndCleanup()
+    {
+        using (var f = new ImportWorkerFixture(skip: true)) using (var stop = new System.Threading.CancellationTokenSource()) {
+            f.Session.Execute = (b, t) => { stop.Cancel(); throw WorkerSqlError(uncertain: true); };
+            var r = f.Run(stop.Token);
+            Assert(r.Status == MssqlImportStatus.Cancelled && f.Session.Executes == 1 && r.UncertainBatch == 1 && r.FailedBatches == 1, "Cancellation retains SQL error details and blocks skip.");
+            Assert(File.ReadAllText(r.LogPath).Contains("detail two") && f.Progress.Exists(p => p.Stage == MssqlImportStage.Stopping), "Stopping and SQL details survive cancellation.");
+        }
+        using (var f = new ImportWorkerFixture()) using (var stop = new System.Threading.CancellationTokenSource()) {
+            f.Session.Execute = (b, t) => { stop.Cancel(); t.ThrowIfCancellationRequested(); };
+            f.Session.Finish = () => new MssqlImportCleanup(false, true, false, "CommandStillActive");
+            Assert(f.Run(stop.Token).Status == MssqlImportStatus.CleanupUncertain && f.Session.Executes == 1, "Unacknowledged command cannot be called cancelled.");
+        }
+        using (var f = new ImportWorkerFixture(skip: true)) using (var stop = new System.Threading.CancellationTokenSource()) {
+            var stream = new WorkerFlushStream { Cancellation = stop };
+            f.LogFactory = job => new MssqlImportLog(job, f.DirectoryPath, p => stream);
+            f.Session.Execute = (b, t) => { stream.CancelOnFlush = true; throw WorkerSqlError(); };
+            Assert(f.Run(stop.Token).Status == MssqlImportStatus.Cancelled && f.Session.Executes == 1, "Cancel during error flush cannot schedule next.");
+        }
+        using (var f = new ImportWorkerFixture()) {
+            f.Session.Execute = (b, t) => { throw WorkerSqlError(); };
+            f.Session.Finish = () => { throw new IOException("cleanup fault"); };
+            var r = f.Run(); Assert(r.Status == MssqlImportStatus.Failed && r.ValidationSummary.Contains("SqlBatchFailed") && r.ValidationSummary.Contains("Cleanup"), "Original failed result survives cleanup exception.");
+        }
+        using (var f = new ImportWorkerFixture(WorkerNative("CREATE TABLE dbo.t(i int);\r\nGO\r\n", true, 1))) using (var stop = new System.Threading.CancellationTokenSource()) {
+            f.Session.Counting = t => { stop.Cancel(); t.ThrowIfCancellationRequested(); };
+            Assert(f.Run(stop.Token).Status == MssqlImportStatus.Cancelled && f.Session.Counts == 1, "Verification COUNT_BIG cancellation is acknowledged after cleanup.");
+        }
+    }
+    private static void MssqlImportWorkerPhaseAndBoundaries()
+    {
+        string sql = WorkerNative("CREATE TABLE dbo.t(i int);\r\nGO\r\nCREATE NONCLUSTERED INDEX IX ON dbo.t(i);\r\nGO\r\nALTER TABLE dbo.t WITH CHECK ADD CONSTRAINT ck CHECK(i>0);\r\nGO\r\n", true, 1);
+        using (var f = new ImportWorkerFixture(sql)) {
+            f.Session.Execute = (b, t) => {
+                var p = f.Progress[f.Progress.Count - 1];
+                if (b.Number == 2) Assert(p.Phase == MssqlImportPhase.Indexes && !p.Remaining.HasValue, "Index phase immediately disables ETA before command.");
+                if (b.Number == 3) Assert(p.Phase == MssqlImportPhase.Constraints && !p.Remaining.HasValue, "Constraint phase immediately disables ETA before command.");
+                Assert(p.SuccessfulBatches == b.Number - 1, "Read-ahead is not acknowledged progress.");
+            };
+            Assert(f.Run().Status == MssqlImportStatus.Completed, "Bounded phase lexer preserves SQL execution.");
+        }
+        using (var f = new ImportWorkerFixture("SELECT '#mp_10000000000000000000000000000009_s CREATE INDEX FOREIGN KEY';\r\nGO\r\n")) {
+            using (var p = f.Service.Preflight(f.Request, null, default(System.Threading.CancellationToken))) {
+                Assert(p.Scan.Script.Kind == MssqlImportScriptKind.Generic, "String decoys are generic.");
+                Assert(f.Service.Run(f.Request, p, value => { throw new InvalidOperationException("observer"); }, default(System.Threading.CancellationToken)).Status == MssqlImportStatus.Completed, "Observer failure cannot alter execution truth.");
+            }
+        }
+    }
+}
+public static partial class SmokeTests
+{
+    private static void MssqlImportWorkerAdditionalBoundaries()
+    {
+        using (var f = new ImportWorkerFixture()) {
+            f.Session.Execute = (b, t) => { throw new IOException("unknown transport"); };
+            var r = f.Run(); Assert(r.Status == MssqlImportStatus.Failed && r.UncertainBatch == 1 && r.ProcessedBytes == 0, "Non-SQL execution failure is uncertain and unacknowledged.");
+        }
+        using (var f = new ImportWorkerFixture()) {
+            f.Session.State = () => { if (f.Session.Executes != 0) throw WorkerSqlError(uncertain: true); return WorkerState(); };
+            var r = f.Run(); Assert(r.Status == MssqlImportStatus.Failed && File.ReadAllText(r.LogPath).Contains("detail two"), "Probe SQL detail also survives worker failure.");
+        }
+        using (var f = new ImportWorkerFixture()) using (var stop = new System.Threading.CancellationTokenSource()) {
+            f.Session.State = () => { if (f.Session.Executes == 1) { stop.Cancel(); stop.Token.ThrowIfCancellationRequested(); } return WorkerState(); };
+            var r = f.Run(stop.Token); Assert(r.Status == MssqlImportStatus.Cancelled && f.Session.Executes == 1 && r.SuccessfulBatches == 0, "Cancellation during post-state prevents acknowledgement and next SQL.");
+        }
+        using (var f = new ImportWorkerFixture()) using (var stop = new System.Threading.CancellationTokenSource()) {
+            using (var p = f.Service.Preflight(f.Request, null, stop.Token)) {
+                var r = f.Service.Run(f.Request, p, value => { if (value.Stage == MssqlImportStage.Finished) stop.Cancel(); f.Progress.Add(value); }, stop.Token);
+                Assert(r.Status == MssqlImportStatus.Completed && f.Progress[f.Progress.Count - 1].Stage == MssqlImportStage.Finished, "Late cancellation cannot publish stopping after terminal callback.");
+            }
+        }
+        using (var f = new ImportWorkerFixture()) {
+            f.LogFactory = job => { throw new IOException("log create fault"); };
+            using (var p = f.Service.Preflight(f.Request, null, default(System.Threading.CancellationToken))) Assert(!p.Passed && f.Session.Executes == 0 && f.Opens == 1, "Log creation failure blocks execution factory.");
+        }
+        using (var f = new ImportWorkerFixture()) {
+            using (var p = f.Service.Preflight(f.Request, null, default(System.Threading.CancellationToken))) {
+                var original = p.Scan;
+                // Same real retained input; alter only expected digest through internal immutable construction.
+                var input = MssqlImportInput.Open(f.Source, "fixture");
+                var log = new MssqlImportLog(f.Request.JobId, f.DirectoryPath); log.WriteStart(f.Request, original, p.Target);
+                var badScan = new MssqlImportScan(original.FileBytes, original.BatchCount, original.MaxBatchCodeUnits, original.EncodingName, "mismatched", original.Script);
+                using (var changed = new MssqlImportPreflight(f.Service, f.Request, Path.GetFullPath(f.Source), input, badScan, p.Target, log, new MssqlImportIssue[0])) {
+                    var r = f.Service.Run(f.Request, changed, null, default(System.Threading.CancellationToken));
+                    Assert(r.Status == MssqlImportStatus.Failed && r.ValidationSummary.Contains("DigestMismatch"), "Every EOF compares actual execution digest to retained scan.");
+                }
+            }
+        }
+        using (var f = new ImportWorkerFixture()) {
+            using (var p = f.Service.Preflight(f.Request, null, default(System.Threading.CancellationToken))) {
+                var entered = new System.Threading.ManualResetEventSlim(); var release = new System.Threading.ManualResetEventSlim();
+                f.Session.Execute = (b, t) => { if (b.Number == 1) { entered.Set(); Assert(release.Wait(3000), "Fixture release arrives."); } };
+                var task = System.Threading.Tasks.Task.Run(() => f.Service.Run(f.Request, p, null, default(System.Threading.CancellationToken)));
+                try {
+                    Assert(entered.Wait(3000), "Running worker owns first command."); p.Dispose();
+                    Assert(f.Service.Run(f.Request, p, null, default(System.Threading.CancellationToken)).Status == MssqlImportStatus.Failed && f.Opens == 2, "Concurrent/stale preflight cannot acquire or dispose running worker.");
+                } finally { release.Set(); }
+                Assert(task.GetAwaiter().GetResult().Status == MssqlImportStatus.Completed && f.Session.Executes == 2, "Stale dispose leaves retained execution input/log alive.");
+                entered.Dispose(); release.Dispose();
+            }
+        }
+        using (var f = new ImportWorkerFixture()) using (var stop = new System.Threading.CancellationTokenSource()) {
+            var entered = new System.Threading.ManualResetEventSlim(); var release = new System.Threading.ManualResetEventSlim(); var stopping = new System.Threading.ManualResetEventSlim();
+            f.Session.Execute = (b, t) => { entered.Set(); Assert(release.Wait(3000), "Blocked provider fixture releases."); t.ThrowIfCancellationRequested(); };
+            using (var p = f.Service.Preflight(f.Request, null, stop.Token)) {
+                var task = System.Threading.Tasks.Task.Run(() => f.Service.Run(f.Request, p, value => { if (value.Stage == MssqlImportStage.Stopping) stopping.Set(); }, stop.Token));
+                try { Assert(entered.Wait(3000), "Provider fixture enters."); stop.Cancel(); Assert(stopping.Wait(1000) && !task.IsCompleted && f.Session.Cleanups == 0, "Stopping precedes command unwind and no premature terminal/cleanup."); }
+                finally { release.Set(); }
+                Assert(task.GetAwaiter().GetResult().Status == MssqlImportStatus.Cancelled && f.Session.Executes == 1 && f.Session.Cleanups == 1, "Actual command unwind precedes truthful cleanup/cancelled result.");
+            }
+            entered.Dispose(); release.Dispose(); stopping.Dispose();
+        }
+        using (var f = new ImportWorkerFixture()) using (var stop = new System.Threading.CancellationTokenSource()) {
+            f.Session.State = () => { if (f.Session.Executes == 1) { stop.Cancel(); throw WorkerSqlError(uncertain: true); } return WorkerState(); };
+            var r = f.Run(stop.Token); Assert(r.Status == MssqlImportStatus.Cancelled && File.ReadAllText(r.LogPath).Contains("detail two"), "Cancellation with SQL probe details must log then cancel.");
+        }
+        using (var f = new ImportWorkerFixture(skip: true)) {
+            f.Session.Execute = (b, t) => { throw WorkerSqlError(); };
+            f.Session.State = () => { if (f.Session.Executes != 0) throw new MssqlImportBatchException(new[] { new MssqlImportSqlError(50000, 1, 16, 1, "distinct safety probe detail") }); return WorkerState(); };
+            var r = f.Run(); string log = File.ReadAllText(r.LogPath);
+            Assert(r.Status == MssqlImportStatus.Failed && f.Session.Executes == 1 && log.Contains("detail two") && log.Contains("RelativeLine=1 SourceLine=unknown Message=distinct safety probe detail") && log.Contains("Origin=Probe;DuringBatch=1"), "Safety probe failure cannot discard either SQL error collection.");
+        }
+        using (var f = new ImportWorkerFixture(skip: true)) {
+            f.Session.State = () => f.Session.Executes == 0 ? WorkerState(1, 1) : WorkerState();
+            f.Session.Execute = (b, t) => { throw WorkerSqlError(); };
+            Assert(f.Run().Status == MssqlImportStatus.Failed && f.Session.Executes == 1, "Pre-batch open transaction prohibits skipping even after rollback0.");
+        }
+        foreach (int failAt in new[] { 1, 2, 3 }) using (var f = new ImportWorkerFixture(WorkerNative(WorkerLobInit() + "SELECT 2;\r\nGO\r\n"), true)) {
+            f.Session.Lob = job => f.Session.Lobs >= failAt ? new MssqlImportLobState(true, 1, 2, 1, false, false) : new MssqlImportLobState(true, 1, 1, 1, true, false);
+            f.Session.Execute = (b, t) => { if (b.Number == 2 && failAt < 3) throw WorkerSqlError(); };
+            Assert(f.Run().Status == MssqlImportStatus.Failed, "Ordinary error/EOF cannot bypass initialized LOB terminal gate.");
+        }
+    }
+}
