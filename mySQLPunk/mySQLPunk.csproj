@@ -364,6 +364,8 @@
     <Compile Include="lib\AutoRecoveryDraftService.cs" />
     <Compile Include="lib\ConnectionDialogMessageService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
+    <Compile Include="lib\MssqlImport\MssqlImportLog.cs" />
+    <Compile Include="lib\MssqlImport\MssqlImportProgressEstimator.cs" />
     <Compile Include="lib\MssqlImport\MssqlImportModels.cs" />
     <Compile Include="lib\MssqlImport\MssqlGoBatchReader.cs" />
     <Compile Include="lib\MssqlImport\MssqlImportInput.cs" />

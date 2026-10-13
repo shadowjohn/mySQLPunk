@@ -31,6 +31,11 @@ public static partial class SmokeTests
         if (args.Length != 0) return SnapshotCrashChild(args);
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL import worker log faults", MssqlImportLogFaultsPropagate, ref passed);
+        Run("MSSQL import worker window and throttle", MssqlImportProgressWindowAndThrottle, ref passed);
+        Run("MSSQL import worker tail bound", MssqlImportLogTailIsBounded, ref passed);
+        Run("MSSQL import worker estimates", MssqlImportProgressEstimatesConfirmedBytes, ref passed);
+        Run("MSSQL import worker log retention", MssqlImportLogRetainsAllErrors, ref passed);
         Run("MSSQL import parser contexts", MssqlImportParserPreservesContexts, ref passed);
         Run("MSSQL import parser limits", MssqlImportParserLimits, ref passed);
         Run("MSSQL import parser unsupported", MssqlImportParserUnsupported, ref passed);
