@@ -36,6 +36,7 @@ public static partial class SmokeTests
         Run("MSSQL import worker cleanup diagnostics", MssqlImportCleanupErrorDiagnostics, ref passed);
         Run("MSSQL import integration guards", MssqlImportIntegrationGuards, ref passed);
         Run("MSSQL import integration live", MssqlImportIntegrationLive, ref passed);
+        Run("MSSQL import wizard terminal tail truncation", ImportWizard_TerminalTailTruncation, ref passed);
         Run("MSSQL import wizard close race and log fault", ImportWizard_CloseCompletionRaceAndLogFailure, ref passed);
         Run("MSSQL import wizard cancellation dispatch", ImportWizard_CancelDoesNotBlockUi, ref passed);
         Run("MSSQL import wizard snapshots and actions", ImportWizard_SnapshotsAndActions, ref passed);

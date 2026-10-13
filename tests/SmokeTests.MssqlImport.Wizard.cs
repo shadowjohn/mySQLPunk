@@ -277,7 +277,7 @@ public static partial class SmokeTests
         internal bool Writable = true, BlockExecution, HoldCleanup, FailFirstBatch, BlockTarget, UncertainCleanup, BlockCancelCallback, FailLogEnd;
         internal readonly ManualResetEventSlim CancelCallbackEntered = new ManualResetEventSlim(), ReleaseCancelCallback = new ManualResetEventSlim();
         internal readonly ManualResetEventSlim TargetEntered = new ManualResetEventSlim(), ReleaseTarget = new ManualResetEventSlim();
-        internal int FactoryThread;
+        internal int FactoryThread, LargeSqlErrorMessageCodeUnits;
         internal int SessionCalls, BatchCalls, OwnerReleases, BlockBatch = 1, DelayMilliseconds;
         internal readonly List<string> GeneratedLogs = new List<string>();
         internal ImportWizardFixture()
@@ -358,6 +358,11 @@ public static partial class SmokeTests
                 if (fixture.BlockExecution && batch.Number == fixture.BlockBatch && !fixture.ReleaseExecution.Wait(12000, token)) throw new InvalidOperationException("FixtureExecutionDeadline");
                 token.ThrowIfCancellationRequested();
             }
+            if (fixture.LargeSqlErrorMessageCodeUnits > 0)
+                throw new MssqlImportBatchException(new[] {
+                    new MssqlImportSqlError(547, 0, 16, 1,
+                        "batch-tail-" + batch.Number + ":" + new string('x', fixture.LargeSqlErrorMessageCodeUnits))
+                });
             if (fixture.FailFirstBatch && batch.Number == 1)
                 throw new MssqlImportBatchException(new[] { new MssqlImportSqlError(547, 0, 16, 1, "fixture constraint detail"), new MssqlImportSqlError(2627, 1, 16, 2, "fixture second detail") });
         }
@@ -641,5 +646,48 @@ public static partial class SmokeTests
         public void Flush() { inner.Flush(); }
         public void WriteEnd(MssqlImportResult result) { throw new IOException("fixture final-log write fault"); }
         public void Dispose() { inner.Dispose(); }
+    }
+    private static void ImportWizard_TerminalTailTruncation()
+    {
+        using (var fixture = new ImportWizardFixture { LargeSqlErrorMessageCodeUnits = 20000 })
+        using (var form = fixture.CreateForm())
+        {
+            form.Show();
+            IWFind<CheckBox>(form, "importSkipErrors").Checked = true;
+            IWPrepareAndConfirm(form);
+            IWClick(form, "importNext");
+            IWPump(() => form.Result != null && IWFind<Button>(form, "importCancel").Enabled,
+                "Two large ordinary errors finish and release the worker.");
+            Assert(form.Result.Status == MssqlImportStatus.CompletedWithErrors && form.Result.TotalErrors == 2,
+                "Exactly two failed GO batches produce an amber terminal result.");
+            string preview = IWFind<TextBox>(form, "importErrorText").Text;
+            Console.WriteLine("Terminal log tail: totalErrors=" + form.Result.TotalErrors + "; retainedUTF16=" + preview.Length);
+            Assert(preview.Length > 0 && preview.Length < 32768,
+                "Whole-event eviction leaves less than the character bound.");
+            Assert(preview.Contains("batch-tail-2:") && !preview.Contains("batch-tail-1:"),
+                "Native preview retains only the newest event after byte-bound eviction.");
+            string caption = IWFind<Label>(form, "importErrorCount").Text;
+            Assert(caption.Contains("已截段") || caption.Contains("Truncated"),
+                "Terminal native caption preserves authoritative truncation with fewer than100events.");
+            string disk = File.ReadAllText(form.Result.LogPath, new UTF8Encoding(false, true));
+            Assert(disk.Contains("batch-tail-1:") && disk.Contains("batch-tail-2:"),
+                "Both original events remain in the actual full log.");
+
+            // A clean execution in this same window must not inherit the previous cutoff.
+            fixture.LargeSqlErrorMessageCodeUnits = 0;
+            IWClick(form, "importNext");
+            IWPump(() => IWFind<Button>(form, "importNext").Enabled, "Fresh clean preflight passes.");
+            IWClick(form, "importNext");
+            IWFind<CheckBox>(form, "importConfirmTarget").Checked = true;
+            IWClick(form, "importNext");
+            IWPump(() => form.Result != null && IWFind<Button>(form, "importCancel").Enabled,
+                "Fresh clean job finishes in the same window.");
+            Assert(form.Result.Status == MssqlImportStatus.Completed && form.Result.TotalErrors == 0,
+                "Second job has no error events.");
+            caption = IWFind<Label>(form, "importErrorCount").Text;
+            Assert(!caption.Contains("已截段") && !caption.Contains("Truncated"),
+                "New-job final caption does not inherit prior truncation.");
+            form.Close();
+        }
     }
 }

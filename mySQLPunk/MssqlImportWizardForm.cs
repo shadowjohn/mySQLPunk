@@ -373,12 +373,14 @@ namespace mySQLPunk
         }
         private void RenderResult(MssqlImportResult result)
         {
+            bool truncated;
+            lock (progressGate) truncated = latest != null && latest.JobId == result.JobId && latest.LogTruncated;
             terminalRendered = true; stage.Text = status.Text = StatusText(result.Status);
             stage.ForeColor = result.Status == MssqlImportStatus.Completed ? ThemeManager.SuccessColor : result.Status == MssqlImportStatus.CompletedWithErrors || result.Status == MssqlImportStatus.Cancelled ? ThemeManager.WarningColor : ThemeManager.DangerColor;
             elapsed.Text = T("已經過：", "Elapsed: ") + Duration(result.Elapsed); eta.Text = T("預估剩餘：未知（作業已結束）", "Remaining: unknown (job ended)"); logPath.Text = result.LogPath ?? logPath.Text;
             resultText.Visible = true; resultText.Text = StatusText(result.Status) + "\r\n" + T("目標：", "Target: ") + target.Text + "\r\n" + T("成功批次：", "Successful batches: ") + result.SuccessfulBatches.ToString("N0") + T("；失敗／略過：", "; failed/skipped: ") + result.FailedBatches.ToString("N0") + "\r\n" + T("已處理檔案範圍：", "Processed file coverage: ") + result.ProcessedBytes.ToString("N0") + " / " + result.FileBytes.ToString("N0") + " bytes" + "\r\n" + T("最後確認批次：", "Last acknowledged batch: ") + result.LastAcknowledgedBatch.ToString("N0") + T("；未確認批次：", "; uncertain batch: ") + (result.UncertainBatch?.ToString("N0") ?? T("無", "none")) + "\r\n" + string.Join("\r\n", (result.ValidationSummary ?? "ImportFailed").Split(';').Select(Explain)) + "\r\n" + CleanupText(result.Cleanup) + "\r\n" + PartialWarning();
             coverage.Text = T("已處理檔案範圍：", "Processed file coverage: ") + result.ProcessedBytes.ToString("N0") + " / " + result.FileBytes.ToString("N0") + " bytes"; bar.Style = ProgressBarStyle.Continuous; bar.Value = Percent(result.ProcessedBytes, result.FileBytes);
-            errorCount.Text = (errors.Text.Length >= 32768 || result.TotalErrors > 100 ? T("已截段；最近最多 100 筆／64 KiB UTF-16。", "Truncated; recent at most 100 events / 64 KiB UTF-16.") : T("最近錯誤紀錄。", "Recent errors.")) + T(" 共 ", " Total ") + result.TotalErrors.ToString("N0") + T(" 筆；完整 log 路徑見上方。", " events; full log path above."); Reflow();
+            errorCount.Text = (truncated ? T("已截段；最近最多 100 筆／64 KiB UTF-16。", "Truncated; recent at most 100 events / 64 KiB UTF-16.") : T("最近錯誤紀錄。", "Recent errors.")) + T(" 共 ", " Total ") + result.TotalErrors.ToString("N0") + T(" 筆；完整 log 路徑見上方。", " events; full log path above."); Reflow();
         }
         private static int Percent(long bytes, long total) => total <= 0 ? 0 : (int)Math.Max(0, Math.Min(100, 100.0 * bytes / total));
         private static string Duration(TimeSpan value) => ((long)Math.Max(0, value.TotalHours)).ToString("00") + ":" + value.Minutes.ToString("00") + ":" + value.Seconds.ToString("00");
