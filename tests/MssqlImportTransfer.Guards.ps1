@@ -193,3 +193,15 @@ function Test-TransferTrialBuildSnapshot {
     }
     return New-TransferGuardDecision $true 'BuildSnapshotAccepted'
 }
+
+function Test-TransferTrialMarkerPresence {
+    param([hashtable]$Receipt,[bool]$MarkerExists,[int]$ChildExitCode)
+    if($MarkerExists){return New-TransferGuardDecision $true 'TrialMarkerPresent'}
+    if($Receipt -and $Receipt.Executed -is [bool] -and !$Receipt.Executed -and
+        $Receipt.AttemptMarkerDurable -is [bool] -and !$Receipt.AttemptMarkerDurable -and
+        $Receipt.Status -ceq 'NotStarted' -and $ChildExitCode -ne 0 -and $Receipt.FailureCode -is [string] -and
+        $Receipt.FailureCode -cmatch '^Trial[A-Za-z0-9:]{1,148}$'){
+        return New-TransferGuardDecision $false ('TrialNotStarted:'+$Receipt.FailureCode)
+    }
+    return New-TransferGuardDecision $false 'TrialAttemptMarkerMissing'
+}

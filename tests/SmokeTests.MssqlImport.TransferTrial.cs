@@ -130,6 +130,7 @@ public static partial class SmokeTests
         var mount=new StringBuilder(1024);var localVolume=new StringBuilder(1024);var actualVolume=new StringBuilder(1024);
         TransferRequire(new DriveInfo("C").DriveType==DriveType.Fixed&&GetVolumePathName(existing,mount,1024)&&string.Equals(mount.ToString(),@"C:\",StringComparison.OrdinalIgnoreCase)&&GetVolumeNameForVolumeMountPoint(@"C:\",localVolume,1024)&&GetVolumeNameForVolumeMountPoint(mount.ToString(),actualVolume,1024)&&localVolume.ToString()==actualVolume.ToString(),"TrialLocalCVolumeRequired");
     }
+    private static int TransferDatabaseId(IDataRecord row,int ordinal) { return Convert.ToInt32(row.GetValue(ordinal),CultureInfo.InvariantCulture); }
     private static JObject TransferIdentity(CancellationToken cancellation)
     {
         using (var connection = TransferOpenProbe())
@@ -148,7 +149,7 @@ FROM sys.databases AS d WHERE d.database_id=DB_ID();";
                 string login = reader.IsDBNull(9) ? "" : reader.GetString(9);
                 string current = reader.IsDBNull(10) ? "" : reader.GetString(10);
                 var row = new JObject {
-                    ["server"] = reader.GetString(0), ["database"] = reader.GetString(1), ["databaseId"] = reader.GetInt32(2),
+                    ["server"] = reader.GetString(0), ["database"] = reader.GetString(1), ["databaseId"] = TransferDatabaseId(reader,2),
                     ["createDateTicks"] = reader.GetDateTime(3).Ticks, ["version"] = reader.GetString(4),
                     ["compatibility"] = Convert.ToInt32(reader.GetValue(5), CultureInfo.InvariantCulture), ["state"] = reader.GetString(6),
                     ["readOnly"] = reader.GetBoolean(7), ["recovery"] = reader.GetString(8),
@@ -265,7 +266,7 @@ FROM sys.dm_db_log_space_usage;";
                 {
                     TransferRequire(reader.Read()&&!reader.IsDBNull(0),"TrialLogUsedUnavailable");
                     TransferRequire(string.Equals(reader.GetString(3),@"JOHN\MSSQL2019",StringComparison.OrdinalIgnoreCase)&&reader.GetString(4)=="Transfer","TrialLogUsedIdentityChanged");
-                    if(expectedIdentity!=null)TransferRequire(reader.GetInt32(1)==(long)expectedIdentity["DatabaseId"]&&reader.GetDateTime(2).Ticks==(long)expectedIdentity["DatabaseCreateDateTicks"],"TrialLogUsedIdentityChanged");
+                    if(expectedIdentity!=null)TransferRequire(TransferDatabaseId(reader,1)==(long)expectedIdentity["DatabaseId"]&&reader.GetDateTime(2).Ticks==(long)expectedIdentity["DatabaseCreateDateTicks"],"TrialLogUsedIdentityChanged");
                     long bytes=reader.GetInt64(0);TransferRequire(bytes>=0,"TrialLogUsedInvalid");
                     snapshot["Bytes"]=bytes;snapshot["Availability"]="LogUsedAvailable";
                 }
@@ -464,6 +465,8 @@ FROM sys.dm_db_log_space_usage;";
             {Environment.SetEnvironmentVariable(name,"1");TransferExpectGuard(MssqlImportTransferTrial,"TrialForeignOptIn");Environment.SetEnvironmentVariable(name,null);}
             Environment.SetEnvironmentVariable("MYSQLPUNK_MSSQL_IMPORT_SERVER","not-authorized");TransferExpectGuard(MssqlImportTransferTrial,"TrialInvocationMismatch");
             TransferRequireEntryFreeSpace(TransferEntryFree);TransferExpectGuard(()=>TransferRequireEntryFreeSpace(TransferEntryFree-1),"TrialInsufficientSpace");
+            var identityShape=new DataTable();identityShape.Columns.Add("database_id",typeof(short));identityShape.Rows.Add((short)5);
+            using(var shape=identityShape.CreateDataReader()){shape.Read();TransferGuardCheck(TransferDatabaseId(shape,0)==5,"Actual SQL2019 smallint DB_ID provider shape converts without InvalidCastException.");}
             var request=TransferGuardRequest(fixture);TransferValidateRequest(request,fixture);
             foreach(string name in new[]{"Server","DatabaseName","InputCanonicalPath","ProductExecutablePath","OutputCanonicalPath"})
             {var bad=(JObject)request.DeepClone();bad[name]="wrong";TransferExpectGuard(()=>TransferValidateRequest(bad,fixture),"TrialRequestPolicy");}

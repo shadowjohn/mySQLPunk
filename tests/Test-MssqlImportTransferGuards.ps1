@@ -85,6 +85,10 @@ function Invoke-TransferTrialDraftAssertions {
     $copy=$receipt.Clone();$copy.TerminalLogUsedBytes=0L;Assert-Decision 'UsedLogEvidenceInvalid' (Test-TransferTrialCompletionReceipt $expected $marker $copy ('1'*64))
     $copy=$receipt.Clone();$copy.PreRunLogUsedBytes=$null;Assert-Decision 'UsedLogEvidenceInvalid' (Test-TransferTrialCompletionReceipt $expected $marker $copy ('1'*64))
     $copy=$receipt.Clone();$copy.TerminalLogUsedBytes=0L;$copy.TerminalLogUsedAvailability='LogUsedAvailable';Assert-Decision 'TrialVerifiedWithinReceiptBoundary' (Test-TransferTrialCompletionReceipt $expected $marker $copy ('1'*64))
+    $notStarted=@{Executed=$false;AttemptMarkerDurable=$false;Status='NotStarted';FailureCode='TrialFailure:InvalidCastException'}
+    Assert-Decision 'TrialNotStarted:TrialFailure:InvalidCastException' (Test-TransferTrialMarkerPresence $notStarted $false 1)
+    Assert-Decision 'TrialMarkerPresent' (Test-TransferTrialMarkerPresence $notStarted $true 1)
+    Assert-Decision 'TrialAttemptMarkerMissing' (Test-TransferTrialMarkerPresence $notStarted $false 0)
     Write-Output ('Decision assertions: '+$script:TransferDraftAssertionCount+'; strict JSON exception cases also passed.')
     return 'PURE GUARDS PASS: invocation, 64GiB, target, exact SID/name, attempt, bounded strict JSON, unified marker/receipt, opt-in isolation, 20GiB/IO cancellation. No SQL or filesystem mutation.'
 }

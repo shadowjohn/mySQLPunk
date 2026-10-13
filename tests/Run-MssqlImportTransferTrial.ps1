@@ -87,6 +87,8 @@ try{
     $finalPath=Join-Path $outputFull 'final.json'
     if(!(Test-Path -LiteralPath $finalPath -PathType Leaf)){throw 'Missing execution receipt; skipped or missing registration is not acceptance. Preserve marker/output.'}
     $receipt=ConvertFrom-TransferBoundedJson (Read-TrialBoundedBytes (Assert-TrialPath $finalPath))
+    $claimState=Test-TransferTrialMarkerPresence $receipt (Test-Path -LiteralPath $fixedAttempt -PathType Leaf) $child.ExitCode
+    if(!$claimState.Allowed){throw $claimState.Code}
     $markerBytes=Read-TrialBoundedBytes (Assert-TrialPath $fixedAttempt)
     $marker=ConvertFrom-TransferBoundedJson $markerBytes
     $expected=$request.Clone();$expected.ProcessId=[long]$child.Id;$expected.RequestSha256=Hash-TrialBytes $requestBytes
