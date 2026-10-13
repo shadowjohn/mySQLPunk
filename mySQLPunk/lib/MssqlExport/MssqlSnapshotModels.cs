@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Linq;
 namespace mySQLPunk.lib.MssqlExport
 {
     internal sealed class MssqlSnapshotIdentity
@@ -26,6 +27,26 @@ namespace mySQLPunk.lib.MssqlExport
             !IsWritable.HasValue ? MssqlSnapshotUnavailableReason.UpdateabilityUnknown : !IsWritable.Value ? MssqlSnapshotUnavailableReason.ReadOnly : MssqlSnapshotUnavailableReason.None;
         internal MssqlSnapshotCapability(MssqlSnapshotIdentity identity, int state, bool? canAlter, bool? isWritable)
         { Identity = identity; State = state; CanAlter = canAlter; IsWritable = isWritable; }
+    }
+    internal enum MssqlSnapshotStartRejection { None, SnapshotUnavailable, SnapshotBusy }
+    // Only explicit application decisions cross this boundary; provider text is never classified by message.
+    internal sealed class MssqlSnapshotStartException : InvalidOperationException
+    {
+        public MssqlSnapshotStartRejection Reason { get; }
+        public MssqlSnapshotCapability Capability { get; }
+        internal MssqlSnapshotStartException(MssqlSnapshotStartRejection reason, MssqlSnapshotCapability capability = null)
+            : base(reason == MssqlSnapshotStartRejection.SnapshotBusy ? "SnapshotBusy: another snapshot export is running; retry later." : "SnapshotUnavailable: recheck and review the read mode before starting.")
+        {
+            if (reason != MssqlSnapshotStartRejection.SnapshotBusy && reason != MssqlSnapshotStartRejection.SnapshotUnavailable) throw new ArgumentOutOfRangeException(nameof(reason));
+            Reason = reason; Capability = capability;
+        }
+        internal static void RequireValid(MssqlExportPreflight preflight)
+        {
+            if (preflight.CanStart) return;
+            if (preflight.Issues.Any(x => x.Code == "SnapshotUnavailable"))
+                throw new MssqlSnapshotStartException(MssqlSnapshotStartRejection.SnapshotUnavailable, preflight.SnapshotCapability);
+            throw new InvalidOperationException("Export preflight did not pass.");
+        }
     }
     internal enum MssqlSnapshotCleanupState { NotRequired, PreservedOn, RestoredOff, Unconfirmed }
     internal sealed class MssqlSnapshotCleanupResult

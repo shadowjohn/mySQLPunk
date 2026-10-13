@@ -60,6 +60,50 @@ public static partial class SmokeTests
             Assert(!safe.Message.Contains("SqlPermissionDenied") && !safe.Message.Contains("LoginRejected"), "Unknown failure does not invent a permission cause");
         }
     }
+    private static MssqlExportResult SnapshotStartFixture(MssqlExportRequest request, string fault, out List<string> calls)
+    {
+        calls = new List<string>();
+        var capability = new MssqlSnapshotCapability(WIdentity(), 0, fault != "inspect", true);
+        var basis = WorkerSchema();
+        var schema = new MssqlExportSchema(basis.Tables, null, null, 0, null, null, capability);
+        var source = new WorkerSource(schema, calls);
+        if (fault == "inspect") source.InspectIssues = new MssqlExportMetadataReader().ValidateStart(schema, request).ToArray();
+        else {
+            var backend = new SnapshotFakeBackend(calls) { Locks = fault == "busy" ? new HashSet<string> { "fixture" } : null };
+            if (fault == "post-enable") { backend.OnEnabled = () => backend.CanAlter = false; source.SnapshotReady = () => backend.ReadCapability(CancellationToken.None); }
+            if (fault == "prepare") backend.OnRead = () => backend.CanAlter = false;
+            if (fault == "partial") backend.OnRead = () => { if (backend.Events.Count(x => x == "read") == 2) backend.CanAlter = false; };
+            source.SnapshotLifecycle = new MssqlSnapshotLifecycle(backend, new SnapshotFakeStore(calls) { FailRemove = fault == "partial" }, request.JobId);
+        }
+        return new MssqlSqlExportService(() => source).Export(request, null, CancellationToken.None);
+    }
+    private static void SnapshotWorker_LateStartUnavailable()
+    {
+        foreach (string fault in new[] { "inspect", "prepare", "partial", "post-enable" }) {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql");
+            var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", WorkerSchema().Tables.Select(t => t.Key).ToList().AsReadOnly(), MssqlExportMode.DataOnly, false, path, null, null, true);
+            List<string> calls; var result = SnapshotStartFixture(request, fault, out calls);
+            AssertContains(result.ErrorMessage, "SnapshotUnavailable", "Selected snapshot capability rejection remains typed through actual worker " + fault);
+            Assert(result.StartRejection == MssqlSnapshotStartRejection.SnapshotUnavailable && result.StartCapability != null && !result.StartCapability.CanManage, "Typed unavailable category retains refreshed safe capability");
+            Assert(result.Stage == MssqlExportStage.Failed && result.PublishedPath == null && !File.Exists(path) && !calls.Contains("source.rows"), "No output or ordinary fallback after start rejection");
+            Assert(calls.Count(x => x == "restore") == 1 && calls.Contains("source.dispose"), "Start rejection still independently finishes and releases source");
+            if (fault == "post-enable") Assert(result.SnapshotCleanup.State == MssqlSnapshotCleanupState.Unconfirmed && result.SnapshotCleanup.ObservedState == 1 && result.Warnings.Contains("RestoreUnconfirmed") && result.ResidualPaths.Contains("fixture-journal"), "Post-enable source rejection retains independent Unconfirmed state, warning and journal");
+            if (fault == "partial") Assert(result.SnapshotCleanup.WarningCode == "JournalRemoveFailed" && result.ResidualPaths.Contains("fixture-journal"), "Partial Prepare journal cleanup warning survives typed rejection");
+        }
+    }
+    private static void SnapshotWorker_StartBusy()
+    {
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql");
+        var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", WorkerSchema().Tables.Select(t => t.Key).ToList().AsReadOnly(), MssqlExportMode.DataOnly, false, path, null, null, true);
+        List<string> calls; var result = SnapshotStartFixture(request, "busy", out calls);
+        AssertContains(result.ErrorMessage, "SnapshotBusy", "Actual lifecycle lock refusal remains actionable through worker");
+        Assert(result.StartRejection == MssqlSnapshotStartRejection.SnapshotBusy && result.StartCapability.CanManage, "Typed busy category preserves known capability without provider text");
+        Assert(result.Stage == MssqlExportStage.Failed && !File.Exists(path) && !calls.Contains("ON") && !calls.Contains("source.rows"), "Busy refusal cannot alter or write output");
+        Assert(calls.Contains("source.dispose") && !calls.Contains("unlock"), "Busy nonowner releases source without releasing another job lock");
+        var forged = new WorkerSource(WorkerSchema(), new List<string>()) { BeginFailure = new InvalidOperationException("SnapshotBusy;Password=private-secret") };
+        var generic = new MssqlSqlExportService(() => forged).Export(request, null, CancellationToken.None);
+        Assert(generic.StartRejection == MssqlSnapshotStartRejection.None && !generic.ErrorMessage.Contains("SnapshotBusy") && !generic.ErrorMessage.Contains("private-secret"), "Provider-like message cannot impersonate an allowlisted decision or leak payload");
+    }
     private static void SnapshotWorker_CancellationDuringCleanup()
     {
         string root = Path.Combine(Path.GetTempPath(), "snapshot-primary-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
@@ -342,12 +386,13 @@ public static partial class SmokeTests
     private sealed class WorkerSource : IMssqlExportSource
     {
         private readonly MssqlExportSchema schema; private readonly List<string> calls; private readonly Action disposed; private bool closed;
-        internal string Fault; internal CancellationTokenSource Cancel; internal bool ThrowFinish;
+        internal string Fault; internal CancellationTokenSource Cancel; internal bool ThrowFinish; internal Exception BeginFailure;
+        internal MssqlExportIssue[] InspectIssues; internal MssqlSnapshotLifecycle SnapshotLifecycle; internal Func<MssqlSnapshotCapability> SnapshotReady;
         internal Action DuringFinish; internal bool FailReaderRead, FailReaderDispose, CancelOnReaderRead, CancelOnReaderDispose; internal MssqlRowReader LastReader;
         internal WorkerSource(MssqlExportSchema schema, List<string> calls, Action disposed = null) { this.schema = schema; this.calls = calls; this.disposed = disposed; calls.Add("source.open"); }
         public MssqlExportCatalog ReadCatalog(string db, CancellationToken c) { c.ThrowIfCancellationRequested(); return new MssqlExportCatalog(schema.Tables, 1, null); }
-        public MssqlExportPreflight Inspect(MssqlExportRequest r, CancellationToken c) { calls.Add("source.inspect"); return new MssqlExportPreflight(schema, Fault == "inspect" ? new[] { new MssqlExportIssue("Denied", null, null, "denied") } : null); }
-        public MssqlExportSchema BeginRead(MssqlExportRequest r, Action<MssqlExportStage> report, CancellationToken c) { calls.Add("source.begin"); if (Fault == "begin") throw new IOException("snapshot failed"); return schema; }
+        public MssqlExportPreflight Inspect(MssqlExportRequest r, CancellationToken c) { calls.Add("source.inspect"); return new MssqlExportPreflight(schema, InspectIssues ?? (Fault == "inspect" ? new[] { new MssqlExportIssue("Denied", null, null, "denied") } : null)); }
+        public MssqlExportSchema BeginRead(MssqlExportRequest r, Action<MssqlExportStage> report, CancellationToken c) { calls.Add("source.begin"); if (BeginFailure != null) throw BeginFailure; SnapshotLifecycle?.Prepare(report, c); if (SnapshotReady != null) MssqlExportSource.RequireSnapshotReady(SnapshotReady()); if (Fault == "begin") throw new IOException("snapshot failed"); return schema; }
         public MssqlRowReader OpenRows(MssqlTableDefinition t, CancellationToken c) {
             calls.Add("source.rows"); if (Fault == "rows") throw new IOException("DB disconnected private connection-string");
             if (Fault == "cancel-read") { Cancel.Cancel(); c.ThrowIfCancellationRequested(); }
@@ -358,7 +403,7 @@ public static partial class SmokeTests
         }
         public void CompleteRead(MssqlExportSchema s, CancellationToken c) { calls.Add("source.complete"); if (Fault == "complete") throw new InvalidOperationException("schema fingerprint changed"); }
         internal MssqlSnapshotCleanupResult Cleanup = new MssqlSnapshotCleanupResult(MssqlSnapshotCleanupState.NotRequired, null, null, null);
-        public MssqlSnapshotCleanupResult FinishRead(Action<MssqlExportStage> report) { calls.Add("restore"); DuringFinish?.Invoke(); if (ThrowFinish) throw new IOException("private cleanup"); report?.Invoke(MssqlExportStage.RestoringSnapshot); return Cleanup; }
+        public MssqlSnapshotCleanupResult FinishRead(Action<MssqlExportStage> report) { calls.Add("restore"); DuringFinish?.Invoke(); if (ThrowFinish) throw new IOException("private cleanup"); report?.Invoke(MssqlExportStage.RestoringSnapshot); return SnapshotLifecycle == null ? Cleanup : SnapshotLifecycle.Restore(report); }
         public void Dispose() { if (closed) return; closed = true; calls.Add("source.dispose"); disposed?.Invoke(); }
     }
     private sealed class WorkerReadFailure : System.Data.Common.DbDataReader

@@ -82,7 +82,8 @@ namespace mySQLPunk.lib.MssqlExport
                 lifecycle = new MssqlSnapshotLifecycle(snapshotBackend, recoveryStore, value.JobId, deadlineFactory);
                 lifecycle.Prepare(report, cancellation);
                 // Prepare confirms ON within its budget; recheck immediately before beginning the data transaction.
-                if (snapshotBackend.ReadCapability(cancellation).State != 1) throw new InvalidOperationException("SnapshotStateUnconfirmed");
+                var capability = snapshotBackend.ReadCapability(cancellation);
+                RequireSnapshotReady(capability);
             }
             var isolation = ReadIsolation(value);
             if (isolation.HasValue) transaction = session.Connection.BeginTransaction(isolation.Value);
@@ -117,8 +118,10 @@ namespace mySQLPunk.lib.MssqlExport
             cancellation.ThrowIfCancellationRequested();
             if (transaction != null) { transaction.Commit(); transaction.Dispose(); transaction = null; }
         }
+        internal static void RequireSnapshotReady(MssqlSnapshotCapability capability)
+        { if (capability == null || capability.State != 1 || !capability.CanManage) throw new MssqlSnapshotStartException(MssqlSnapshotStartRejection.SnapshotUnavailable, capability); }
         private static void RequireValid(MssqlExportPreflight preflight)
-        { if (!preflight.CanStart) throw new InvalidOperationException(string.Join(Environment.NewLine, preflight.Issues.Select(x => x.Code + ": " + x.Message))); }
+        { MssqlSnapshotStartException.RequireValid(preflight); }
         private void CheckAlive() { if (disposed) throw new ObjectDisposedException(nameof(MssqlExportSource)); }
         private void CheckIdle() { CheckAlive(); if (request != null) throw new InvalidOperationException("A read is already active."); }
         public MssqlSnapshotCleanupResult FinishRead(Action<MssqlExportStage> report)

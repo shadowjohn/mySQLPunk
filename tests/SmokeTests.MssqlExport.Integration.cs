@@ -37,6 +37,87 @@ public static partial class SmokeTests
         }
     }
 
+    private sealed class RestoreProcessReceipt
+    {
+        public bool TimedOut, TerminationConfirmed, OutputComplete, TerminationFailed;
+        public int? ExitCode;
+        public string Stdout, Stderr;
+        public long StdoutCharacters, StderrCharacters;
+    }
+    private sealed class RestoreOutput
+    {
+        internal const int Limit = 65536;
+        private readonly StringBuilder text = new StringBuilder();
+        internal long Characters;
+        internal async System.Threading.Tasks.Task Drain(StreamReader reader)
+        {
+            var buffer = new char[4096]; int count;
+            while ((count = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) != 0) {
+                lock (text) { Characters += count; text.Append(buffer, 0, count); if (text.Length > Limit) text.Remove(0, text.Length - Limit); }
+            }
+        }
+        internal string Capture() { lock (text) return text.ToString(); }
+    }
+    // This helper owns only the Process.Start return value. It cannot enumerate or kill other processes.
+    private static int RunOwnedRestore(ProcessStartInfo start, int timeoutMilliseconds, Action<RestoreProcessReceipt> save)
+    {
+        using (var process = Process.Start(start)) {
+            var output = new RestoreOutput(); var errors = new RestoreOutput();
+            var stdout = output.Drain(process.StandardOutput); var stderr = errors.Drain(process.StandardError);
+            bool timedOut = !process.WaitForExit(timeoutMilliseconds), terminationFailed = false;
+            if (timedOut) {
+                try { process.Kill(); }
+                catch (InvalidOperationException) { /* The owned child may have exited at the deadline. */ }
+                catch (System.ComponentModel.Win32Exception) { terminationFailed = true; }
+            }
+            bool reaped = process.WaitForExit(10000);
+            bool complete = false;
+            try { complete = System.Threading.Tasks.Task.WaitAll(new[] { stdout, stderr }, 10000); }
+            catch (AggregateException) { /* Available bounded output and incomplete receipt still survive. */ }
+            var receipt = new RestoreProcessReceipt {
+                TimedOut = timedOut, TerminationConfirmed = reaped, TerminationFailed = terminationFailed,
+                ExitCode = reaped ? (int?)process.ExitCode : null, OutputComplete = complete,
+                Stdout = output.Capture(), Stderr = errors.Capture(), StdoutCharacters = output.Characters, StderrCharacters = errors.Characters
+            };
+            save(receipt); // Persist output and actual exit/termination truth BEFORE throwing.
+            if (timedOut) throw new TimeoutException("Owned sqlcmd restore exceeded profile deadline");
+            if (!reaped || !complete) throw new IOException("Owned sqlcmd output capture incomplete");
+            return receipt.ExitCode.Value;
+        }
+    }
+    private static int RestoreProcessChild(string mode)
+    {
+        Console.WriteLine("owned stdout begin"); Console.Error.WriteLine("owned stderr begin");
+        if (mode == "--owned-restore-fixture-timeout") {
+            Console.Write(new string('o', RestoreOutput.Limit + 4096)); Console.WriteLine("owned stdout tail");
+            Console.Error.Write(new string('e', RestoreOutput.Limit + 4096)); Console.Error.WriteLine("owned stderr tail");
+            Console.Out.Flush(); Console.Error.Flush(); Thread.Sleep(Timeout.Infinite);
+        }
+        return mode == "--owned-restore-fixture-failure" ? 7 : 0;
+    }
+    private static void RestoreProcess_TimeoutEvidence()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "owned-restore-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        try {
+            foreach (string mode in new[] { "success", "failure", "timeout" }) {
+                RestoreProcessReceipt receipt = null; bool timeout = false;
+                var start = new ProcessStartInfo(System.Windows.Forms.Application.ExecutablePath, "--owned-restore-fixture-" + mode) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+                try {
+                    int exit = RunOwnedRestore(start, mode == "timeout" ? 2000 : 10000, r => {
+                        receipt = r; File.WriteAllText(Path.Combine(root, mode + ".json"), JsonConvert.SerializeObject(r));
+                    });
+                    Assert(exit == (mode == "failure" ? 7 : 0), "Non-timeout child preserves exact exit truth");
+                } catch (TimeoutException) { timeout = true; }
+                Assert(receipt != null && receipt.TerminationConfirmed && receipt.OutputComplete && File.Exists(Path.Combine(root, mode + ".json")), "Receipt persists after owned child reap");
+                Assert(timeout == (mode == "timeout") && receipt.TimedOut == timeout, "Timeout still fails after evidence is saved");
+                Assert(receipt.Stdout.Length <= RestoreOutput.Limit && receipt.Stderr.Length <= RestoreOutput.Limit, "Available output is bounded independently");
+                if (timeout) {
+                    Assert(receipt.ExitCode.HasValue && receipt.ExitCode.Value != 0 && !receipt.TerminationFailed, "Owned terminated process cannot be reported as successful restore");
+                    Assert(receipt.StdoutCharacters > RestoreOutput.Limit && receipt.StderrCharacters > RestoreOutput.Limit && receipt.Stdout.Contains("owned stdout tail") && receipt.Stderr.Contains("owned stderr tail"), "Bounded tail and original character counts survive timeout");
+                }
+            }
+        } finally { Directory.Delete(root, true); }
+    }
     private sealed class IntegrationFixture : IDisposable
     {
         internal readonly string Server, Root, Token, Source, Target, Profile;
@@ -148,15 +229,16 @@ public static partial class SmokeTests
             string args = "-S \"" + endpoint + "\" -d " + Target + " -E -b -x " + (go ? "" : "-f 65001 ") + "-i \"" + file + "\"";
             var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_SQLCMD"),args) { UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true };
             var elapsed = Stopwatch.StartNew();
-            using (var p = Process.Start(start))
-            {
-                var stdout = p.StandardOutput.ReadToEndAsync(); var stderr = p.StandardError.ReadToEndAsync(); if (!p.WaitForExit(Profile == "Large" ? 3600000 : 300000)) { p.Kill(); p.WaitForExit(10000); throw new TimeoutException("Owned sqlcmd restore exceeded profile deadline"); }
-                int attempt = ++restoreSequence;
-                File.WriteAllText(file + ".restore-" + attempt + ".log",stdout.Result + stderr.Result);
+            int attempt = ++restoreSequence;
+            int exitCode = RunOwnedRestore(start, Profile == "Large" ? 3600000 : 300000, receipt => {
+                File.WriteAllText(file + ".restore-" + attempt + ".log", receipt.Stdout + receipt.Stderr);
                 elapsed.Stop();
-                Evidence["restore-" + Path.GetFileName(file) + "-" + attempt] = new { command = "sqlcmd " + args, exitCode = p.ExitCode, elapsed=elapsed.Elapsed };
-                Save(); Assert(expectSuccess ? p.ExitCode == 0 : p.ExitCode != 0,"sqlcmd single-session expected exit for " + file + ": " + p.ExitCode);
-            }
+                Evidence["restore-" + Path.GetFileName(file) + "-" + attempt] = new { command = "sqlcmd " + args, exitCode = receipt.ExitCode, elapsed=elapsed.Elapsed,
+                    timedOut = receipt.TimedOut, terminationConfirmed = receipt.TerminationConfirmed, terminationFailed = receipt.TerminationFailed, outputComplete = receipt.OutputComplete,
+                    stdoutCharacters = receipt.StdoutCharacters, stderrCharacters = receipt.StderrCharacters, outputLimitPerStream = RestoreOutput.Limit };
+                Save();
+            });
+            Assert(expectSuccess ? exitCode == 0 : exitCode != 0,"sqlcmd single-session expected exit for " + file + ": " + exitCode);
         }
         internal void RecordArtifact(string file)
         {

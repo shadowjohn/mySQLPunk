@@ -65,6 +65,7 @@ namespace mySQLPunk.lib.MssqlExport
             var estimator = new MssqlExportProgressEstimator(request.JobId, new MssqlExportSchema(null, null, null, 0, null), request.Mirror != null);
             var stage = MssqlExportStage.Preflight; bool succeeded = false; bool canceled = false; string error = null;
             MssqlSnapshotCleanupResult cleanup = null;
+            var startRejection = MssqlSnapshotStartRejection.None; MssqlSnapshotCapability startCapability = null;
             Exception sourceError = null; bool sourceCanceled = false;
             Action<Exception> captureSourceFailure = ex => {
                 if (sourceError != null) return;
@@ -87,7 +88,8 @@ namespace mySQLPunk.lib.MssqlExport
                 try
                 {
                     var preflight = source.Inspect(request, cancellation);
-                    if (!preflight.CanStart) throw new InvalidOperationException("Export preflight did not pass.");
+                    startCapability = preflight.SnapshotCapability;
+                    MssqlSnapshotStartException.RequireValid(preflight);
                     var schema = source.BeginRead(request, s => { stage = s; report(estimator.Sample(s, null, 0, 0, written, clock.Elapsed, true)); }, cancellation);
                     estimator = new MssqlExportProgressEstimator(request.JobId, schema, request.Mirror != null);
                     cancellation.ThrowIfCancellationRequested();
@@ -168,8 +170,10 @@ namespace mySQLPunk.lib.MssqlExport
                 var primary = sourceError ?? ex;
                 canceled = sourceError != null ? sourceCanceled : cancellation.IsCancellationRequested;
                 // SQL/provider messages can contain credentials or row values. Return only a safe category.
+                var rejected = canceled ? null : primary as MssqlSnapshotStartException;
+                if (rejected != null) { startRejection = rejected.Reason; startCapability = rejected.Reason == MssqlSnapshotStartRejection.SnapshotBusy ? rejected.Capability ?? startCapability : rejected.Capability; }
                 var prerequisite = canceled ? null : MssqlExportPrerequisiteException.From(primary);
-                error = canceled ? "Export canceled." : prerequisite != null ? "Export failed during " + stage + ". " + prerequisite.Message : "Export failed during " + stage + " (" + primary.GetType().Name + ").";
+                error = canceled ? "Export canceled." : rejected != null ? rejected.Message : prerequisite != null ? "Export failed during " + stage + ". " + prerequisite.Message : "Export failed during " + stage + " (" + primary.GetType().Name + ").";
             }
             finally
             {
@@ -193,7 +197,7 @@ namespace mySQLPunk.lib.MssqlExport
             else if (published != null) stage = MssqlExportStage.LocalCompletedMirrorIncomplete;
             else stage = canceled ? MssqlExportStage.Canceled : MssqlExportStage.Failed;
             report(estimator.Sample(stage, null, 0, 0, written, clock.Elapsed, true));
-            return new MssqlExportResult(request.JobId, stage, published, mirrorPath, counts, clock.Elapsed, warnings, residuals, error, request.UseSnapshot, cleanup);
+            return new MssqlExportResult(request.JobId, stage, published, mirrorPath, counts, clock.Elapsed, warnings, residuals, error, request.UseSnapshot, cleanup, startRejection, startRejection == MssqlSnapshotStartRejection.None ? null : startCapability);
         }
     }
 }

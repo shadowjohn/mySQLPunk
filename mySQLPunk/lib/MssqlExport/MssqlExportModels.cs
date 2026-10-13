@@ -427,11 +427,16 @@ namespace mySQLPunk.lib.MssqlExport
         public string ErrorMessage { get; }
         public bool UseSnapshot { get; }
         public MssqlSnapshotCleanupResult SnapshotCleanup { get; }
+        public MssqlSnapshotStartRejection StartRejection { get; }
+        public MssqlSnapshotCapability StartCapability { get; }
         internal MssqlExportResult(Guid jobId, MssqlExportStage stage, string publishedPath, string mirrorPath,
-            IEnumerable<MssqlTableRowCount> rows, TimeSpan elapsed, IEnumerable<string> warnings, IEnumerable<string> residuals, string errorMessage, bool useSnapshot = false, MssqlSnapshotCleanupResult snapshotCleanup = null)
+            IEnumerable<MssqlTableRowCount> rows, TimeSpan elapsed, IEnumerable<string> warnings, IEnumerable<string> residuals, string errorMessage, bool useSnapshot = false, MssqlSnapshotCleanupResult snapshotCleanup = null,
+            MssqlSnapshotStartRejection startRejection = MssqlSnapshotStartRejection.None, MssqlSnapshotCapability startCapability = null)
         {
             JobId = jobId; Stage = stage; PublishedPath = publishedPath; MirrorPath = mirrorPath; RowCounts = MssqlNativeFacts.Copy(rows);
             Elapsed = elapsed; Warnings = MssqlNativeFacts.Copy(warnings); ResidualPaths = MssqlNativeFacts.Copy(residuals); ErrorMessage = errorMessage; UseSnapshot = useSnapshot; SnapshotCleanup = snapshotCleanup;
+            if (!Enum.IsDefined(typeof(MssqlSnapshotStartRejection), startRejection)) throw new ArgumentOutOfRangeException(nameof(startRejection));
+            StartRejection = startRejection; StartCapability = startCapability;
         }
     }
 

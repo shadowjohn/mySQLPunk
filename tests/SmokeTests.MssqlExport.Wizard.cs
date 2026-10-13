@@ -46,6 +46,42 @@ public static partial class SmokeTests
             Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Stale capability response cannot prepare request"); form.Close();
         }
     }
+    private static void SnapshotWizard_LateStartRejection()
+    {
+        foreach (string fault in new[] { "inspect", "prepare", "busy", "partial", "post-enable" }) {
+            var service = new WizardService { CapabilityOverride = new MssqlSnapshotCapability(WIdentity(), 0, true, true) };
+            service.StartOutcome = r => { List<string> calls; return SnapshotStartFixture(r, fault, out calls); };
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql");
+            using (var form = WForm(service, path, new[] { new MssqlObjectKey(2, "sales", "orders") })) {
+                form.Show(); WPump(() => WControl<Button>(form, "mssqlStart").Enabled); WClick(form, "mssqlStart");
+                WControl<RadioButton>(form, "mssqlDataOnly").Checked = true;
+                WControl<RadioButton>(form, "mssqlSnapshotYes").Checked = true;
+                WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+                Assert(service.Seen.UseSnapshot, "Fixture successfully confirms Yes before late worker rejection");
+                WClick(form, "mssqlStart"); WPump(() => service.ExportCalls == 1 && WControl<Button>(form, "mssqlCancel").Enabled);
+                WPump(() => WControl<Button>(form, "mssqlRetry").Visible);
+                Assert(WControl<Panel>(form, "mssqlStep2").Visible && WControl<Button>(form, "mssqlBack").Visible && !WControl<Button>(form, "mssqlStart").Enabled, "Late start rejection returns confirmation and requires explicit recheck");
+                string message = WControl<Label>(form, "mssqlConfirmation").Text;
+                AssertContains(message, fault == "busy" ? "SnapshotBusy" : "SnapshotUnavailable", "Confirmation includes safe rejection category");
+                Assert(WControl<TextBox>(form, "mssqlOutputPath").Text == path && WControl<RadioButton>(form, "mssqlDataOnly").Checked && service.Seen.Tables.Count == 1 && service.Seen.Tables[0].ObjectId == 2, "Late rejection preserves path, mode and table choices");
+                if (fault != "busy") Assert(WControl<RadioButton>(form, "mssqlSnapshotNo").Checked && message.Contains("READ COMMITTED"), "Capability decline explicitly switches to No with ordinary-read warning");
+                else Assert(message.Contains("稍後") || message.Contains("later"), "Busy explains retry later");
+                if (fault == "post-enable") Assert(message.Contains("Unconfirmed") && message.Contains("ON (1)") && message.Contains("fixture-journal") && message.Contains("RestoreUnconfirmed"), "Confirmation retains post-enable Unconfirmed cleanup details");
+                if (fault == "partial") Assert(message.Contains("fixture-journal") && message.Contains("JournalRemoveFailed"), "Confirmation preserves partial Prepare recovery details");
+                Assert(service.ExportCalls == 1 && !File.Exists(path), "No silent retry after decline or busy");
+                service.CapabilityOverride = new MssqlSnapshotCapability(WIdentity(), 0, fault == "busy", true);
+                WClick(form, "mssqlRetry"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+                Assert(service.ExportCalls == 1 && service.Seen.UseSnapshot == (fault == "busy"), "Explicit recheck prepares reviewed mode without starting another export");
+                if (fault == "partial" || fault == "post-enable") {
+                    AssertContains(WControl<Label>(form, "mssqlConfirmation").Text, "fixture-journal", "Recovery warning remains visible after recheck");
+                    service.PreflightFailure = new InvalidOperationException("private provider text");
+                    WClick(form, "mssqlRetry"); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+                    Assert(!WControl<Button>(form, "mssqlStart").Enabled && WControl<Label>(form, "mssqlConfirmation").Text.Contains("fixture-journal"), "Failed review cannot hide earlier recovery warning");
+                }
+                form.Close();
+            }
+        }
+    }
     private static void SnapshotWizard_RecoveryAndTerminalStatus()
     {
         var unknownRecord = new MssqlSnapshotRecoveryRecord(Guid.NewGuid(), WIdentity(), 0, MssqlSnapshotRecoveryPhase.Unconfirmed, 1, DateTime.UtcNow, MssqlSnapshotRecoveryCode.RestoreUnconfirmed);
@@ -224,6 +260,7 @@ public static partial class SmokeTests
         internal int? SnapshotOverride;
         internal MssqlSnapshotCapability CapabilityOverride;
         internal MssqlSnapshotCleanupResult Cleanup;
+        internal Func<MssqlExportRequest, MssqlExportResult> StartOutcome; internal int ExportCalls;
         internal IReadOnlyList<MssqlSnapshotRecoveryNotice> Notices = new MssqlSnapshotRecoveryNotice[0];
         internal override IReadOnlyList<MssqlSnapshotRecoveryNotice> LoadRecoveryNotices(MssqlSnapshotIdentity identity) => Notices;
         internal bool IgnoreInspectionCancellation;
@@ -266,7 +303,8 @@ public static partial class SmokeTests
         {
             Seen = request;
             Progress = progress;
-            Exporting = true;
+            Exporting = true; Interlocked.Increment(ref ExportCalls);
+            if (StartOutcome != null) return StartOutcome(request);
             if (Preview)
             {
                 Frame(request.JobId, 12345678);

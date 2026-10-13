@@ -27,9 +27,14 @@ public static partial class SmokeTests
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args.Length == 1 && args[0].StartsWith("--owned-restore-fixture-", StringComparison.Ordinal)) return RestoreProcessChild(args[0]);
         if (args.Length != 0) return SnapshotCrashChild(args);
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL export restore process timeout evidence", RestoreProcess_TimeoutEvidence, ref passed);
+        Run("MSSQL export snapshot worker late start unavailable", SnapshotWorker_LateStartUnavailable, ref passed);
+        Run("MSSQL export snapshot worker start busy", SnapshotWorker_StartBusy, ref passed);
+        Run("MSSQL export snapshot wizard late start rejection", SnapshotWizard_LateStartRejection, ref passed);
         Run("MSSQL export snapshot worker cleanup cancellation", SnapshotWorker_CancellationDuringCleanup, ref passed);
         Run("MSSQL export snapshot worker reader disposal", SnapshotWorker_ReadAndDisposeFailures, ref passed);
         Run("MSSQL export snapshot worker notices", SnapshotWorker_RecoveryNotices, ref passed);

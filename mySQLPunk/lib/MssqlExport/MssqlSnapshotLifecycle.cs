@@ -63,10 +63,10 @@ namespace mySQLPunk.lib.MssqlExport
                 try
                 {
                     deadline.Check();
-                    if (!backend.TryAcquireLock(deadline.Token)) throw new InvalidOperationException("SnapshotBusy");
+                    if (!backend.TryAcquireLock(deadline.Token)) throw new MssqlSnapshotStartException(MssqlSnapshotStartRejection.SnapshotBusy);
                     locked = true;
                     var capability = Read(deadline);
-                    if (!capability.CanManage) throw new InvalidOperationException("SnapshotCapabilityUnavailable");
+                    if (!capability.CanManage) throw new MssqlSnapshotStartException(MssqlSnapshotStartRejection.SnapshotUnavailable, capability);
                     identity = capability.Identity; original = capability.State;
                     if (original == 1) return;
                     Report(report, MssqlExportStage.EnablingSnapshot);
@@ -78,7 +78,7 @@ namespace mySQLPunk.lib.MssqlExport
                     catch (Exception) { Warn(MssqlSnapshotRecoveryCode.JournalUpdateFailed); throw; }
                     var fresh = Read(deadline);
                     RequireIdentity(fresh);
-                    if (!fresh.CanManage || fresh.State != 0) throw new InvalidOperationException("SnapshotCapabilityChanged");
+                    if (!fresh.CanManage || fresh.State != 0) throw new MssqlSnapshotStartException(MssqlSnapshotStartRejection.SnapshotUnavailable, fresh);
                     deadline.Check(); attemptedEnable = true;
                     try { backend.SetEnabled(true, deadline.Token); }
                     catch (MssqlSnapshotSettingNotAttemptedException ex)
