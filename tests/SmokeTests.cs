@@ -32,6 +32,8 @@ public static partial class SmokeTests
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_IMPORT_WIZARD_PREVIEW") == "1") return ImportWizardPreview();
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL import Transfer guards", MssqlImportTransferGuards, ref passed);
+        Run("MSSQL import Transfer trial", MssqlImportTransferTrial, ref passed);
         Run("MSSQL import worker published cleanup receipt", MssqlImportPublishedReleaseRace, ref passed);
         Run("MSSQL import worker cleanup diagnostics", MssqlImportCleanupErrorDiagnostics, ref passed);
         Run("MSSQL import integration guards", MssqlImportIntegrationGuards, ref passed);

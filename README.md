@@ -248,7 +248,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | Database inline rename | 可用 | Database、Table、View 可用 F2 或右鍵改名；Esc 只取消編輯。MySQL 以完整 SQL 串流複製並保留舊 DB，PostgreSQL/SQL Server 使用原生 rename，SQLite 會移動檔案並更新連線路徑。 |
 | PostgreSQL | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；`public` 以外的 schema 會以 `schema.table` 顯示並可用於主要資料表操作，部分進階索引仍有限制。 |
 | SQLite | 可用 | 支援一般 SQLite 與 SpatiaLite 載入；欄位註解以 mySQLPunk sidecar metadata table 保存。 |
-| SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；`dbo` 以外的 schema 會以 `schema.table` 顯示並可用於主要資料表操作。 |
+| SQL Server | 可用 | 支援 metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；`dbo` 以外的 schema 會以 `schema.table` 顯示並可用於主要資料表操作。Windows「執行 SQL 檔」提供串流 GO 匯入精靈、進度／取消與錯誤紀錄，詳見 [MSSQL SQL 檔匯入](docs/MSSQL_SQL_IMPORT.md)。 |
 | Oracle | 部分可用 | 支援 schema/table/view metadata、資料瀏覽、資料編輯、DDL、Dump、Table Designer；部分 DDL 仍受權限、語法與物件型態限制。 |
 | MongoDB | 第三期可用 | 支援一般與 SRV 連線、URI 匯入、database／collection／view metadata、抽樣 schema 推斷、索引與統計資訊、分頁文件瀏覽與 JSON find 查詢；文件檢視器提供可展開文件樹、單一文件安全編輯（`_id` 鎖定＋樂觀並行比對）、文件新增與安全刪除。standalone 4.4／7.0／8.0 已通過實機矩陣；Atlas／SRV 驗證環境與 Aggregation Pipeline 仍在後續階段。 |
 | Redis / Microsoft Garnet | 第三期可用 | 支援 `redis://`／`rediss://`、ACL／密碼驗證、logical db、TLS 直連、key 型別／TTL／摘要瀏覽與 pattern／type／單一 key 受限查詢；key 編輯器依型別切換，string 值、hash 欄位、list 元素（含依索引安全刪除與尾端新增）、set 成員與 zset 分數都以 WATCH/MULTI/EXEC 並行保護寫入，另有 TTL 設定／移除與刪除 key。資料庫節點可開啟 INFO 即時監控及 Pub/Sub 訊息工作區，支援 channel／pattern 訂閱與明確發布。Redis 6.2、Redis 7 與 Garnet standalone 既有各 39 項實機矩陣通過，新增案例待重跑；Cluster／Sentinel 仍待補。 |
