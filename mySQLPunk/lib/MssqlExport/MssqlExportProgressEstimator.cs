@@ -37,7 +37,7 @@ namespace mySQLPunk.lib.MssqlExport
                 {
                     // A terminal failure does not claim that its interrupted table completed.
                     completedRows += tableRows; completedBytes += tableBytes;
-                    if (!terminal || stage == MssqlExportStage.Completed) completed.Add(current.ObjectId);
+                    if ((!terminal && stage != MssqlExportStage.RestoringSnapshot && stage != MssqlExportStage.EnablingSnapshot) || stage == MssqlExportStage.Completed) completed.Add(current.ObjectId);
                 }
                 current = table; tableRows = 0; tableBytes = 0;
             }
@@ -103,7 +103,8 @@ namespace mySQLPunk.lib.MssqlExport
                 }
                 else state = MssqlExportEstimationState.Unreliable;
             }
-            if (terminal || stage == MssqlExportStage.Publishing) { eta = null; bytesPerSecond = null; }
+            if (stage == MssqlExportStage.EnablingSnapshot || stage == MssqlExportStage.RestoringSnapshot) state = MssqlExportEstimationState.Waiting;
+            if (terminal || stage == MssqlExportStage.Publishing || stage == MssqlExportStage.EnablingSnapshot || stage == MssqlExportStage.RestoringSnapshot) { eta = null; bytesPerSecond = null; }
             if (stage == MssqlExportStage.Completed) { lastPercent = 100; state = MssqlExportEstimationState.Complete; }
             string message = state == MssqlExportEstimationState.Waiting ? "Waiting for progress" : stage.ToString();
             return new MssqlExportProgress(jobId, stage, current, tableRows, tableBytes, actualRows, actualBytes, written,

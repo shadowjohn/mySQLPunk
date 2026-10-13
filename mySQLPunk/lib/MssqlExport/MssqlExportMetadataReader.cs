@@ -19,7 +19,8 @@ namespace mySQLPunk.lib.MssqlExport
             EnsureVisibility(connection, null, cancellation);
             var tables = ReadTables(connection, null, cancellation);
             var issues = tables.Where(t => !t.Flag("can_select")).Select(t => new MssqlExportIssue("UnreadableTable", t.Key, null, "SELECT permission is required."));
-            return new MssqlExportCatalog(tables, Snapshot(connection, null, cancellation), issues);
+            var capability = new MssqlSnapshotBackend(connection).ReadCapability(cancellation);
+            return new MssqlExportCatalog(tables, capability.State, issues, capability);
         }
         internal MssqlExportSchema ReadSchema(SqlConnection connection, SqlTransaction transaction, MssqlExportRequest request, CancellationToken cancellation)
         {
@@ -75,28 +76,88 @@ JOIN sys.columns rc ON rc.object_id=f.referenced_object_id AND rc.column_id=f.re
             if (request.IncludeViews)
                 foreach (var r in Query(connection, transaction, @"SELECT v.object_id,SCHEMA_NAME(v.schema_id) schema_name,v.name,m.definition,m.uses_ansi_nulls,m.uses_quoted_identifier,m.is_schema_bound,v.with_check_option,
 (SELECT COUNT(*) FROM sys.indexes i WHERE i.object_id=v.object_id AND i.index_id>0) index_count,
-(SELECT COUNT(*) FROM sys.triggers t WHERE t.parent_id=v.object_id) trigger_count,
-(SELECT COUNT(*) FROM sys.extended_properties e WHERE e.class=1 AND e.major_id=v.object_id) unsupported_properties
+(SELECT COUNT(*) FROM sys.triggers t WHERE t.parent_id=v.object_id) trigger_count
 FROM sys.views v LEFT JOIN sys.sql_modules m ON m.object_id=v.object_id WHERE v.is_ms_shipped=0 ORDER BY v.object_id", cancellation))
                 { var f = new MssqlNativeFacts(r); views.Add(new MssqlViewDefinition(new MssqlObjectKey(f.Number("object_id"), f.Text("schema_name"), f.Text("name")), r)); }
             var objectIds = new HashSet<int>(selected.Select(x => x.Key.ObjectId).Concat(views.Select(x => x.Key.ObjectId)));
             var dependencies = new List<MssqlDependency>();
             foreach (var r in Query(connection, transaction, @"SELECT CASE WHEN o.parent_object_id<>0 THEN o.parent_object_id ELSE d.referencing_id END object_id,
-d.referenced_id,d.referenced_server_name,d.referenced_database_name,d.referenced_schema_name,d.referenced_entity_name
-FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.referencing_id WHERE d.referenced_class=1", cancellation))
-            { var f = new MssqlNativeFacts(r); if (objectIds.Contains(f.Number("object_id"))) dependencies.Add(new MssqlDependency(f.Number("object_id"), f.Text("referenced_id") == null ? (int?)null : f.Number("referenced_id"), f.Text("referenced_server_name"), f.Text("referenced_database_name"), f.Text("referenced_schema_name"), f.Text("referenced_entity_name"))); }
-            return new MssqlExportSchema(selected, views, dependencies, Snapshot(connection, transaction, cancellation), issues);
+d.referenced_id,d.referenced_server_name,d.referenced_database_name,d.referenced_schema_name,d.referenced_entity_name,
+d.is_ambiguous,d.is_caller_dependent,DB_ID() source_database_id,DB_ID(d.referenced_database_name) referenced_database_id,
+local_object.object_id resolved_local_id
+FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.referencing_id
+LEFT JOIN sys.objects local_object ON d.referenced_server_name IS NULL AND d.referenced_database_name IS NOT NULL
+AND DB_ID(d.referenced_database_name)=DB_ID() AND d.referenced_schema_name IS NOT NULL
+AND local_object.object_id=OBJECT_ID(QUOTENAME(d.referenced_schema_name)+N'.'+QUOTENAME(d.referenced_entity_name))
+AND local_object.type IN ('U','V')
+WHERE d.referenced_class=1", cancellation))
+            {
+                var f = new MssqlNativeFacts(r);
+                if (objectIds.Contains(f.Number("object_id"))) dependencies.Add(new MssqlDependency(f.Number("object_id"), NullableNumber(f, "referenced_id"),
+                    f.Text("referenced_server_name"), f.Text("referenced_database_name"), f.Text("referenced_schema_name"), f.Text("referenced_entity_name"),
+                    NullableNumber(f, "source_database_id"), NullableNumber(f, "referenced_database_id"), NullableNumber(f, "resolved_local_id"),
+                    f.Flag("is_ambiguous"), f.Flag("is_caller_dependent")));
+            }
+            var properties = ReadExtendedProperties(connection, transaction, objectIds, cancellation);
+            var capability = new MssqlSnapshotBackend(connection, transaction).ReadCapability(cancellation);
+            var schema = new MssqlExportSchema(selected, views, dependencies, capability.State, issues, extendedProperties: properties, snapshotCapability: capability);
+            return PrepareViewReferences(schema, request, (database, ownerSchema, name) => ResolveViewReference(connection, transaction, database, ownerSchema, name, cancellation));
+        }
+        internal static MssqlExportSchema PrepareViewReferences(MssqlExportSchema schema, MssqlExportRequest request,
+            Func<string, string, string, MssqlViewReferenceResolution> resolver)
+        {
+            if (request.Mode == MssqlExportMode.DataOnly) return schema;
+            var views = schema.Views.ToList();
+            var dependencies = schema.Dependencies.ToList();
+            var issues = schema.Issues.ToList();
+            var selected = new HashSet<int>(schema.Tables.Select(x => x.Key.ObjectId).Concat(views.Select(x => x.Key.ObjectId)));
+            bool changed = false;
+            for (int i = 0; i < views.Count; i++)
+            {
+                var view = views[i];
+                var owned = dependencies.Where(d => d.ObjectId == view.Key.ObjectId).ToArray();
+                var qualified = owned.Where(d => d.Database != null || d.Server != null).ToArray();
+                if (qualified.Length == 0) continue;
+                // Preserve the existing failure boundary for every other dependency and
+                // never authorize a table expression by preparing an unrelated view.
+                if (owned.Any(d => d.IsAmbiguous || d.IsCallerDependent || d.Server != null ||
+                    (d.Database != null ? !d.HasSameDatabaseIdentity || !selected.Contains(d.ResolvedLocalId.Value) :
+                    !d.ReferencedId.HasValue || !selected.Contains(d.ReferencedId.Value)))) continue;
+                int? sourceId = qualified[0].SourceDatabaseId;
+                if (qualified.Any(d => d.SourceDatabaseId != sourceId)) continue;
+                var result = MssqlViewReferenceRewriter.Rewrite(view, (database, ownerSchema, name) =>
+                {
+                    var resolution = resolver(database, ownerSchema, name);
+                    return resolution != null && resolution.SourceDatabaseId == sourceId ? resolution : null;
+                }, qualified.Select(d => d.ResolvedLocalId), selected);
+                changed = true;
+                if (!result.Success) { issues.Add(result.Issue); continue; }
+                var facts = view.Facts.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+                facts["prepared_definition"] = result.Sql;
+                facts["prepared_same_database_references"] = true;
+                views[i] = new MssqlViewDefinition(view.Key, facts);
+                for (int j = 0; j < dependencies.Count; j++)
+                    if (dependencies[j].ObjectId == view.Key.ObjectId && dependencies[j].Database != null)
+                        dependencies[j] = dependencies[j].WithPreparedSameDatabaseReference();
+            }
+            return changed ? new MssqlExportSchema(schema.Tables, views, dependencies, schema.SnapshotState, issues, schema.ExtendedProperties, schema.SnapshotCapability) : schema;
+        }
+        internal IReadOnlyList<MssqlExportIssue> ValidateStart(MssqlExportSchema schema, MssqlExportRequest request)
+        {
+            var issues = new List<MssqlExportIssue>(Validate(schema, request));
+            if (request.UseSnapshot && (schema.SnapshotCapability == null || !schema.SnapshotCapability.CanManage))
+                issues.Add(new MssqlExportIssue("SnapshotUnavailable", null, null, "SNAPSHOT requires known state OFF/ON, database ALTER permission and a writable database. Choose ordinary reading or ask the DBA to review capability."));
+            return issues.AsReadOnly();
         }
         internal IReadOnlyList<MssqlExportIssue> Validate(MssqlExportSchema schema, MssqlExportRequest request)
         {
             var issues = new List<MssqlExportIssue>(schema.Issues);
-            if (request.Mode != MssqlExportMode.SchemaOnly && schema.SnapshotState != 1) issues.Add(new MssqlExportIssue("SnapshotUnavailable", null, null, "ALLOW_SNAPSHOT_ISOLATION must be ON (state 1); OFF and transitions cannot export data."));
             var ids = new HashSet<int>(schema.Tables.Select(x => x.Key.ObjectId).Concat(schema.Views.Select(x => x.Key.ObjectId)));
             foreach (var t in schema.Tables)
             {
                 Action<string, string, string> add = (code, col, reason) => issues.Add(new MssqlExportIssue(code, t.Key, col, reason));
-                if (t.Text("can_select") != null && !t.Flag("can_select")) add("UnreadableTable", null, "SELECT permission is required.");
-                foreach (var flag in new[] { "temporal_type", "ledger_type", "is_memory_optimized", "is_filetable", "is_node", "is_edge", "is_external", "is_remote_data_archive_enabled", "trigger_count", "fulltext_count", "security_policy_count", "unsupported_properties" })
+                if (request.Mode != MssqlExportMode.SchemaOnly && t.Facts.ContainsKey("can_select") && !t.Flag("can_select")) add("UnreadableTable", null, "SELECT permission is required.");
+                foreach (var flag in new[] { "temporal_type", "ledger_type", "is_memory_optimized", "is_filetable", "is_node", "is_edge", "is_external", "is_remote_data_archive_enabled", "trigger_count", "fulltext_count", "security_policy_count" })
                     if (t.Number(flag) != 0) add("UnsupportedTableFeature", null, "Unsupported table feature: " + flag);
                 if (request.Mode != MssqlExportMode.DataOnly && t.Text("uses_ansi_nulls") != null && !t.Flag("uses_ansi_nulls")) add("UnsupportedAnsiNulls", null, "Legacy ANSI_NULLS OFF cannot be recreated on modern SQL Server.");
                 foreach (var c in t.Columns)
@@ -127,30 +188,116 @@ FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.refer
             {
                 if (v.Text("uses_ansi_nulls") != null && !v.AnsiNulls) issues.Add(new MssqlExportIssue("UnsupportedAnsiNulls", v.Key, null, "Legacy view ANSI_NULLS OFF cannot be recreated on modern SQL Server."));
                 if (string.IsNullOrEmpty(v.Definition)) issues.Add(new MssqlExportIssue("UnreadableDefinition", v.Key, null, "View definition is encrypted or unreadable."));
-                if (v.Number("index_count") != 0 || v.Number("trigger_count") != 0 || v.Number("unsupported_properties") != 0) issues.Add(new MssqlExportIssue("UnsupportedViewFeature", v.Key, null, "Indexed views, view triggers and view extended properties are unsupported."));
+                if (v.Number("index_count") != 0) issues.Add(new MssqlExportIssue("UnsupportedViewFeature", v.Key, null, "Indexed views are unsupported."));
+                if (v.Number("trigger_count") != 0) issues.Add(new MssqlExportIssue("UnsupportedViewFeature", v.Key, null, "View triggers are unsupported."));
             }
+            ValidateExtendedProperties(schema, issues);
             if (request.Mode != MssqlExportMode.DataOnly)
                 foreach (var d in schema.Dependencies)
-                    if (d.Server != null || d.Database != null || !d.ReferencedId.HasValue || !ids.Contains(d.ReferencedId.Value))
+                    if (d.IsAmbiguous || d.IsCallerDependent || d.Server != null || !d.EffectiveReferencedId.HasValue || !ids.Contains(d.EffectiveReferencedId.Value) ||
+                        (d.Database != null && (!d.HasSameDatabaseIdentity || !d.PreparedSameDatabaseReference ||
+                            !schema.Views.Any(v => v.Key.ObjectId == d.ObjectId && v.HasPreparedReferences))))
                         issues.Add(new MssqlExportIssue("MissingDependency", schema.Tables.Select(x => x.Key).Concat(schema.Views.Select(x => x.Key)).FirstOrDefault(x => x.ObjectId == d.ObjectId), null, "Definition requires unexported object: " + string.Join(".", new[] { d.Server, d.Database, d.Schema, d.Name }.Where(x => x != null))));
             if (schema.Tables.GroupBy(x => x.Key.ObjectId).Any(g => g.Count() > 1))
                 issues.Add(new MssqlExportIssue("DuplicateSelection", null, null, "Each table may be selected only once."));
             var pending = new HashSet<int>(schema.Views.Select(x => x.Key.ObjectId));
             while (pending.Count != 0)
             {
-                var ready = pending.Where(id => !schema.Dependencies.Any(d => d.ObjectId == id && d.ReferencedId.HasValue && pending.Contains(d.ReferencedId.Value))).ToList();
+                var ready = pending.Where(id => !schema.Dependencies.Any(d => d.ObjectId == id && d.EffectiveReferencedId.HasValue && pending.Contains(d.EffectiveReferencedId.Value))).ToList();
                 if (ready.Count == 0) { issues.Add(new MssqlExportIssue("DependencyCycle", null, null, "View dependencies contain a cycle and cannot be scripted in dependency order.")); break; }
                 foreach (int id in ready) pending.Remove(id);
             }
             return issues.AsReadOnly();
         }
+        private static int? NullableNumber(MssqlNativeFacts facts, string name) => facts.Text(name) == null ? (int?)null : facts.Number(name);
+        private static MssqlViewReferenceResolution ResolveViewReference(SqlConnection connection, SqlTransaction transaction,
+            string database, string schema, string name, CancellationToken cancellation)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            // Reject before setting sized parameters: truncation cannot establish identity.
+            if (new[] { database, schema, name }.Any(x => string.IsNullOrEmpty(x) || x.Length > 128))
+                return new MssqlViewReferenceResolution(null, null, null, null);
+            const string sql = @"SELECT CONVERT(int,DB_ID()) source_database_id,CONVERT(int,DB_ID(@database)) referenced_database_id,o.object_id,RTRIM(o.type) object_type
+FROM (VALUES(1)) seed(n)
+LEFT JOIN sys.objects o ON DB_ID(@database)=DB_ID()
+AND o.object_id=OBJECT_ID(QUOTENAME(@schema)+N'.'+QUOTENAME(@name))";
+            var command = new SqlCommand(sql, connection, transaction) { CommandTimeout = 0 };
+            command.Parameters.Add("@database", SqlDbType.NVarChar, 128).Value = database;
+            command.Parameters.Add("@schema", SqlDbType.NVarChar, 128).Value = schema;
+            command.Parameters.Add("@name", SqlDbType.NVarChar, 128).Value = name;
+            using (var owner = new MssqlCommandOwner(command, cancellation))
+            using (var reader = owner.ExecuteReader(CommandBehavior.SingleRow))
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (!reader.Read()) return new MssqlViewReferenceResolution(null, null, null, null);
+                var result = new MssqlViewReferenceResolution(reader.IsDBNull(0) ? (int?)null : reader.GetInt32(0),
+                    reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1), reader.IsDBNull(2) ? (int?)null : reader.GetInt32(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3));
+                cancellation.ThrowIfCancellationRequested();
+                return result;
+            }
+        }
+        private static IReadOnlyList<MssqlExtendedPropertyDefinition> ReadExtendedProperties(SqlConnection connection, SqlTransaction transaction, IEnumerable<int> objectIds, CancellationToken cancellation)
+        {
+            string ids = string.Join(",", objectIds.OrderBy(x => x).Select(x => x.ToString(CultureInfo.InvariantCulture)));
+            if (ids.Length == 0) return new MssqlExtendedPropertyDefinition[0];
+            // Read only the selected owners, and only convert values whose native type we support.
+            string sql = @"SELECT o.object_id,SCHEMA_NAME(o.schema_id) schema_name,o.name object_name,
+CASE WHEN o.type='V' THEN 'VIEW' ELSE 'TABLE' END owner_type,
+e.minor_id,c.name column_name,e.name,CONVERT(nvarchar(128),SQL_VARIANT_PROPERTY(e.value,'BaseType')) base_type,
+CONVERT(int,SQL_VARIANT_PROPERTY(e.value,'MaxLength')) max_length,
+CONVERT(nvarchar(128),SQL_VARIANT_PROPERTY(e.value,'Collation')) collation,
+CASE WHEN e.value IS NULL THEN 1 ELSE 0 END is_null,
+CASE WHEN SQL_VARIANT_PROPERTY(e.value,'BaseType')='nvarchar' THEN CONVERT(varchar(max),CONVERT(varbinary(8000),CONVERT(nvarchar(4000),e.value)),2)
+     WHEN SQL_VARIANT_PROPERTY(e.value,'BaseType')='int' THEN CONVERT(varchar(max),CONVERT(varbinary(4),CONVERT(int,e.value)),2)
+     ELSE NULL END value_hex
+FROM sys.extended_properties e JOIN sys.objects o ON o.object_id=e.major_id
+LEFT JOIN sys.columns c ON c.object_id=e.major_id AND c.column_id=e.minor_id
+WHERE e.class=1 AND o.type IN ('U','V') AND e.major_id IN (" + ids + ") ORDER BY e.major_id,e.minor_id,e.name";
+            return Query(connection, transaction, sql, cancellation).Select(row =>
+            {
+                var f = new MssqlNativeFacts(row);
+                return new MssqlExtendedPropertyDefinition(new MssqlObjectKey(f.Number("object_id"), f.Text("schema_name"), f.Text("object_name")), f.Text("owner_type"), row);
+            }).ToList().AsReadOnly();
+        }
+        private static void ValidateExtendedProperties(MssqlExportSchema schema, List<MssqlExportIssue> issues)
+        {
+            var identities = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var p in schema.ExtendedProperties)
+            {
+                Action<string, string> add = (code, reason) => issues.Add(new MssqlExportIssue(code, p.Owner, p.ColumnName, "Extended property " + Quote(p.Name ?? "<unnamed>") + ": " + reason));
+                var table = schema.Tables.FirstOrDefault(t => t.Key.ObjectId == p.Owner.ObjectId && t.Key.Schema == p.Owner.Schema && t.Key.Name == p.Owner.Name);
+                var view = schema.Views.FirstOrDefault(v => v.Key.ObjectId == p.Owner.ObjectId && v.Key.Schema == p.Owner.Schema && v.Key.Name == p.Owner.Name);
+                bool ownerValid = (p.OwnerType == "TABLE" && table != null) || (p.OwnerType == "VIEW" && view != null);
+                if (!ownerValid || p.Name == null || p.MinorId < 0 || (p.MinorId == 0 && p.ColumnName != null) ||
+                    (p.MinorId != 0 && (p.ColumnName == null || (table != null && !table.Columns.Any(c => c.Ordinal == p.MinorId && c.Name == p.ColumnName)))))
+                { add("InvalidExtendedProperty", "Owner or column scope is unavailable."); continue; }
+                string identity = p.Owner.ObjectId.ToString(CultureInfo.InvariantCulture) + ":" + p.MinorId.ToString(CultureInfo.InvariantCulture) + ":" + p.Name;
+                if (!identities.Add(identity)) { add("InvalidExtendedProperty", "Duplicate property identity."); continue; }
+                if (p.IsNull)
+                {
+                    if (p.BaseType != null || p.MaxLengthBytes.HasValue || p.Collation != null || p.ValueHex != null) add("InvalidExtendedProperty", "NULL variant metadata is inconsistent.");
+                    continue;
+                }
+                if (p.BaseType != "nvarchar" && p.BaseType != "int")
+                { add("UnsupportedExtendedPropertyType", "Unsupported SQL type: " + (p.BaseType ?? "<unknown>") + ". Supported types are nvarchar, int and NULL."); continue; }
+                string hex = p.ValueHex;
+                bool validHex = hex != null && hex.Length % 2 == 0 && hex.All(c => (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'));
+                int bytes = hex == null ? -1 : hex.Length / 2;
+                bool valid = validHex && bytes <= 7500;
+                if (p.BaseType == "int") valid &= p.MaxLengthBytes == 4 && bytes == 4 && p.Collation == null;
+                else valid &= p.MaxLengthBytes.HasValue && p.MaxLengthBytes >= 2 && p.MaxLengthBytes <= 8000 && p.MaxLengthBytes % 2 == 0 &&
+                    bytes % 2 == 0 && bytes <= p.MaxLengthBytes && !string.IsNullOrEmpty(p.Collation) &&
+                    p.Collation.All(c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_');
+                if (!valid) add("InvalidExtendedProperty", "Native value length, encoding or collation metadata is inconsistent for SQL type " + p.BaseType + ".");
+            }
+        }
         private static readonly HashSet<string> SupportedTypes = new HashSet<string>("bigint int smallint tinyint bit decimal numeric money smallmoney float real date time datetime datetime2 smalldatetime datetimeoffset char varchar text nchar nvarchar ntext binary varbinary image uniqueidentifier xml timestamp rowversion geometry".Split(' '), StringComparer.OrdinalIgnoreCase);
         private static void EnsureVisibility(SqlConnection c, SqlTransaction t, CancellationToken token)
         {
             var row = Query(c, t, "SELECT HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') allowed", token)[0];
-            if (!new MssqlNativeFacts(row).Flag("allowed")) throw new InvalidOperationException("Database VIEW DEFINITION permission is required to detect hidden dependencies and definitions.");
+            if (!new MssqlNativeFacts(row).Flag("allowed")) throw new MssqlExportPrerequisiteException(MssqlPrerequisite.ViewDefinitionRequired);
         }
-        private static int Snapshot(SqlConnection c, SqlTransaction t, CancellationToken token) { return new MssqlNativeFacts(Query(c, t, "SELECT snapshot_isolation_state FROM sys.databases WHERE database_id=DB_ID()", token).Single()).Number("snapshot_isolation_state"); }
         private static bool HasCatalog(SqlConnection c, SqlTransaction t, string name, CancellationToken token)
         { return Query(c, t, "SELECT object_id FROM sys.all_objects WHERE name='" + name + "' AND schema_id=SCHEMA_ID('sys')", token).Count != 0; }
         private static List<MssqlTableDefinition> ReadTables(SqlConnection c, SqlTransaction t, CancellationToken token)
@@ -161,8 +308,7 @@ FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.refer
 HAS_PERMS_BY_NAME(QUOTENAME(SCHEMA_NAME(t.schema_id))+'.'+QUOTENAME(t.name),'OBJECT','SELECT') can_select,
 (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id=t.object_id AND p.index_id IN(0,1)) estimated_rows,
 (SELECT COUNT(*) FROM sys.triggers tr WHERE tr.parent_id=t.object_id) trigger_count,
-(SELECT COUNT(*) FROM sys.fulltext_indexes f WHERE f.object_id=t.object_id) fulltext_count,
-(SELECT COUNT(*) FROM sys.extended_properties e WHERE e.class=1 AND e.major_id=t.object_id AND e.name<>N'MS_Description') unsupported_properties," +
+(SELECT COUNT(*) FROM sys.fulltext_indexes f WHERE f.object_id=t.object_id) fulltext_count," +
 (security ? "(SELECT COUNT(*) FROM sys.security_predicates sp WHERE sp.target_object_id=t.object_id)" : "0") + " security_policy_count," + optional + @"
 FROM sys.tables t LEFT JOIN sys.extended_properties ep ON ep.class=1 AND ep.major_id=t.object_id AND ep.minor_id=0 AND ep.name=N'MS_Description'
 WHERE t.is_ms_shipped=0 ORDER BY t.object_id";

@@ -185,10 +185,12 @@ public static partial class SmokeTests
             foreach (var stage in new[] { MssqlExportStage.Completed, MssqlExportStage.Canceled, MssqlExportStage.Failed, MssqlExportStage.LocalCompletedMirrorIncomplete })
             using (var fixture = new RoutingFixture("mssql"))
             {
-                fixture.Result = new MssqlExportResult(Guid.NewGuid(), stage, stage == MssqlExportStage.Completed || stage == MssqlExportStage.LocalCompletedMirrorIncomplete ? "local.sql" : null, null, null, TimeSpan.Zero, null, null, "fixture reason");
+                fixture.Result = new MssqlExportResult(Guid.NewGuid(), stage, stage == MssqlExportStage.Completed || stage == MssqlExportStage.LocalCompletedMirrorIncomplete ? "local.sql" : null, null, null, TimeSpan.Zero, null, null, "fixture reason", true, new MssqlSnapshotCleanupResult(MssqlSnapshotCleanupState.Unconfirmed, 3, "fixture-only.json", "RestoreUnconfirmed"));
                 fixture.Invoke("BackupSelectedDatabaseWithDialog");
                 Assert(fixture.Status.Count == 1, "Terminal wizard result updates main status once");
                 AssertContains(fixture.Status.Single(), stage == MssqlExportStage.Completed ? "completed" : stage == MssqlExportStage.Canceled ? "canceled" : stage == MssqlExportStage.Failed ? "failed" : "mirror incomplete", "Status follows authoritative terminal stage");
+                AssertContains(fixture.Status.Single(), "restoration is unconfirmed", "Restore warning is independent of terminal stage");
+                AssertContains(fixture.Status.Single(), "fixture-only.json", "Main status retains recovery record path");
                 if (stage == MssqlExportStage.LocalCompletedMirrorIncomplete) AssertContains(fixture.Status.Single(), "local.sql", "Incomplete mirror retains published local path");
             }
         }

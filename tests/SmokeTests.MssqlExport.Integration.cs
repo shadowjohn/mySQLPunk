@@ -21,18 +21,103 @@ public static partial class SmokeTests
     {
         string profile = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION");
         if (string.IsNullOrEmpty(profile)) { Console.WriteLine("SKIP live integration (explicit runner -Run required)"); return; }
-        Assert(new[] { "Core", "Large", "Concurrency", "ClientProbe", "FinalFix", "Geometry" }.Contains(profile), "Known integration profile");
-        using (var fixture = new IntegrationFixture(profile))
+        Assert(new[] { "OptionalSnapshot", "SnapshotLifecycle", "Core", "Large", "Concurrency", "ClientProbe", "FinalFix", "Geometry", "Properties", "References" }.Contains(profile), "Known integration profile");
+        using (var fixture = new IntegrationFixture(profile, profile != "OptionalSnapshot" && profile != "SnapshotLifecycle"))
         {
-            if (profile == "ClientProbe") IntegrationClientProbe(fixture);
+            if (profile == "OptionalSnapshot") IntegrationOptionalSnapshot(fixture);
+            else if (profile == "SnapshotLifecycle") IntegrationSnapshotLifecycle(fixture);
+            else if (profile == "ClientProbe") IntegrationClientProbe(fixture);
             else if (profile == "FinalFix") IntegrationFinalFix(fixture);
             else if (profile == "Geometry") IntegrationGeometry(fixture);
+            else if (profile == "Properties") IntegrationProperties(fixture);
+            else if (profile == "References") IntegrationReferences(fixture);
             else if (profile == "Core") IntegrationCore(fixture);
             else if (profile == "Large") IntegrationLarge(fixture);
             else IntegrationConcurrency(fixture);
         }
     }
 
+    private sealed class RestoreProcessReceipt
+    {
+        public bool TimedOut, TerminationConfirmed, OutputComplete, TerminationFailed;
+        public int? ExitCode;
+        public string Stdout, Stderr;
+        public long StdoutCharacters, StderrCharacters;
+    }
+    private sealed class RestoreOutput
+    {
+        internal const int Limit = 65536;
+        private readonly StringBuilder text = new StringBuilder();
+        internal long Characters;
+        internal async System.Threading.Tasks.Task Drain(StreamReader reader)
+        {
+            var buffer = new char[4096]; int count;
+            while ((count = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) != 0) {
+                lock (text) { Characters += count; text.Append(buffer, 0, count); if (text.Length > Limit) text.Remove(0, text.Length - Limit); }
+            }
+        }
+        internal string Capture() { lock (text) return text.ToString(); }
+    }
+    // This helper owns only the Process.Start return value. It cannot enumerate or kill other processes.
+    private static int RunOwnedRestore(ProcessStartInfo start, int timeoutMilliseconds, Action<RestoreProcessReceipt> save)
+    {
+        using (var process = Process.Start(start)) {
+            var output = new RestoreOutput(); var errors = new RestoreOutput();
+            var stdout = output.Drain(process.StandardOutput); var stderr = errors.Drain(process.StandardError);
+            bool timedOut = !process.WaitForExit(timeoutMilliseconds), terminationFailed = false;
+            if (timedOut) {
+                try { process.Kill(); }
+                catch (InvalidOperationException) { /* The owned child may have exited at the deadline. */ }
+                catch (System.ComponentModel.Win32Exception) { terminationFailed = true; }
+            }
+            bool reaped = process.WaitForExit(10000);
+            bool complete = false;
+            try { complete = System.Threading.Tasks.Task.WaitAll(new[] { stdout, stderr }, 10000); }
+            catch (AggregateException) { /* Available bounded output and incomplete receipt still survive. */ }
+            var receipt = new RestoreProcessReceipt {
+                TimedOut = timedOut, TerminationConfirmed = reaped, TerminationFailed = terminationFailed,
+                ExitCode = reaped ? (int?)process.ExitCode : null, OutputComplete = complete,
+                Stdout = output.Capture(), Stderr = errors.Capture(), StdoutCharacters = output.Characters, StderrCharacters = errors.Characters
+            };
+            save(receipt); // Persist output and actual exit/termination truth BEFORE throwing.
+            if (timedOut) throw new TimeoutException("Owned sqlcmd restore exceeded profile deadline");
+            if (!reaped || !complete) throw new IOException("Owned sqlcmd output capture incomplete");
+            return receipt.ExitCode.Value;
+        }
+    }
+    private static int RestoreProcessChild(string mode)
+    {
+        Console.WriteLine("owned stdout begin"); Console.Error.WriteLine("owned stderr begin");
+        if (mode == "--owned-restore-fixture-timeout") {
+            Console.Write(new string('o', RestoreOutput.Limit + 4096)); Console.WriteLine("owned stdout tail");
+            Console.Error.Write(new string('e', RestoreOutput.Limit + 4096)); Console.Error.WriteLine("owned stderr tail");
+            Console.Out.Flush(); Console.Error.Flush(); Thread.Sleep(Timeout.Infinite);
+        }
+        return mode == "--owned-restore-fixture-failure" ? 7 : 0;
+    }
+    private static void RestoreProcess_TimeoutEvidence()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "owned-restore-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        try {
+            foreach (string mode in new[] { "success", "failure", "timeout" }) {
+                RestoreProcessReceipt receipt = null; bool timeout = false;
+                var start = new ProcessStartInfo(System.Windows.Forms.Application.ExecutablePath, "--owned-restore-fixture-" + mode) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+                try {
+                    int exit = RunOwnedRestore(start, mode == "timeout" ? 2000 : 10000, r => {
+                        receipt = r; File.WriteAllText(Path.Combine(root, mode + ".json"), JsonConvert.SerializeObject(r));
+                    });
+                    Assert(exit == (mode == "failure" ? 7 : 0), "Non-timeout child preserves exact exit truth");
+                } catch (TimeoutException) { timeout = true; }
+                Assert(receipt != null && receipt.TerminationConfirmed && receipt.OutputComplete && File.Exists(Path.Combine(root, mode + ".json")), "Receipt persists after owned child reap");
+                Assert(timeout == (mode == "timeout") && receipt.TimedOut == timeout, "Timeout still fails after evidence is saved");
+                Assert(receipt.Stdout.Length <= RestoreOutput.Limit && receipt.Stderr.Length <= RestoreOutput.Limit, "Available output is bounded independently");
+                if (timeout) {
+                    Assert(receipt.ExitCode.HasValue && receipt.ExitCode.Value != 0 && !receipt.TerminationFailed, "Owned terminated process cannot be reported as successful restore");
+                    Assert(receipt.StdoutCharacters > RestoreOutput.Limit && receipt.StderrCharacters > RestoreOutput.Limit && receipt.Stdout.Contains("owned stdout tail") && receipt.Stderr.Contains("owned stderr tail"), "Bounded tail and original character counts survive timeout");
+                }
+            }
+        } finally { Directory.Delete(root, true); }
+    }
     private sealed class IntegrationFixture : IDisposable
     {
         internal readonly string Server, Root, Token, Source, Target, Profile;
@@ -42,8 +127,13 @@ public static partial class SmokeTests
         internal Action AfterBegin;
         internal Action<MssqlTableDefinition> BeforeRows;
         internal bool RestrictedReader;
+        internal bool ParentFirst;
+        internal string SourceOverride, JournalOverride;
+        internal Action<bool> BeforeSetting, AfterSetting;
+        internal readonly List<string> SettingAudit = new List<string>();
+        internal readonly List<string> LockAudit = new List<string>();
         private int restoreSequence;
-        internal IntegrationFixture(string profile)
+        internal IntegrationFixture(string profile, bool initialSnapshot = true)
         {
             Profile = profile;
             Server = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_SERVER");
@@ -69,7 +159,9 @@ public static partial class SmokeTests
                         Exec(c,"USE " + Q(db) + "; EXEC sys.sp_addextendedproperty @name=N'mysqlpunk_export_owner',@value=" + Lit(Token) + ";");
                         Exec(c,"USE master; ALTER DATABASE " + Q(db) + " SET RECOVERY SIMPLE;");
                     }
-                    Exec(c,"ALTER DATABASE " + Q(Source) + " SET ALLOW_SNAPSHOT_ISOLATION ON;");
+                    if (initialSnapshot) Exec(c,"ALTER DATABASE " + Q(Source) + " SET ALLOW_SNAPSHOT_ISOLATION ON;");
+                    Evidence["initialSnapshotRequested"] = initialSnapshot;
+                    Evidence["initialSnapshotObserved"] = Scalar(c,"SELECT snapshot_isolation_state FROM sys.databases WHERE name=" + Lit(Source));
                 }
                 Evidence["sourceCollation"] = "Latin1_General_100_BIN2";
                 Save();
@@ -97,11 +189,13 @@ public static partial class SmokeTests
         }
         internal IMssqlExportSource NewSource()
         {
+            Assert(SourceOverride == null || SourceOverride == Source || SourceOverride == Target, "Source factory uses exact owned database whitelist");
+            Assert(JournalOverride == null || Path.GetFullPath(JournalOverride).StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "Injected journal remains inside owned fixture root");
             var provider = new my_mssql();
-            provider.SetConn(new SqlConnectionStringBuilder { DataSource = Server, InitialCatalog = Source, IntegratedSecurity = true, Pooling = false, TrustServerCertificate = true }.ConnectionString);
+            provider.SetConn(new SqlConnectionStringBuilder { DataSource = Server, InitialCatalog = SourceOverride ?? Source, IntegratedSecurity = true, Pooling = false, TrustServerCertificate = true }.ConnectionString);
             provider.Open(); WorkerConnections.Add(provider.MCT);
             if (RestrictedReader) Exec(provider.MCT,"EXECUTE AS USER = N'fixture_reader';");
-            return new IntegrationSource(new MssqlExportSource(new MssqlOwnedSession(provider,provider.MCT)),this);
+            return new IntegrationSource(new MssqlExportSource(new MssqlOwnedSession(provider,provider.MCT), new MssqlSnapshotRecoveryStore(JournalOverride ?? Path.Combine(Root,"journal")), c => new IntegrationSnapshotBackend(c,this)),this);
         }
         internal MssqlSqlExportService Service(MssqlArtifactFiles files = null, Action<MssqlExportStage> phase = null)
         {
@@ -109,40 +203,42 @@ public static partial class SmokeTests
                 Assert(WorkerConnections.All(c => c.State == ConnectionState.Closed), "Real source connections released before file " + stage);
                 Evidence["sourceReleasedBeforeLocalPhases"] = true;
                 if (phase != null) phase(stage);
-            });
+            }, new MssqlSnapshotRecoveryStore(Path.Combine(Root,"journal")));
         }
-        internal MssqlExportRequest Request(string filename = "export.sql", bool views = true, MssqlExportMode mode = MssqlExportMode.SchemaAndData, Func<MssqlTableDefinition,bool> select = null, bool mirror = false)
+        internal MssqlExportRequest Request(string filename = "export.sql", bool views = true, MssqlExportMode mode = MssqlExportMode.SchemaAndData, Func<MssqlTableDefinition,bool> select = null, bool mirror = false, bool? useSnapshot = null)
         {
             var tables = Service().LoadCatalog(Source,CancellationToken.None).Tables.Where(t => select == null || select(t)).Select(t => t.Key).ToArray();
             string path = Path.Combine(Root,filename);
-            return new MssqlExportRequest(Guid.NewGuid(),Source,tables,mode,views,path,MssqlExportArtifact.CaptureDestination(path,CancellationToken.None),mirror ? new MssqlMirrorOptions(Path.Combine(Root,"mirror"),2) : null);
+            return new MssqlExportRequest(Guid.NewGuid(),Source,tables,mode,views,path,MssqlExportArtifact.CaptureDestination(path,CancellationToken.None),mirror ? new MssqlMirrorOptions(Path.Combine(Root,"mirror"),2) : null, useSnapshot ?? (mode != MssqlExportMode.SchemaOnly));
         }
         internal MssqlExportResult Export(MssqlExportRequest request, CancellationToken cancellation = default(CancellationToken), MssqlArtifactFiles files = null, Action<MssqlExportStage> phase = null, Action<MssqlExportProgress> progress = null)
         {
             using (var memory = new IntegrationMemory())
             {
                 var result = Service(files,phase).Export(request,new WorkerProgress(p => { memory.Stage = p.Stage.ToString(); if (progress != null) progress(p); }),cancellation);
-                Evidence["export-" + Path.GetFileName(request.TargetPath)] = new { stage=result.Stage.ToString(), result.Elapsed, result.ErrorMessage, result.PublishedPath, result.MirrorPath, rows = result.RowCounts.Sum(x => x.Rows), memory = memory.Snapshot() };
+                Evidence["export-" + Path.GetFileName(request.TargetPath)] = new { stage=result.Stage.ToString(), result.Elapsed, result.ErrorMessage, result.PublishedPath, result.MirrorPath, request.UseSnapshot, cleanup = result.SnapshotCleanup, snapshotState = SnapshotState(this), journal = Directory.Exists(Path.Combine(Root,"journal")) ? Directory.GetFiles(Path.Combine(Root,"journal")) : new string[0], settingAudit = SettingAudit.ToArray(), lockAudit = LockAudit.ToArray(), rows = result.RowCounts.Sum(x => x.Rows), memory = memory.Snapshot() };
                 Save(); return result;
             }
         }
         internal void Restore(string file, bool expectSuccess = true)
         {
             Assert(File.Exists(file),"Restore artifact exists");
+            RecordArtifact(file);
             bool go = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_CLIENT") == "Go";
             string endpoint = go ? "np:"+Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_PIPE") : Server;
             string args = "-S \"" + endpoint + "\" -d " + Target + " -E -b -x " + (go ? "" : "-f 65001 ") + "-i \"" + file + "\"";
             var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION_SQLCMD"),args) { UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true };
             var elapsed = Stopwatch.StartNew();
-            using (var p = Process.Start(start))
-            {
-                var stdout = p.StandardOutput.ReadToEndAsync(); var stderr = p.StandardError.ReadToEndAsync(); p.WaitForExit();
-                int attempt = ++restoreSequence;
-                File.WriteAllText(file + ".restore-" + attempt + ".log",stdout.Result + stderr.Result);
+            int attempt = ++restoreSequence;
+            int exitCode = RunOwnedRestore(start, Profile == "Large" ? 3600000 : 300000, receipt => {
+                File.WriteAllText(file + ".restore-" + attempt + ".log", receipt.Stdout + receipt.Stderr);
                 elapsed.Stop();
-                Evidence["restore-" + Path.GetFileName(file) + "-" + attempt] = new { command = "sqlcmd " + args, exitCode = p.ExitCode, elapsed=elapsed.Elapsed };
-                Save(); Assert(expectSuccess ? p.ExitCode == 0 : p.ExitCode != 0,"sqlcmd single-session expected exit for " + file + ": " + p.ExitCode);
-            }
+                Evidence["restore-" + Path.GetFileName(file) + "-" + attempt] = new { command = "sqlcmd " + args, exitCode = receipt.ExitCode, elapsed=elapsed.Elapsed,
+                    timedOut = receipt.TimedOut, terminationConfirmed = receipt.TerminationConfirmed, terminationFailed = receipt.TerminationFailed, outputComplete = receipt.OutputComplete,
+                    stdoutCharacters = receipt.StdoutCharacters, stderrCharacters = receipt.StderrCharacters, outputLimitPerStream = RestoreOutput.Limit };
+                Save();
+            });
+            Assert(expectSuccess ? exitCode == 0 : exitCode != 0,"sqlcmd single-session expected exit for " + file + ": " + exitCode);
         }
         internal void RecordArtifact(string file)
         {
@@ -165,6 +261,7 @@ public static partial class SmokeTests
                         while (r.Read()) Assert(Path.GetDirectoryName(Path.GetFullPath(r.GetString(0))) == Root,"Owned database file path before DROP");
                 }
                 using (var c = Open("master")) Exec(c,"ALTER DATABASE " + Q(db) + " SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE " + Q(db));
+                Evidence["cleaned-" + db] = DateTime.UtcNow; Save();
                 Created.Remove(db); Console.WriteLine("CLEANED " + db);
             }
             Evidence["cleanup"] = "All exact token-owned databases dropped; artifacts retained"; Save();
@@ -173,13 +270,14 @@ public static partial class SmokeTests
 
     private sealed class IntegrationSource : IMssqlExportSource
     {
-        private readonly IMssqlExportSource inner; private readonly IntegrationFixture fixture;
+        private readonly IMssqlExportSource inner; private readonly IntegrationFixture fixture; private MssqlExportSchema originalReadSchema;
         internal IntegrationSource(IMssqlExportSource inner, IntegrationFixture fixture) { this.inner=inner; this.fixture=fixture; }
         public MssqlExportCatalog ReadCatalog(string d,CancellationToken c) { return inner.ReadCatalog(d,c); }
         public MssqlExportPreflight Inspect(MssqlExportRequest r,CancellationToken c) { return inner.Inspect(r,c); }
-        public MssqlExportSchema BeginRead(MssqlExportRequest r,CancellationToken c) { var schema=inner.BeginRead(r,c); if(fixture.AfterBegin!=null)fixture.AfterBegin(); return schema; }
+        public MssqlExportSchema BeginRead(MssqlExportRequest r,Action<MssqlExportStage> report,CancellationToken c) { var schema=inner.BeginRead(r,report,c); originalReadSchema=schema; if(fixture.AfterBegin!=null)fixture.AfterBegin(); if(fixture.ParentFirst) schema = new MssqlExportSchema(schema.Tables.OrderBy(t=>t.Key.Name=="Parent"?0:1),schema.Views,schema.Dependencies,schema.SnapshotState,schema.Issues,schema.ExtendedProperties,schema.SnapshotCapability); return schema; }
         public MssqlRowReader OpenRows(MssqlTableDefinition t,CancellationToken c) { if(fixture.BeforeRows!=null)fixture.BeforeRows(t); return inner.OpenRows(t,c); }
-        public void CompleteRead(MssqlExportSchema s,CancellationToken c) { inner.CompleteRead(s,c); }
+        public MssqlSnapshotCleanupResult FinishRead(Action<MssqlExportStage> report) { return inner.FinishRead(report); }
+        public void CompleteRead(MssqlExportSchema s,CancellationToken c) { inner.CompleteRead(originalReadSchema ?? s,c); }
         public void Dispose() { inner.Dispose(); }
     }
 
@@ -490,9 +588,9 @@ public static partial class SmokeTests
         f.Evidence["encryptedDefinitionIssues"]=encryptedCheck.Issues.Select(x=>x.Code+":"+x.ObjectKey?.Name).ToArray();
         using(var c=f.Open("master"))IntegrationFixture.Exec(c,"ALTER DATABASE "+IntegrationFixture.Q(f.Source)+" SET ALLOW_SNAPSHOT_ISOLATION OFF;");
         var off=f.Request("snapshot-off.sql",false,select:t=>t.Key.Name=="IdentityEmpty");
-        Assert(f.Service().Preflight(off,CancellationToken.None).Issues.Any(x=>x.Code=="SnapshotUnavailable"),"Snapshot OFF rejected");
+        Assert(f.Service().Preflight(off,CancellationToken.None).CanStart,"Snapshot OFF with confirmed ALTER capability may start");
         using(var c=f.Open("master"))IntegrationFixture.Exec(c,"ALTER DATABASE "+IntegrationFixture.Q(f.Source)+" SET ALLOW_SNAPSHOT_ISOLATION ON;");
-        f.Pass("Live unsupported spatial variant alias typed XML sequence encrypted definition and SNAPSHOT OFF preflight");
+        f.Pass("Live unsupported spatial variant alias typed XML sequence encrypted definition and manageable SNAPSHOT OFF preflight");
         using(var c=f.Open(f.Source))IntegrationFixture.Exec(c,"CREATE USER fixture_reader WITHOUT LOGIN; GRANT SELECT TO fixture_reader; DENY VIEW DEFINITION TO fixture_reader;");
         var hidden=f.Request("hidden.sql",false,select:t=>t.Key.Schema=="一");
         f.RestrictedReader=true;

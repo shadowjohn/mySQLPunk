@@ -11,6 +11,47 @@ namespace mySQLPunk.lib.MssqlExport
 {
     internal enum MssqlExportMode { SchemaAndData, SchemaOnly, DataOnly }
 
+    internal enum MssqlPrerequisite { ViewDefinitionRequired, SqlPermissionDenied, LoginRejected, DatabaseUnavailable }
+
+    // Only fixed categories cross the provider boundary; never retain provider text or inner exceptions.
+    internal sealed class MssqlExportPrerequisiteException : InvalidOperationException
+    {
+        public MssqlPrerequisite Reason { get; }
+        internal MssqlExportPrerequisiteException(MssqlPrerequisite reason) : base(Describe(reason)) { Reason = reason; }
+        private static string Describe(MssqlPrerequisite reason)
+        {
+            switch (reason) {
+                case MssqlPrerequisite.ViewDefinitionRequired: return "[ViewDefinitionRequired] Database VIEW DEFINITION is required to inspect complete object definitions and dependencies. Ask the DBA to review definition visibility, then retry.";
+                case MssqlPrerequisite.SqlPermissionDenied: return "[SqlPermissionDenied] SQL Server denied a required operation. Ask the DBA to review definition-read permissions and, for data export, table SELECT permissions, then retry.";
+                case MssqlPrerequisite.LoginRejected: return "[LoginRejected] SQL Server rejected the login. Review the connection account and authentication configuration, then retry.";
+                case MssqlPrerequisite.DatabaseUnavailable: return "[DatabaseUnavailable] The requested or default database is unavailable or access was rejected. Review the database name, availability and account access, then retry.";
+                default: throw new ArgumentOutOfRangeException(nameof(reason));
+            }
+        }
+        internal static MssqlExportPrerequisiteException From(Exception error)
+        {
+            var known = error as MssqlExportPrerequisiteException;
+            if (known != null) return known;
+            var sql = error as System.Data.SqlClient.SqlException;
+            if (sql == null) return null;
+            // The first SqlError may be a general wrapper; inspect every entry without reading messages.
+            var numbers = new HashSet<int>(sql.Errors.Cast<System.Data.SqlClient.SqlError>().Select(x => x.Number));
+            if (numbers.Contains(18456) || numbers.Contains(18452)) return new MssqlExportPrerequisiteException(MssqlPrerequisite.LoginRejected);
+            if (numbers.Contains(916) || numbers.Contains(4060) || numbers.Contains(4064)) return new MssqlExportPrerequisiteException(MssqlPrerequisite.DatabaseUnavailable);
+            if (numbers.Contains(229) || numbers.Contains(230) || numbers.Contains(297) || numbers.Contains(300)) return new MssqlExportPrerequisiteException(MssqlPrerequisite.SqlPermissionDenied);
+            return null;
+        }
+    }
+
+    internal static class MssqlSnapshotState
+    {
+        internal static string Describe(int state)
+        {
+            string name = state == 0 ? "OFF" : state == 1 ? "ON" : state == 2 ? "IN_TRANSITION_TO_OFF" : state == 3 ? "IN_TRANSITION_TO_ON" : "UNKNOWN";
+            return name + " (" + state.ToString(CultureInfo.InvariantCulture) + ")";
+        }
+    }
+
     internal sealed class MssqlObjectKey
     {
         public int ObjectId { get; }
@@ -85,7 +126,8 @@ namespace mySQLPunk.lib.MssqlExport
         public string TargetPath { get; }
         public ExportDestinationStamp Destination { get; }
         public MssqlMirrorOptions Mirror { get; }
-        public MssqlExportRequest(Guid jobId, string databaseName, IReadOnlyList<MssqlObjectKey> tables, MssqlExportMode mode, bool includeViews, string targetPath, ExportDestinationStamp destination, MssqlMirrorOptions mirror)
+        public bool UseSnapshot { get; }
+        public MssqlExportRequest(Guid jobId, string databaseName, IReadOnlyList<MssqlObjectKey> tables, MssqlExportMode mode, bool includeViews, string targetPath, ExportDestinationStamp destination, MssqlMirrorOptions mirror, bool useSnapshot = false)
         {
             if (jobId == Guid.Empty) throw new ArgumentException("Job identity is required", nameof(jobId));
             if (string.IsNullOrWhiteSpace(databaseName)) throw new ArgumentException("Database is required", nameof(databaseName));
@@ -97,7 +139,8 @@ namespace mySQLPunk.lib.MssqlExport
             if (selection.Contains(null)) throw new ArgumentException("Table selection contains null", nameof(tables));
             JobId = jobId; DatabaseName = databaseName; Tables = selection.AsReadOnly();
             Mode = mode; IncludeViews = includeViews; TargetPath = Path.GetFullPath(targetPath);
-            Destination = destination; Mirror = mirror;
+            if (mode == MssqlExportMode.SchemaOnly && useSnapshot) throw new ArgumentException("Schema-only export cannot use snapshot", nameof(useSnapshot));
+            Destination = destination; Mirror = mirror; UseSnapshot = useSnapshot;
         }
     }
 
@@ -185,8 +228,27 @@ namespace mySQLPunk.lib.MssqlExport
         public MssqlObjectKey Key { get; }
         internal MssqlViewDefinition(MssqlObjectKey key, IDictionary<string, object> facts) : base(facts) { Key = key; }
         public string Definition => Text("definition");
+        public string PreparedDefinition => Text("prepared_definition");
+        public bool HasPreparedReferences => Flag("prepared_same_database_references") && !string.IsNullOrEmpty(PreparedDefinition);
         public bool AnsiNulls => Flag("uses_ansi_nulls");
         public bool QuotedIdentifier => Flag("uses_quoted_identifier");
+    }
+    // SQL variant metadata is stored as immutable scalar facts and native value hex.
+    // A byte[] fact would be mutable and would not be represented by Canonical().
+    internal sealed class MssqlExtendedPropertyDefinition : MssqlNativeFacts
+    {
+        public MssqlObjectKey Owner { get; }
+        public string OwnerType { get; }
+        internal MssqlExtendedPropertyDefinition(MssqlObjectKey owner, string ownerType, IDictionary<string, object> facts) : base(facts)
+        { Owner = owner ?? throw new ArgumentNullException(nameof(owner)); OwnerType = ownerType; }
+        public int MinorId => Number("minor_id");
+        public string ColumnName => Text("column_name");
+        public string Name => Text("name");
+        public string BaseType => Text("base_type");
+        public int? MaxLengthBytes => Text("max_length") == null ? (int?)null : Number("max_length");
+        public string Collation => Text("collation");
+        public bool IsNull => Flag("is_null");
+        public string ValueHex => Text("value_hex");
     }
     internal sealed class MssqlDependency
     {
@@ -196,8 +258,28 @@ namespace mySQLPunk.lib.MssqlExport
         public string Database { get; }
         public string Schema { get; }
         public string Name { get; }
-        internal MssqlDependency(int objectId, int? referencedId, string server, string database, string schema, string name)
-        { ObjectId = objectId; ReferencedId = referencedId; Server = server; Database = database; Schema = schema; Name = name; }
+        public int? SourceDatabaseId { get; }
+        public int? ReferencedDatabaseId { get; }
+        public int? ResolvedLocalId { get; }
+        public bool IsAmbiguous { get; }
+        public bool IsCallerDependent { get; }
+        public bool PreparedSameDatabaseReference { get; }
+        public bool HasSameDatabaseIdentity => Server == null && !string.IsNullOrEmpty(Database) && !string.IsNullOrEmpty(Schema) &&
+            SourceDatabaseId.HasValue && SourceDatabaseId.Value > 0 && SourceDatabaseId == ReferencedDatabaseId &&
+            ResolvedLocalId.HasValue && ResolvedLocalId.Value > 0 && (!ReferencedId.HasValue || ReferencedId == ResolvedLocalId) &&
+            !IsAmbiguous && !IsCallerDependent;
+        public int? EffectiveReferencedId => Server == null && Database == null && !IsAmbiguous && !IsCallerDependent ? ReferencedId :
+            PreparedSameDatabaseReference && HasSameDatabaseIdentity ? ResolvedLocalId : null;
+        internal MssqlDependency(int objectId, int? referencedId, string server, string database, string schema, string name,
+            int? sourceDatabaseId = null, int? referencedDatabaseId = null, int? resolvedLocalId = null,
+            bool isAmbiguous = false, bool isCallerDependent = false, bool preparedSameDatabaseReference = false)
+        {
+            ObjectId = objectId; ReferencedId = referencedId; Server = server; Database = database; Schema = schema; Name = name;
+            SourceDatabaseId = sourceDatabaseId; ReferencedDatabaseId = referencedDatabaseId; ResolvedLocalId = resolvedLocalId;
+            IsAmbiguous = isAmbiguous; IsCallerDependent = isCallerDependent; PreparedSameDatabaseReference = preparedSameDatabaseReference;
+        }
+        internal MssqlDependency WithPreparedSameDatabaseReference() => new MssqlDependency(ObjectId, ReferencedId, Server, Database, Schema, Name,
+            SourceDatabaseId, ReferencedDatabaseId, ResolvedLocalId, IsAmbiguous, IsCallerDependent, true);
     }
     internal sealed class MssqlExportIssue
     {
@@ -211,21 +293,27 @@ namespace mySQLPunk.lib.MssqlExport
     {
         public IReadOnlyList<MssqlTableDefinition> Tables { get; }
         public int SnapshotState { get; }
+        public MssqlSnapshotCapability SnapshotCapability { get; }
         public IReadOnlyList<MssqlExportIssue> Issues { get; }
-        internal MssqlExportCatalog(IEnumerable<MssqlTableDefinition> tables, int snapshotState, IEnumerable<MssqlExportIssue> issues)
-        { Tables = MssqlNativeFacts.Copy(tables); SnapshotState = snapshotState; Issues = MssqlNativeFacts.Copy(issues); }
+        internal MssqlExportCatalog(IEnumerable<MssqlTableDefinition> tables, int snapshotState, IEnumerable<MssqlExportIssue> issues, MssqlSnapshotCapability snapshotCapability = null)
+        { Tables = MssqlNativeFacts.Copy(tables); SnapshotState = snapshotState; SnapshotCapability = snapshotCapability;
+            if (snapshotCapability != null && snapshotCapability.State != snapshotState) throw new ArgumentException("Snapshot capability state mismatch", nameof(snapshotCapability)); Issues = MssqlNativeFacts.Copy(issues); }
     }
     internal sealed class MssqlExportSchema
     {
         public IReadOnlyList<MssqlTableDefinition> Tables { get; }
         public IReadOnlyList<MssqlViewDefinition> Views { get; }
         public IReadOnlyList<MssqlDependency> Dependencies { get; }
+        public IReadOnlyList<MssqlExtendedPropertyDefinition> ExtendedProperties { get; }
         public IReadOnlyList<MssqlExportIssue> Issues { get; }
         public int SnapshotState { get; }
+        public MssqlSnapshotCapability SnapshotCapability { get; }
         public string Fingerprint { get; }
-        internal MssqlExportSchema(IEnumerable<MssqlTableDefinition> tables, IEnumerable<MssqlViewDefinition> views, IEnumerable<MssqlDependency> dependencies, int snapshotState, IEnumerable<MssqlExportIssue> issues)
+        internal MssqlExportSchema(IEnumerable<MssqlTableDefinition> tables, IEnumerable<MssqlViewDefinition> views, IEnumerable<MssqlDependency> dependencies, int snapshotState, IEnumerable<MssqlExportIssue> issues, IEnumerable<MssqlExtendedPropertyDefinition> extendedProperties = null, MssqlSnapshotCapability snapshotCapability = null)
         {
-            Tables = MssqlNativeFacts.Copy(tables); Views = MssqlNativeFacts.Copy(views); Dependencies = MssqlNativeFacts.Copy(dependencies); Issues = MssqlNativeFacts.Copy(issues); SnapshotState = snapshotState;
+            ExtendedProperties = MssqlNativeFacts.Copy(extendedProperties);
+            Tables = MssqlNativeFacts.Copy(tables); Views = MssqlNativeFacts.Copy(views); Dependencies = MssqlNativeFacts.Copy(dependencies); Issues = MssqlNativeFacts.Copy(issues); SnapshotState = snapshotState; SnapshotCapability = snapshotCapability;
+            if (snapshotCapability != null && snapshotCapability.State != snapshotState) throw new ArgumentException("Snapshot capability state mismatch", nameof(snapshotCapability));
             var text = new StringBuilder();
             foreach (var t in Tables.OrderBy(x => x.Key.ObjectId))
             {
@@ -235,8 +323,19 @@ namespace mySQLPunk.lib.MssqlExport
                 foreach (var c in t.Constraints.OrderBy(x => x.Name, StringComparer.Ordinal)) { c.Canonical(text); foreach (var column in c.Columns) column.Canonical(text); }
             }
             foreach (var v in Views.OrderBy(x => x.Key.ObjectId)) { Key(text, v.Key); v.Canonical(text); }
-            foreach (var d in Dependencies.OrderBy(x => x.ObjectId).ThenBy(x => x.ReferencedId).ThenBy(x => x.Name, StringComparer.Ordinal))
-            { MssqlNativeFacts.Part(text, d.ObjectId.ToString(CultureInfo.InvariantCulture)); MssqlNativeFacts.Part(text, d.ReferencedId?.ToString(CultureInfo.InvariantCulture)); MssqlNativeFacts.Part(text, d.Server); MssqlNativeFacts.Part(text, d.Database); MssqlNativeFacts.Part(text, d.Schema); MssqlNativeFacts.Part(text, d.Name); }
+            foreach (var d in Dependencies.OrderBy(x => x.ObjectId).ThenBy(x => x.ReferencedId).ThenBy(x => x.Server, StringComparer.Ordinal)
+                .ThenBy(x => x.Database, StringComparer.Ordinal).ThenBy(x => x.Schema, StringComparer.Ordinal).ThenBy(x => x.Name, StringComparer.Ordinal)
+                .ThenBy(x => x.SourceDatabaseId).ThenBy(x => x.ReferencedDatabaseId).ThenBy(x => x.ResolvedLocalId)
+                .ThenBy(x => x.IsAmbiguous).ThenBy(x => x.IsCallerDependent).ThenBy(x => x.PreparedSameDatabaseReference))
+            {
+                MssqlNativeFacts.Part(text, d.ObjectId.ToString(CultureInfo.InvariantCulture)); MssqlNativeFacts.Part(text, d.ReferencedId?.ToString(CultureInfo.InvariantCulture));
+                MssqlNativeFacts.Part(text, d.Server); MssqlNativeFacts.Part(text, d.Database); MssqlNativeFacts.Part(text, d.Schema); MssqlNativeFacts.Part(text, d.Name);
+                MssqlNativeFacts.Part(text, d.SourceDatabaseId?.ToString(CultureInfo.InvariantCulture)); MssqlNativeFacts.Part(text, d.ReferencedDatabaseId?.ToString(CultureInfo.InvariantCulture));
+                MssqlNativeFacts.Part(text, d.ResolvedLocalId?.ToString(CultureInfo.InvariantCulture)); MssqlNativeFacts.Part(text, d.IsAmbiguous.ToString());
+                MssqlNativeFacts.Part(text, d.IsCallerDependent.ToString()); MssqlNativeFacts.Part(text, d.PreparedSameDatabaseReference.ToString());
+            }
+            foreach (var p in ExtendedProperties.OrderBy(x => x.Owner.ObjectId).ThenBy(x => x.MinorId).ThenBy(x => x.Name, StringComparer.Ordinal))
+            { Key(text, p.Owner); MssqlNativeFacts.Part(text, p.OwnerType); p.Canonical(text); }
             using (var sha = SHA256.Create()) Fingerprint = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text.ToString()))).Replace("-", "");
         }
         private static void Key(StringBuilder text, MssqlObjectKey key) { MssqlNativeFacts.Part(text, key.ObjectId.ToString(CultureInfo.InvariantCulture)); MssqlNativeFacts.Part(text, key.Schema); MssqlNativeFacts.Part(text, key.Name); }
@@ -245,6 +344,7 @@ namespace mySQLPunk.lib.MssqlExport
     {
         public MssqlExportSchema Schema { get; }
         public int SnapshotState => Schema.SnapshotState;
+        public MssqlSnapshotCapability SnapshotCapability => Schema.SnapshotCapability;
         public IReadOnlyList<MssqlExportIssue> Issues { get; }
         public bool CanStart => Issues.Count == 0;
         internal MssqlExportPreflight(MssqlExportSchema schema, IEnumerable<MssqlExportIssue> issues) { Schema = schema; Issues = MssqlNativeFacts.Copy(issues); }
@@ -278,7 +378,7 @@ namespace mySQLPunk.lib.MssqlExport
         }
     }
 
-    internal enum MssqlExportStage { Preflight, Schema, Data, Verifying, Publishing, Mirroring, CancelRequested, Completed, Canceled, Failed, LocalCompletedMirrorIncomplete }
+    internal enum MssqlExportStage { Preflight, Schema, Data, Verifying, Publishing, Mirroring, CancelRequested, Completed, Canceled, Failed, LocalCompletedMirrorIncomplete, EnablingSnapshot, RestoringSnapshot }
     internal enum MssqlExportEstimationState { Estimating, Measuring, Waiting, Unreliable, Complete }
     internal sealed class MssqlExportProgress
     {
@@ -325,11 +425,18 @@ namespace mySQLPunk.lib.MssqlExport
         public IReadOnlyList<string> Warnings { get; }
         public IReadOnlyList<string> ResidualPaths { get; }
         public string ErrorMessage { get; }
+        public bool UseSnapshot { get; }
+        public MssqlSnapshotCleanupResult SnapshotCleanup { get; }
+        public MssqlSnapshotStartRejection StartRejection { get; }
+        public MssqlSnapshotCapability StartCapability { get; }
         internal MssqlExportResult(Guid jobId, MssqlExportStage stage, string publishedPath, string mirrorPath,
-            IEnumerable<MssqlTableRowCount> rows, TimeSpan elapsed, IEnumerable<string> warnings, IEnumerable<string> residuals, string errorMessage)
+            IEnumerable<MssqlTableRowCount> rows, TimeSpan elapsed, IEnumerable<string> warnings, IEnumerable<string> residuals, string errorMessage, bool useSnapshot = false, MssqlSnapshotCleanupResult snapshotCleanup = null,
+            MssqlSnapshotStartRejection startRejection = MssqlSnapshotStartRejection.None, MssqlSnapshotCapability startCapability = null)
         {
             JobId = jobId; Stage = stage; PublishedPath = publishedPath; MirrorPath = mirrorPath; RowCounts = MssqlNativeFacts.Copy(rows);
-            Elapsed = elapsed; Warnings = MssqlNativeFacts.Copy(warnings); ResidualPaths = MssqlNativeFacts.Copy(residuals); ErrorMessage = errorMessage;
+            Elapsed = elapsed; Warnings = MssqlNativeFacts.Copy(warnings); ResidualPaths = MssqlNativeFacts.Copy(residuals); ErrorMessage = errorMessage; UseSnapshot = useSnapshot; SnapshotCleanup = snapshotCleanup;
+            if (!Enum.IsDefined(typeof(MssqlSnapshotStartRejection), startRejection)) throw new ArgumentOutOfRangeException(nameof(startRejection));
+            StartRejection = startRejection; StartCapability = startCapability;
         }
     }
 

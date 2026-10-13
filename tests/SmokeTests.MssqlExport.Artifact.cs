@@ -84,7 +84,7 @@ public static partial class SmokeTests
     }
     private static MssqlExportRequest ArtifactRequest(string path, ExportDestinationStamp stamp)
     {
-        return new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] {new MssqlObjectKey(1,"dbo","T")}, MssqlExportMode.SchemaAndData, false, path, stamp, null);
+        return new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] {new MssqlObjectKey(1,"dbo","T")}, MssqlExportMode.SchemaAndData, false, path, stamp, null, true);
     }
     private static MssqlArtifactReceipt FinishArtifact(MssqlExportArtifact artifact)
     {

@@ -108,6 +108,8 @@ namespace mySQLPunk
             if (!string.IsNullOrWhiteSpace(result.PublishedPath)) message += " · " + result.PublishedPath;
             if (!string.IsNullOrWhiteSpace(result.MirrorPath)) message += " · " + result.MirrorPath;
             if (!string.IsNullOrWhiteSpace(result.ErrorMessage)) message += " · " + result.ErrorMessage;
+            if (result.SnapshotCleanup?.State == MssqlSnapshotCleanupState.Unconfirmed)
+                message += " · " + ReportText.Get("警告：資料庫設定尚未確認恢復", "Warning: database setting restoration is unconfirmed") + MssqlExportWizardForm.CleanupText(result.SnapshotCleanup);
             return message;
         }
     }

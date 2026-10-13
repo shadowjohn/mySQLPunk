@@ -18,13 +18,28 @@ public static partial class SmokeTests
                 { "column_id", 1 }, { "name", "g" }, { "type_name", fact == "geography" ? "geography" : "geometry" },
                 { "type_schema", fact == "user-schema" ? "dbo" : "sys" }, { "is_user_defined", fact == "user-defined" }, { "is_assembly_type", true } });
             var t = ValueTable(c);
-            var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] { t.Key }, mode, false, Path.Combine(Path.GetTempPath(), "geometry.sql"), null, null);
+            var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] { t.Key }, mode, false, Path.Combine(Path.GetTempPath(), "geometry.sql"), null, null, mode != MssqlExportMode.SchemaOnly);
             var issues = new MssqlExportMetadataReader().Validate(new MssqlExportSchema(new[] { t }, null, null, 1, null), request);
             Assert((issues.Count == 0) == (fact == "native"), "Only native sys.geometry accepted in " + mode + ": " + fact);
             if (fact != "native") Assert(issues.Any(x => x.ColumnName == "g"), "Rejected type identifies column");
         }
     }
 
+    private static void Diagnostic_MetadataModes()
+    {
+        foreach (var mode in new[] { MssqlExportMode.SchemaOnly, MssqlExportMode.SchemaAndData, MssqlExportMode.DataOnly })
+        foreach (int state in new[] { 0, 1, 2, 3, 9 })
+        foreach (bool? select in new bool?[] { false, true, null }) {
+            var table = new MssqlTableDefinition(new MssqlObjectKey(1, "dbo", "visible"), new Dictionary<string, object> { { "can_select", select.HasValue ? (object)select.Value : DBNull.Value } }, null, null, null);
+            var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] { table.Key }, mode, false, Path.Combine(Path.GetTempPath(), "matrix.sql"), null, null, mode != MssqlExportMode.SchemaOnly);
+            var identity = new MssqlSnapshotIdentity("server", "fixture", 1, new DateTime(2026, 1, 1));
+            var schema = new MssqlExportSchema(new[] { table }, null, null, state, null, null, new MssqlSnapshotCapability(identity, state, true, true));
+            var issues = new MssqlExportMetadataReader().ValidateStart(schema, request);
+            Assert(issues.Any(x => x.Code == "UnreadableTable") == (select != true && mode != MssqlExportMode.SchemaOnly), "Schema-only needs readable definitions, not SELECT; both data modes need SELECT");
+            Assert(issues.Any(x => x.Code == "SnapshotUnavailable") == (state != 0 && state != 1 && mode != MssqlExportMode.SchemaOnly), "Snapshot state gates only data modes, including unknown states");
+            Assert(new MssqlExportPreflight(schema, issues).CanStart == (mode == MssqlExportMode.SchemaOnly || (select == true && (state == 0 || state == 1))), "Mode/state/permission matrix cannot silently pass missing data prerequisites");
+        }
+    }
     private static void Metadata_RequiresNativeReader()
     {
         Assert(typeof(MssqlObjectKey).Assembly.GetType("mySQLPunk.lib.MssqlExport.MssqlExportMetadataReader") != null, "Native metadata reader must exist");
@@ -42,7 +57,7 @@ public static partial class SmokeTests
         Assert(catalog.Tables.Count == 2, "dbo and sales objects remain distinct");
         Assert(catalog.Tables[0].EstimatedRows == null && catalog.Tables[0].EstimatedBytes == null, "Missing estimates remain unknown");
         Assert(MssqlExportMetadataReader.Quote(a.Name) == "[ord]]ers]", "Quote each identifier segment");
-        var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] { a, b }, MssqlExportMode.SchemaAndData, false, Path.Combine(Path.GetTempPath(), "fixture.sql"), null, null);
+        var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] { a, b }, MssqlExportMode.SchemaAndData, false, Path.Combine(Path.GetTempPath(), "fixture.sql"), null, null, true);
         var schema = new MssqlExportSchema(tables, null, new[] { new MssqlDependency(a.ObjectId, 999, null, null, "dbo", "missing") }, 0, null);
         var issues = new MssqlExportMetadataReader().Validate(schema, request);
         Assert(System.Linq.Enumerable.Any(issues, x => x.Code == "UnsupportedSpatial" && x.ColumnName == "shape"), "Spatial issue names column");
@@ -52,7 +67,7 @@ public static partial class SmokeTests
         for (int state = 0; state <= 3; state++)
         {
             var candidate = new MssqlExportSchema(tables, null, null, state, null);
-            Assert(System.Linq.Enumerable.Any(new MssqlExportMetadataReader().Validate(candidate, request), x => x.Code == "SnapshotUnavailable") == (state != 1), "Only ON accepts data snapshot");
+            Assert(System.Linq.Enumerable.Any(new MssqlExportMetadataReader().Validate(candidate, request), x => x.Code == "SnapshotUnavailable") == false, "Final shape validation never repeats settings capability gate");
         }
         var v1 = new MssqlViewDefinition(new MssqlObjectKey(201, "dbo", "v1"), new Dictionary<string, object> { { "definition", "CREATE VIEW dbo.v1 AS SELECT * FROM dbo.v2" } });
         var v2 = new MssqlViewDefinition(new MssqlObjectKey(202, "dbo", "v2"), new Dictionary<string, object> { { "definition", "CREATE VIEW dbo.v2 AS SELECT * FROM dbo.v1" } });
@@ -97,7 +112,7 @@ public static partial class SmokeTests
         var index = new MssqlIndexDefinition(new Dictionary<string, object> { { "index_id", 1 }, { "name", "pk" }, { "type", 1 }, { "is_primary_key", true }, { "optimize_for_sequential_key", null } }, new[] { new MssqlNativeFacts(new Dictionary<string, object> { { "index_column_id", 1 }, { "name", "id" }, { "key_ordinal", 1 } }) });
         var ddl = new StringWriter();
         var oldSchema = new MssqlExportSchema(new[] { new MssqlTableDefinition(key, new Dictionary<string, object>(), new[] { column }, new[] { index }, null) }, null, null, 1, null);
-        new MssqlSchemaScriptWriter().WriteAfterData(oldSchema, new MssqlExportRequest(Guid.NewGuid(), "db", new[] { key }, MssqlExportMode.SchemaAndData, false, Path.Combine(Path.GetTempPath(), "unused.sql"), null, null), ddl, System.Threading.CancellationToken.None);
+        new MssqlSchemaScriptWriter().WriteAfterData(oldSchema, new MssqlExportRequest(Guid.NewGuid(), "db", new[] { key }, MssqlExportMode.SchemaAndData, false, Path.Combine(Path.GetTempPath(), "unused.sql"), null, null, true), ddl, System.Threading.CancellationToken.None);
         AssertNotContains(ddl.ToString(), "OPTIMIZE_FOR_SEQUENTIAL_KEY", "Unavailable old-engine index option omitted from DDL");
     }
 
@@ -193,12 +208,12 @@ public static partial class SmokeTests
     {
         var tables = new List<MssqlObjectKey> { new MssqlObjectKey(7, "dbo", "Orders") };
         string path = Path.Combine(Path.GetTempPath(), "mssql-export.sql");
-        var request = new MssqlExportRequest(Guid.NewGuid(), "shop", tables, MssqlExportMode.SchemaAndData, true, path, null, null);
+        var request = new MssqlExportRequest(Guid.NewGuid(), "shop", tables, MssqlExportMode.SchemaAndData, true, path, null, null, true);
         tables.Clear();
         Assert(request.Tables.Count == 1, "Request must not retain mutable selection");
         AssertThrows<NotSupportedException>(() => ((IList<MssqlObjectKey>)request.Tables).Clear(), "Selection is read-only");
         AssertThrows<ArgumentException>(() => new MssqlExportRequest(Guid.NewGuid(), "shop", request.Tables, (MssqlExportMode)99, false, path, null, null), "Unknown mode rejected");
-        AssertThrows<ArgumentException>(() => new MssqlExportRequest(Guid.NewGuid(), "shop", request.Tables, MssqlExportMode.DataOnly, true, path, null, null), "Data-only cannot include views");
+        AssertThrows<ArgumentException>(() => new MssqlExportRequest(Guid.NewGuid(), "shop", request.Tables, MssqlExportMode.DataOnly, true, path, null, null, true), "Data-only cannot include views");
         AssertThrows<ArgumentException>(() => new MssqlExportRequest(Guid.NewGuid(), "shop", tables, MssqlExportMode.SchemaOnly, false, path, null, null), "Empty selection rejected");
         AssertThrows<ArgumentException>(() => new MssqlExportRequest(Guid.NewGuid(), "shop", request.Tables, MssqlExportMode.SchemaOnly, false, " ", null, null), "Empty path rejected");
         Assert(MssqlExportLimits.SmallRowBytes == 262144, "Row buffer budget");

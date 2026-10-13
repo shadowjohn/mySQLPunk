@@ -14,7 +14,7 @@ public static partial class SmokeTests
         return result;
     }
     private static MssqlExportRequest SchemaRequest(MssqlExportSchema schema, MssqlExportMode mode = MssqlExportMode.SchemaAndData)
-    { return new MssqlExportRequest(Guid.NewGuid(), "source_db", schema.Tables.Select(t => t.Key).ToArray(), mode, mode != MssqlExportMode.DataOnly && schema.Views.Count != 0, Path.Combine(Path.GetTempPath(), "schema.sql"), null, null); }
+    { return new MssqlExportRequest(Guid.NewGuid(), "source_db", schema.Tables.Select(t => t.Key).ToArray(), mode, mode != MssqlExportMode.DataOnly && schema.Views.Count != 0, Path.Combine(Path.GetTempPath(), "schema.sql"), null, null, mode != MssqlExportMode.SchemaOnly); }
     private static void Schema_RequiresWriter()
     { Assert(typeof(MssqlObjectKey).Assembly.GetType("mySQLPunk.lib.MssqlExport.MssqlSchemaScriptWriter") != null, "Native two-stage schema writer must exist"); }
     private static MssqlExportSchema SchemaFixture()
@@ -37,7 +37,7 @@ public static partial class SmokeTests
         var table = new MssqlTableDefinition(key,SchemaFacts("comment","owner's table","lock_escalation_desc","TABLE","text_in_row_limit",0,"large_value_types_out_of_row",false),columns,indexes,constraints);
         var v1 = new MssqlViewDefinition(new MssqlObjectKey(2,"dbo","v1"),SchemaFacts("definition","CREATE VIEW [dbo].[v1] AS SELECT [id] FROM [sa'les]]].[ord]]ers]","uses_ansi_nulls",true,"uses_quoted_identifier",true));
         var v2 = new MssqlViewDefinition(new MssqlObjectKey(3,"dbo","v2"),SchemaFacts("definition","ALTER VIEW [dbo].[v2] AS SELECT * FROM [dbo].[v1]","uses_ansi_nulls",true,"uses_quoted_identifier",false));
-        return new MssqlExportSchema(new[]{table},new[]{v2,v1},new[]{new MssqlDependency(3,2,null,null,"dbo","v1"),new MssqlDependency(2,1,null,null,key.Schema,key.Name)},1,null);
+        return new MssqlExportSchema(new[]{table},new[]{v2,v1},new[]{new MssqlDependency(3,2,null,null,"dbo","v1"),new MssqlDependency(2,1,null,null,key.Schema,key.Name)},1,null, extendedProperties: new[] { PropertiesText(key,"TABLE",0,null,"MS_Description","owner's table"), PropertiesText(key,"TABLE",2,"name","MS_Description","owner's column") });
     }
     private static void Schema_WritesNativeBeforeAndAfter()
     {
@@ -63,7 +63,7 @@ public static partial class SmokeTests
         AssertContains(last,"FILLFACTOR = 80","Preserve index option");
         AssertContains(last,"WITH NOCHECK ADD CONSTRAINT [ck] CHECK","Preserve untrusted check");
         AssertContains(last,"NOCHECK CONSTRAINT [fk]","Preserve disabled FK");
-        AssertContains(last,"owner''s column","Escape extended property values");
+        AssertContains(last,PropertiesHex("owner's column"),"Keep extended property native bytes");
         AssertContains(last,"SET QUOTED_IDENTIFIER OFF;","Preserve view SET option");
         Assert(last.IndexOf("CREATE VIEW [dbo].[v1]",StringComparison.Ordinal)<last.IndexOf("CREATE VIEW [dbo].[v2]",StringComparison.Ordinal),"Topological view order");
         AssertContains(last,"GO","View DDL own batch");

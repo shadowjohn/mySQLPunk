@@ -1,7 +1,7 @@
 param(
     [switch]$Run,
     [string]$Server,
-    [ValidateSet('Core','Large','Concurrency','ClientProbe','FinalFix','Geometry','Ssh')][string]$Profile = 'Core',
+    [ValidateSet('OptionalSnapshot','SnapshotLifecycle','Core','Large','Concurrency','ClientProbe','FinalFix','Geometry','Properties','References','Ssh')][string]$Profile = 'Core',
     [string]$OutputDirectory,
     [ValidateSet('Classic','Go')][string]$Client = 'Classic',
     [string]$SqlcmdPath,
@@ -9,7 +9,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if (!$Run) {
-    Write-Host 'Opt-in isolated MSSQL acceptance. Supply -Run -Server "(localdb)\mySQLPunkExportTest_20261012" -Profile Core|Large|Concurrency|Geometry -OutputDirectory <new empty C: fixture directory>.'
+    Write-Host 'Opt-in isolated MSSQL acceptance. Supply -Run -Server "(localdb)\mySQLPunkExportTest_20261012" -Profile OptionalSnapshot|SnapshotLifecycle|Core|Large|Concurrency|Geometry|Properties|References -OutputDirectory <new empty C: fixture directory>.'
     Write-Host 'Uses Integrated Security; creates only token-owned GUID source/target databases; requires an already running authorized fixture and sqlcmd. Never reads saved connections or installs/starts a server.'
     return
 }
@@ -59,12 +59,13 @@ try {
     $architecture = switch ($machine) { 0x8664 { 'x64' } 0x014c { 'x86' } 0xAA64 { 'ARM64' } default { "PE-machine-$machine" } }
     @{ path=$sqlcmd; architecture=$architecture; fileVersion=(Get-Item -LiteralPath $sqlcmd).VersionInfo.FileVersion } | ConvertTo-Json | Out-File (Join-Path $output 'sqlcmd-identity.json') -Encoding utf8
 } finally { $peReader.Dispose() }
-$envNames = @('MYSQLPUNK_SMOKE_FILTER','MYSQLPUNK_MSSQL_INTEGRATION','MYSQLPUNK_MSSQL_INTEGRATION_SERVER','MYSQLPUNK_MSSQL_INTEGRATION_OUTPUT','MYSQLPUNK_MSSQL_INTEGRATION_FIXTURES','MYSQLPUNK_MSSQL_INTEGRATION_FACTOR','MYSQLPUNK_MSSQL_INTEGRATION_SQLCMD','MYSQLPUNK_MSSQL_INTEGRATION_CLIENT','MYSQLPUNK_MSSQL_INTEGRATION_RESTORE','MYSQLPUNK_MSSQL_INTEGRATION_PIPE')
+$envNames = @('MYSQLPUNK_MSSQL_INTEGRATION_AUTH','MYSQLPUNK_SMOKE_FILTER','MYSQLPUNK_MSSQL_INTEGRATION','MYSQLPUNK_MSSQL_INTEGRATION_SERVER','MYSQLPUNK_MSSQL_INTEGRATION_OUTPUT','MYSQLPUNK_MSSQL_INTEGRATION_FIXTURES','MYSQLPUNK_MSSQL_INTEGRATION_FACTOR','MYSQLPUNK_MSSQL_INTEGRATION_SQLCMD','MYSQLPUNK_MSSQL_INTEGRATION_CLIENT','MYSQLPUNK_MSSQL_INTEGRATION_RESTORE','MYSQLPUNK_MSSQL_INTEGRATION_PIPE')
 $saved = @{}
 foreach ($name in $envNames) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
 try {
     $env:MYSQLPUNK_SMOKE_FILTER = 'MSSQL export integration opt-in'
     $env:MYSQLPUNK_MSSQL_INTEGRATION = $Profile
+    $env:MYSQLPUNK_MSSQL_INTEGRATION_AUTH = [IO.Path]::GetFullPath("$PSScriptRoot/../.superpowers/sdd/implementation-plan/fixture-environment.json")
     $env:MYSQLPUNK_MSSQL_INTEGRATION_SERVER = $Server
     $env:MYSQLPUNK_MSSQL_INTEGRATION_FIXTURES = Join-Path $PSScriptRoot 'MssqlExportFixtures'
     $env:MYSQLPUNK_MSSQL_INTEGRATION_SQLCMD = $sqlcmd

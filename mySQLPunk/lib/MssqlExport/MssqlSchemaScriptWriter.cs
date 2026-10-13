@@ -15,6 +15,8 @@ namespace mySQLPunk.lib.MssqlExport
         {
             Validate(schema, request, output, cancellation);
             Settings(output);
+            output.WriteLine("-- Source read mode: " + (request.Mode == MssqlExportMode.SchemaOnly ? "Schema only (no data transaction)" : request.UseSnapshot ? "SNAPSHOT" : "READ COMMITTED"));
+            if (request.Mode != MssqlExportMode.SchemaOnly && !request.UseSnapshot) output.WriteLine("-- " + MssqlSqlExportService.OrdinaryReadWarning);
             if (request.Mode == MssqlExportMode.DataOnly) return;
             output.WriteLine("-- Restore into an empty, compatible target selected by the caller; existing objects fail.");
             output.WriteLine("-- Named filegroups must already exist. Rowversion values are regenerated.");
@@ -65,13 +67,11 @@ namespace mySQLPunk.lib.MssqlExport
                     cancellation.ThrowIfCancellationRequested();
                     WriteConstraint(table, constraint, output);
                 }
-                Comment(output, table.Key, null, table.Comment);
-                foreach (var column in table.Columns) { cancellation.ThrowIfCancellationRequested(); Comment(output, table.Key, column.Name, column.Comment); }
             }
             var pending = schema.Views.ToDictionary(v => v.Key.ObjectId);
             while (pending.Count != 0)
             {
-                var ready = pending.Values.Where(v => !schema.Dependencies.Any(d => d.ObjectId == v.Key.ObjectId && d.ReferencedId.HasValue && pending.ContainsKey(d.ReferencedId.Value))).OrderBy(v => v.Key.ObjectId).ToArray();
+                var ready = pending.Values.Where(v => !schema.Dependencies.Any(d => d.ObjectId == v.Key.ObjectId && d.EffectiveReferencedId.HasValue && pending.ContainsKey(d.EffectiveReferencedId.Value))).OrderBy(v => v.Key.ObjectId).ToArray();
                 if (ready.Length == 0) throw new InvalidOperationException("View dependency cycle.");
                 foreach (var view in ready)
                 {
@@ -83,6 +83,11 @@ namespace mySQLPunk.lib.MssqlExport
                     Batch(output);
                     pending.Remove(view.Key.ObjectId);
                 }
+            }
+            foreach (var property in schema.ExtendedProperties.OrderBy(p => p.Owner.ObjectId).ThenBy(p => p.MinorId).ThenBy(p => p.Name, StringComparer.Ordinal))
+            {
+                cancellation.ThrowIfCancellationRequested();
+                ExtendedProperty(output, property);
             }
             // Disabling a clustered index first makes its table inaccessible and can disable FKs.
             // Delay all requested disabled states until every object is in place.
@@ -178,10 +183,17 @@ namespace mySQLPunk.lib.MssqlExport
             output.WriteLine("ALTER TABLE " + Qualified(table.Key) + (c.Flag("is_disabled") ? " NOCHECK" : " CHECK") + " CONSTRAINT " + Quote(c.Name) + ";");
             Batch(output);
         }
-        private static void Comment(TextWriter output, MssqlObjectKey key, string column, string value)
+        private static void ExtendedProperty(TextWriter output, MssqlExtendedPropertyDefinition property)
         {
-            if (value == null) return;
-            output.WriteLine("EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=" + Literal(value) + ", @level0type=N'SCHEMA', @level0name=" + Literal(key.Schema) + ", @level1type=N'TABLE', @level1name=" + Literal(key.Name) + (column == null ? "" : ", @level2type=N'COLUMN', @level2name=" + Literal(column)) + ";");
+            string value = property.IsNull ? "NULL" : property.BaseType == "int" ? "CONVERT(int, 0x" + property.ValueHex + ")" :
+                "CONVERT(nvarchar(" + (property.MaxLengthBytes.Value / 2).ToString(CultureInfo.InvariantCulture) + "), 0x" + property.ValueHex + ") COLLATE " + property.Collation;
+            // Assign the collated expression directly to sql_variant. An intermediate
+            // nvarchar variable would use the target database collation instead.
+            output.WriteLine("DECLARE @__mp_property sql_variant;");
+            output.WriteLine("SET @__mp_property = " + value + ";");
+            output.WriteLine("EXEC sys.sp_addextendedproperty @name=" + Literal(property.Name) + ", @value=@__mp_property, @level0type=N'SCHEMA', @level0name=" + Literal(property.Owner.Schema) +
+                ", @level1type=" + Literal(property.OwnerType) + ", @level1name=" + Literal(property.Owner.Name) +
+                (property.MinorId == 0 ? "" : ", @level2type=N'COLUMN', @level2name=" + Literal(property.ColumnName)) + ";");
             Batch(output);
         }
         private static void TableOption(TextWriter output, MssqlTableDefinition table, string fact, string option)
@@ -193,6 +205,7 @@ namespace mySQLPunk.lib.MssqlExport
         // The catalog name wins over stale module text left by sp_rename.
         private static string ViewDefinition(MssqlViewDefinition view)
         {
+            if (view.HasPreparedReferences) return view.PreparedDefinition;
             string text = view.Definition; int position = 0;
             string token = Token(text, ref position);
             if (string.Equals(token, "CREATE", StringComparison.OrdinalIgnoreCase))

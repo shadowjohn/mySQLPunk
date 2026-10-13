@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Data.SqlClient;
 using System.Text;
 using System.Threading;
 
@@ -9,19 +11,32 @@ namespace mySQLPunk.lib.MssqlExport
 {
     internal class MssqlSqlExportService
     {
+        internal const string OrdinaryReadWarning = "一般讀取（READ COMMITTED）：匯出期間可能讀到不同時間的資料；來源持續寫入時，關聯資料可能不一致，還原可能因外鍵限制失敗。檔案驗證不等同還原成功。";
+        private readonly IMssqlSnapshotRecoveryStore recoveryStore;
         private readonly Func<IMssqlExportSource> sourceFactory;
         private readonly MssqlArtifactFiles files;
         private readonly Action<MssqlExportStage> localPhase;
         internal MssqlSqlExportService(Func<IMssqlExportSource> sourceFactory) : this(sourceFactory, new MssqlArtifactFiles(), null) { }
-        internal MssqlSqlExportService(Dictionary<string, object> connection) : this(OwnedFactory(connection)) { }
+        internal MssqlSqlExportService(Dictionary<string, object> connection) : this(connection, new MssqlSnapshotRecoveryStore()) { }
+        internal MssqlSqlExportService(Dictionary<string, object> connection, IMssqlSnapshotRecoveryStore recoveryStore,
+            Func<SqlConnection, IMssqlSnapshotBackend> backendFactory = null)
+            : this(OwnedFactory(connection, recoveryStore, backendFactory), new MssqlArtifactFiles(), null, recoveryStore) { }
         // Existing file operations plus a local phase boundary are sufficient for deterministic faults.
-        internal MssqlSqlExportService(Func<IMssqlExportSource> sourceFactory, MssqlArtifactFiles files, Action<MssqlExportStage> localPhase)
-        { this.sourceFactory = sourceFactory ?? throw new ArgumentNullException(nameof(sourceFactory)); this.files = files ?? throw new ArgumentNullException(nameof(files)); this.localPhase = localPhase; }
-        private static Func<IMssqlExportSource> OwnedFactory(Dictionary<string, object> connection)
+        internal MssqlSqlExportService(Func<IMssqlExportSource> sourceFactory, MssqlArtifactFiles files, Action<MssqlExportStage> localPhase, IMssqlSnapshotRecoveryStore recoveryStore = null)
+        { this.sourceFactory = sourceFactory ?? throw new ArgumentNullException(nameof(sourceFactory)); this.files = files ?? throw new ArgumentNullException(nameof(files)); this.localPhase = localPhase; this.recoveryStore = recoveryStore ?? new MssqlSnapshotRecoveryStore(); }
+        private static Func<IMssqlExportSource> OwnedFactory(Dictionary<string, object> connection, IMssqlSnapshotRecoveryStore recoveryStore, Func<SqlConnection, IMssqlSnapshotBackend> backendFactory)
         {
             if (connection == null) throw new ArgumentNullException(nameof(connection));
             var settings = new Dictionary<string, object>(connection);
-            return () => new MssqlExportSource(ConnectionOpenService.OpenMssqlSession(new Dictionary<string, object>(settings)));
+            return () => new MssqlExportSource(ConnectionOpenService.OpenMssqlSession(new Dictionary<string, object>(settings)), recoveryStore, backendFactory);
+        }
+        internal virtual IReadOnlyList<MssqlSnapshotRecoveryNotice> LoadRecoveryNotices(MssqlSnapshotIdentity identity)
+        {
+            // Display candidates are broader than live-session cleanup authorization: recreated databases
+            // and unknown current identity still need an honest historical notice, never automatic repair.
+            return recoveryStore.ReadPending().Where(n => n.Record == null || identity == null || !identity.IsComplete ||
+                string.Equals(identity.ServerName, n.Record.Identity.ServerName, StringComparison.Ordinal) &&
+                string.Equals(identity.DatabaseName, n.Record.Identity.DatabaseName, StringComparison.Ordinal)).ToList().AsReadOnly();
         }
         internal virtual MssqlExportCatalog LoadCatalog(string databaseName, CancellationToken cancellation)
         {
@@ -36,6 +51,8 @@ namespace mySQLPunk.lib.MssqlExport
         private static Exception SafeInspectionFailure(string operation, Exception error, CancellationToken cancellation)
         {
             if (cancellation.IsCancellationRequested) return new OperationCanceledException(cancellation);
+            var prerequisite = MssqlExportPrerequisiteException.From(error);
+            if (prerequisite != null) return prerequisite;
             // No original exception as InnerException: even ToString must remain safe for a UI log.
             return new InvalidOperationException("Export " + operation + " failed (" + error.GetType().Name + ").");
         }
@@ -47,21 +64,33 @@ namespace mySQLPunk.lib.MssqlExport
             MssqlExportArtifact artifact = null; MssqlExportMirror mirror = null;
             var estimator = new MssqlExportProgressEstimator(request.JobId, new MssqlExportSchema(null, null, null, 0, null), request.Mirror != null);
             var stage = MssqlExportStage.Preflight; bool succeeded = false; bool canceled = false; string error = null;
+            MssqlSnapshotCleanupResult cleanup = null;
+            var startRejection = MssqlSnapshotStartRejection.None; MssqlSnapshotCapability startCapability = null;
+            Exception sourceError = null; bool sourceCanceled = false;
+            Action<Exception> captureSourceFailure = ex => {
+                if (sourceError != null) return;
+                sourceError = ex; sourceCanceled = cancellation.IsCancellationRequested;
+            };
+            if (request.Mode != MssqlExportMode.SchemaOnly && !request.UseSnapshot) warnings.Add(OrdinaryReadWarning);
             long written = 0;
             Action<MssqlExportProgress> report = p => { if (p != null && progress != null) { try { progress.Report(p); } catch { /* Observer failure must not change publication truth. */ } } };
             Action<MssqlExportStage> phase = s => {
                 stage = s; report(estimator.Sample(s, null, 0, 0, written, clock.Elapsed, true));
                 localPhase?.Invoke(s); cancellation.ThrowIfCancellationRequested();
             };
+            // Cleanup reports are deliberately independent of job cancellation and fallible local phase hooks.
+            Action<MssqlExportStage> cleanupPhase = s => report(estimator.Sample(s, null, 0, 0, written, clock.Elapsed, true));
             try
             {
                 report(estimator.Sample(stage, null, 0, 0, 0, clock.Elapsed, true));
                 cancellation.ThrowIfCancellationRequested();
-                using (var source = sourceFactory())
+                var source = sourceFactory();
+                try
                 {
                     var preflight = source.Inspect(request, cancellation);
-                    if (!preflight.CanStart) throw new InvalidOperationException("Export preflight did not pass.");
-                    var schema = source.BeginRead(request, cancellation);
+                    startCapability = preflight.SnapshotCapability;
+                    MssqlSnapshotStartException.RequireValid(preflight);
+                    var schema = source.BeginRead(request, s => { stage = s; report(estimator.Sample(s, null, 0, 0, written, clock.Elapsed, true)); }, cancellation);
                     estimator = new MssqlExportProgressEstimator(request.JobId, schema, request.Mirror != null);
                     cancellation.ThrowIfCancellationRequested();
                     artifact = MssqlExportArtifact.Create(request, files);
@@ -80,12 +109,20 @@ namespace mySQLPunk.lib.MssqlExport
                             report(estimator.Sample(stage, table.Key, 0, 0, artifact.Output.Position, clock.Elapsed, true));
                             if (request.Mode != MssqlExportMode.SchemaOnly)
                             {
-                                using (var reader = source.OpenRows(table, cancellation))
+                                var reader = source.OpenRows(table, cancellation);
+                                bool readFailed = false;
+                                try
                                 {
                                     rows = data.WriteTable(reader.Reader, table, writer, (r, b) => {
                                         rows = r; sourceBytes = b; written = artifact.Output.Position;
                                         report(estimator.Sample(stage, table.Key, r, b, written, clock.Elapsed, false));
                                     }, cancellation);
+                                }
+                                catch (Exception ex) { readFailed = true; captureSourceFailure(ex); throw; }
+                                finally
+                                {
+                                    try { reader.Dispose(); }
+                                    catch (Exception) when (readFailed) { /* FinishRead still sees DisposeSucceeded=false; keep the read failure. */ }
                                 }
                             }
                             counts.Add(new MssqlTableRowCount(table.Key, rows));
@@ -98,6 +135,13 @@ namespace mySQLPunk.lib.MssqlExport
                         writer.Flush(); written = artifact.Output.Position;
                     }
                     source.CompleteRead(schema, cancellation);
+                }
+                catch (Exception ex) { captureSourceFailure(ex); throw; }
+                finally
+                {
+                    try { cleanup = source.FinishRead(cleanupPhase); }
+                    catch (Exception) { cleanup = new MssqlSnapshotCleanupResult(MssqlSnapshotCleanupState.Unconfirmed, null, null, "SourceCleanupUnconfirmed"); }
+                    finally { try { source.Dispose(); } catch (Exception) { warnings.Add("SourceReleaseUnconfirmed"); } }
                 }
                 // No snapshot/reader/command/connection is alive during these local phases.
                 var receipt = artifact.Complete(counts.AsReadOnly(), cancellation); written = receipt.Bytes;
@@ -121,9 +165,15 @@ namespace mySQLPunk.lib.MssqlExport
             }
             catch (Exception ex)
             {
-                canceled = cancellation.IsCancellationRequested;
+                // Cleanup can observe a later cancellation or throw another exception. The original source
+                // outcome is immutable; cancellation after successful reading still stops local publication.
+                var primary = sourceError ?? ex;
+                canceled = sourceError != null ? sourceCanceled : cancellation.IsCancellationRequested;
                 // SQL/provider messages can contain credentials or row values. Return only a safe category.
-                error = canceled ? "Export canceled." : "Export failed during " + stage + " (" + ex.GetType().Name + ").";
+                var rejected = canceled ? null : primary as MssqlSnapshotStartException;
+                if (rejected != null) { startRejection = rejected.Reason; startCapability = rejected.Reason == MssqlSnapshotStartRejection.SnapshotBusy ? rejected.Capability ?? startCapability : rejected.Capability; }
+                var prerequisite = canceled ? null : MssqlExportPrerequisiteException.From(primary);
+                error = canceled ? "Export canceled." : rejected != null ? rejected.Message : prerequisite != null ? "Export failed during " + stage + ". " + prerequisite.Message : "Export failed during " + stage + " (" + primary.GetType().Name + ").";
             }
             finally
             {
@@ -136,12 +186,18 @@ namespace mySQLPunk.lib.MssqlExport
                 // Mirror owns its temporary lifetime inside CopyVerified's finally.
                 if (mirror != null) { warnings.AddRange(mirror.Warnings); residuals.AddRange(mirror.ResidualPaths); }
             }
+            if (cleanup != null)
+            {
+                if (cleanup.WarningCode != null) warnings.Add(cleanup.WarningCode);
+                else if (cleanup.State == MssqlSnapshotCleanupState.Unconfirmed) warnings.Add("SnapshotRestoreUnconfirmed");
+                if (cleanup.RecoveryRecordPath != null) residuals.Add(cleanup.RecoveryRecordPath);
+            }
             string published = artifact?.PublishedPath, mirrorPath = mirror?.MirrorPublishedPath;
             if (succeeded) stage = MssqlExportStage.Completed;
             else if (published != null) stage = MssqlExportStage.LocalCompletedMirrorIncomplete;
             else stage = canceled ? MssqlExportStage.Canceled : MssqlExportStage.Failed;
             report(estimator.Sample(stage, null, 0, 0, written, clock.Elapsed, true));
-            return new MssqlExportResult(request.JobId, stage, published, mirrorPath, counts, clock.Elapsed, warnings, residuals, error);
+            return new MssqlExportResult(request.JobId, stage, published, mirrorPath, counts, clock.Elapsed, warnings, residuals, error, request.UseSnapshot, cleanup, startRejection, startRejection == MssqlSnapshotStartRejection.None ? null : startCapability);
         }
     }
 }

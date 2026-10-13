@@ -25,14 +25,59 @@ public static partial class SmokeTests
     private static readonly string SmokeFilter = (Environment.GetEnvironmentVariable("MYSQLPUNK_SMOKE_FILTER") ?? string.Empty).Trim();
 
     [STAThread]
-    public static int Main()
+    public static int Main(string[] args)
     {
+        if (args.Length == 1 && args[0].StartsWith("--owned-restore-fixture-", StringComparison.Ordinal)) return RestoreProcessChild(args[0]);
+        if (args.Length != 0) return SnapshotCrashChild(args);
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL export restore process timeout evidence", RestoreProcess_TimeoutEvidence, ref passed);
+        Run("MSSQL export snapshot worker late start unavailable", SnapshotWorker_LateStartUnavailable, ref passed);
+        Run("MSSQL export snapshot worker start busy", SnapshotWorker_StartBusy, ref passed);
+        Run("MSSQL export snapshot wizard late start rejection", SnapshotWizard_LateStartRejection, ref passed);
+        Run("MSSQL export snapshot worker cleanup cancellation", SnapshotWorker_CancellationDuringCleanup, ref passed);
+        Run("MSSQL export snapshot worker reader disposal", SnapshotWorker_ReadAndDisposeFailures, ref passed);
+        Run("MSSQL export snapshot worker notices", SnapshotWorker_RecoveryNotices, ref passed);
+        Run("MSSQL export snapshot worker modes", SnapshotWorker_ModeAndCleanupOrder, ref passed);
+        Run("MSSQL export snapshot worker outcomes", SnapshotWorker_PrimaryFailureAndRecovery, ref passed);
+        Run("MSSQL export snapshot worker source cleanup", SnapshotWorker_SourceCleanupOwnership, ref passed);
+        Run("MSSQL export snapshot worker validation", SnapshotWorker_StartValidation, ref passed);
+        Run("MSSQL export snapshot worker progress", SnapshotWorker_ProgressDoesNotCompleteInterruptedTable, ref passed);
+        Run("MSSQL export snapshot lifecycle preserve", SnapshotLifecycle_PreserveOnAndRestoreOwnedOff, ref passed);
+        Run("MSSQL export snapshot lifecycle unknown", SnapshotLifecycle_UnknownEnableAndIdentity, ref passed);
+        Run("MSSQL export snapshot worker adapter start refusal", SnapshotWorker_AdapterStartUnavailable, ref passed);
+        Run("MSSQL export snapshot lifecycle adapter preparation", SnapshotLifecycle_AdapterPreDispatchFailures, ref passed);
+        Run("MSSQL export snapshot lifecycle cancellation", SnapshotLifecycle_CancelDeadlineAndResidual, ref passed);
+        Run("MSSQL export snapshot lifecycle journal", SnapshotLifecycle_NoJournalNoAlter, ref passed);
+        Run("MSSQL export snapshot lifecycle capability", SnapshotLifecycle_CapabilityAndCooperation, ref passed);
+        Run("MSSQL export snapshot lifecycle residual", SnapshotLifecycle_ResidualAndObservers, ref passed);
+        Run("MSSQL export snapshot lifecycle deadline", SnapshotLifecycle_WholeDeadline, ref passed);
+        Run("MSSQL export snapshot recovery untrusted", SnapshotRecovery_UntrustedFiles, ref passed);
+        Run("MSSQL export snapshot recovery faults", SnapshotRecovery_NoSecretsOrUnsafeDelete, ref passed);
+        Run("MSSQL export snapshot recovery durable", SnapshotRecovery_DurableCreateAndUpdate, ref passed);
+        Run("MSSQL export snapshot options defaults", SnapshotOptions_DefaultAndSchemaOnly, ref passed);
+        Run("MSSQL export snapshot options capability", SnapshotOptions_CapabilityMatrix, ref passed);
+        Run("MSSQL export snapshot options fingerprint", SnapshotOptions_Fingerprint, ref passed);
+        Run("MSSQL export references integration preparation", Reference_IntegratesPreparationAndOrdering, ref passed);
+        Run("MSSQL export references integration gates", Reference_IntegrationGatesAndFingerprint, ref passed);
+        Run("MSSQL export references token rewrite", Reference_RewritesTokens, ref passed);
+        Run("MSSQL export references quoted names and headers", Reference_QuotedNamesAndHeaders, ref passed);
+        Run("MSSQL export references unsupported contexts", Reference_RejectsUnsupportedContexts, ref passed);
+        Run("MSSQL export references catalog identity", Reference_RequiresCatalogIdentity, ref passed);
+        Run("MSSQL export references invalid modules", Reference_RejectsInvalidModules, ref passed);
+        Run("MSSQL export diagnostic service", Diagnostic_Service, ref passed);
+        Run("MSSQL export diagnostic metadata modes", Diagnostic_MetadataModes, ref passed);
+        Run("MSSQL export diagnostic wizard snapshot", Diagnostic_WizardSnapshot, ref passed);
+        Run("MSSQL export diagnostic wizard retry", Diagnostic_WizardRetry, ref passed);
+        Run("MSSQL export diagnostic wizard errors", Diagnostic_WizardErrors, ref passed);
+        Run("MSSQL export diagnostic wizard generation", Diagnostic_WizardGeneration, ref passed);
         Run("MSSQL export routing handlers", Routing_FourHandlers, ref passed);
         Run("MSSQL export routing legacy branches", Routing_LegacyBranches, ref passed);
         Run("MSSQL export routing seed resolution", Routing_SeedResolution, ref passed);
         Run("MSSQL export routing result status", Routing_ResultStatus, ref passed);
+        Run("MSSQL export snapshot wizard default disable and radio groups", SnapshotWizard_DefaultDisableAndRadioGroups, ref passed);
+        Run("MSSQL export snapshot wizard recheck and generation", SnapshotWizard_RecheckAndGeneration, ref passed);
+        Run("MSSQL export snapshot wizard recovery and terminal status", SnapshotWizard_RecoveryAndTerminalStatus, ref passed);
         Run("MSSQL export wizard selection", Wizard_Selection, ref passed);
         Run("MSSQL export wizard preflight", Wizard_Preflight, ref passed);
         Run("MSSQL export wizard issues scope and duration", Wizard_IssueScopeAndDuration, ref passed);
@@ -48,6 +93,11 @@ public static partial class SmokeTests
         Run("MSSQL export worker lifecycle", Worker_Lifecycle, ref passed);
         Run("MSSQL export worker failures", Worker_Failures, ref passed);
         Run("MSSQL export worker service", Worker_RequiresService, ref passed);
+        Run("MSSQL export properties ordinary named metadata", Properties_AllowsOrdinaryNamedProperties, ref passed);
+        Run("MSSQL export properties native variants and scopes", Properties_WritesVariantValuesAndScopes, ref passed);
+        Run("MSSQL export properties unsupported and malformed", Properties_RejectsUnsupportedAndMalformedMetadata, ref passed);
+        Run("MSSQL export properties immutable fingerprint", Properties_FingerprintsImmutableNativeFacts, ref passed);
+        Run("MSSQL export properties modes and cancellation", Properties_RespectsModesAndCancellation, ref passed);
         Run("MSSQL export schema view headers", Schema_NormalizesOnlyViewHeader, ref passed);
         Run("MSSQL export schema index option gate", Schema_RejectsUndocumentedIndexOption, ref passed);
         Run("MSSQL export schema legacy ANSI gates", Schema_RejectsLegacyAnsiSemantics, ref passed);
