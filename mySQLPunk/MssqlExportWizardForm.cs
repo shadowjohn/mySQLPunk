@@ -26,7 +26,7 @@ namespace mySQLPunk
         private readonly RadioButton schemaData = new RadioButton(), schemaOnly = new RadioButton(), dataOnly = new RadioButton();
         private readonly Label steps = new Label(), status = new Label(), selection = new Label(), confirmation = new Label();
         private readonly Label stage = new Label(), current = new Label(), percent = new Label(), written = new Label(), tableRows = new Label(), elapsed = new Label(), speed = new Label(), eta = new Label(), resultText = new Label();
-        private readonly Button next = new Button(), back = new Button(), cancel = new Button(), openFile = new Button(), openFolder = new Button(), sound = new Button();
+        private readonly Button retry = new Button(), next = new Button(), back = new Button(), cancel = new Button(), openFile = new Button(), openFolder = new Button(), sound = new Button();
         private readonly ProgressBar overall = new ProgressBar(), tableProgress = new ProgressBar();
         private readonly PunkyReportLoadingControl punky = new PunkyReportLoadingControl();
         private readonly ListBox log = new ListBox();
@@ -39,7 +39,7 @@ namespace mySQLPunk
         private CancellationTokenSource cancellation;
         private MssqlExportRequest prepared;
         private MssqlExportProgress last;
-        private bool busy, closing, rebuilding, loaded, exporting, cancelRequested;
+        private bool busy, closing, rebuilding, loaded, catalogInitialized, exporting, cancelRequested;
         private int step, generation, includedViews;
         internal MssqlExportResult Result { get; private set; }
 
@@ -165,9 +165,15 @@ namespace mySQLPunk
                 step--;
                 ShowPage();
             });
+            Configure(retry, "mssqlRetry", T("重新檢查", "Recheck"), async (s, e) =>
+            {
+                if (busy || closing) return;
+                if (step == 0 && !loaded) await LoadAsync();
+                else if (step == 2) await PreflightAsync();
+            });
             Configure(openFile, "mssqlOpenFile", T("開啟檔案", "Open file"), (s, e) => Open(Result?.PublishedPath));
             Configure(openFolder, "mssqlOpenFolder", T("開啟資料夾", "Open folder"), (s, e) => Open(Result?.PublishedPath == null ? null : Path.GetDirectoryName(Result.PublishedPath)));
-            footer.Controls.AddRange(new Control[] { cancel, next, back, openFolder, openFile });
+            footer.Controls.AddRange(new Control[] { cancel, next, back, retry, openFolder, openFile });
             root.Controls.Add(footer, 0, 3);
             ThemeManager.MarkAsPrimary(next);
             AcceptButton = next;
@@ -600,11 +606,15 @@ namespace mySQLPunk
             selection.Text = T("已選取 ", "Selected ") + selected.Count + " / " + catalog.Count;
             back.Visible = step > 0 && step < 3;
             back.Enabled = !busy;
+            retry.Visible = step == 2 || (step == 0 && !loaded);
+            retry.Enabled = !busy && !closing;
+            retry.Text = step == 0 ? T("重試讀取目錄", "Retry catalog") : T("重新檢查", "Recheck");
+            retry.AccessibleName = retry.Text;
             next.Visible = step < 3 || (!busy && Result != null);
             next.Enabled = !busy && loaded && (step == 0 ? selected.Count > 0 : step == 1 ? !string.IsNullOrWhiteSpace(output.Text) : step == 2 ? prepared != null : true);
             next.Text = step == 2 ? T("開始匯出", "Start export") : step == 3 ? T("重新設定", "Reset") : T("下一步 →", "Next →");
             cancel.Enabled = !cancelRequested;
-            cancel.Text = busy && exporting ? T("取消匯出", "Cancel export") : T("關閉", "Close");
+            cancel.Text = busy ? (exporting ? T("取消匯出", "Cancel export") : T("取消檢查", "Cancel check")) : T("關閉", "Close");
             next.AccessibleName = next.Text;
             cancel.AccessibleName = cancel.Text;
             openFile.Visible = openFolder.Visible = !busy && Result?.PublishedPath != null;
@@ -634,16 +644,27 @@ namespace mySQLPunk
 
         private async Task LoadAsync()
         {
+            if (busy || closing) return;
+            InvalidateRequest();
+            int version = generation;
+            var previousSelection = catalog.Where(t => selected.Contains(t.Key.ObjectId)).Select(t => t.Key).ToList();
+            loaded = false;
             BeginOperation();
             status.Text = T("讀取原生目錄…", "Loading native catalog…");
             try
             {
                 var value = await Task.Run(() => service.LoadCatalog(database, cancellation.Token));
-                if (closing)
+                cancellation.Token.ThrowIfCancellationRequested();
+                if (closing || cancelRequested || cancellation.IsCancellationRequested || version != generation)
                     return;
                 catalog = value.Tables;
                 selected.Clear();
-                if (options.InitialObjectName != null)
+                if (catalogInitialized)
+                {
+                    foreach (var table in catalog)
+                        if (previousSelection.Any(k => k.ObjectId == table.Key.ObjectId && k.Schema == table.Key.Schema && k.Name == table.Key.Name)) selected.Add(table.Key.ObjectId);
+                }
+                else if (options.InitialObjectName != null)
                 {
                     var matches = catalog.Where(t => (t.Key.Schema == "dbo" ? t.Key.Name : t.Key.Schema + "." + t.Key.Name) == options.InitialObjectName).ToList();
                     if (matches.Count == 1)
@@ -653,6 +674,7 @@ namespace mySQLPunk
                     foreach (var table in catalog)
                         if (options.InitialTables == null || options.InitialTables.Any(k => k.Schema == table.Key.Schema && k.Name == table.Key.Name))
                             selected.Add(table.Key.ObjectId);
+                catalogInitialized = true;
                 loaded = true;
                 status.Text = selected.Count == 0 ? T("請選取資料表；初始物件可能已移除或名稱不唯一。", "Select tables; the initial object may be missing or ambiguous.") : T("估計筆數與大小來自目錄，可能與實際值不同。", "Catalog row and size estimates may differ from actual values.");
                 RefreshTables();
@@ -661,9 +683,13 @@ namespace mySQLPunk
             {
                 status.Text = T("已取消", "Canceled");
             }
+            catch (MssqlExportPrerequisiteException ex)
+            {
+                if (!closing && version == generation && !cancelRequested) status.Text = PrerequisiteText(ex.Reason);
+            }
             catch (Exception)
             {
-                status.Text = T("無法讀取目錄，請關閉後重試。", "Cannot load catalog. Close and retry.");
+                if (!closing && version == generation && !cancelRequested) status.Text = T("無法讀取目錄，請檢查連線設定後重試。", "Cannot load catalog. Review connection settings and retry.");
             }
             finally
             {
@@ -673,6 +699,7 @@ namespace mySQLPunk
 
         private async Task PreflightAsync()
         {
+            if (busy || closing) return;
             InvalidateRequest();
             int version = generation;
             var keys = catalog.Where(t => selected.Contains(t.Key.ObjectId)).Select(t => t.Key).ToList().AsReadOnly();
@@ -684,7 +711,8 @@ namespace mySQLPunk
             try
             {
                 var stamp = await Task.Run(() => MssqlExportArtifact.CaptureDestination(path, cancellation.Token));
-                if (closing || version != generation)
+                cancellation.Token.ThrowIfCancellationRequested();
+                if (closing || cancelRequested || cancellation.IsCancellationRequested || version != generation)
                     return;
                 if (stamp.Exists && MessageBox.Show(this, T("目的檔案已存在。確認覆寫這個檔案？", "Destination exists. Replace this file?"), Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 {
@@ -694,10 +722,13 @@ namespace mySQLPunk
 
                 var request = new MssqlExportRequest(Guid.NewGuid(), database, keys, mode, include, path, stamp, options.Mirror);
                 var check = await Task.Run(() => service.Preflight(request, cancellation.Token));
-                if (closing || version != generation)
+                cancellation.Token.ThrowIfCancellationRequested();
+                if (closing || cancelRequested || cancellation.IsCancellationRequested || version != generation)
                     return;
                 includedViews = check.Schema.Views.Count;
-                confirmation.Text = T("SQL 邏輯匯出；不包含登入帳號、作業、原生備份。", "Logical SQL export; excludes logins, jobs and native backups.") + "\r\n\r\n" + keys.Count + T(" 張資料表", " tables") + " · " + ModeText(mode) + "\r\n" + request.TargetPath + "\r\n" + (options.Mirror == null ? T("鏡像：未啟用", "Mirror: disabled") : T("鏡像：", "Mirror: ") + options.Mirror.Directory) + "\r\n" + (mode == MssqlExportMode.SchemaOnly ? T("僅結構：不開啟資料快照交易。", "Schema only: no data snapshot transaction.") : "SNAPSHOT: " + (check.SnapshotState == 1 ? "ON" : "OFF") + T("；全部資料使用同一交易。", "; all data uses one transaction.")) + "\r\n" + ViewScope(mode, include, check.Schema.Views.Count) + "\r\n" + T("計算欄位與 rowversion 值由目標重新產生。", "Computed and rowversion values are regenerated by the target.") + (mode == MssqlExportMode.SchemaOnly ? "" : "\r\n" + T("長時間 SNAPSHOT 可能增加來源 version store 使用量。", "Long SNAPSHOT exports may increase source version-store usage.")) + "\r\n\r\n" + string.Join("\r\n", check.Issues.Select(FormatIssue));
+                confirmation.Text = T("SQL 邏輯匯出；不包含登入帳號、作業、原生備份。", "Logical SQL export; excludes logins, jobs and native backups.") + "\r\n\r\n" + keys.Count + T(" 張資料表", " tables") + " · " + ModeText(mode) + "\r\n" + request.TargetPath + "\r\n" + (options.Mirror == null ? T("鏡像：未啟用", "Mirror: disabled") : T("鏡像：", "Mirror: ") + options.Mirror.Directory) + "\r\n" + (mode == MssqlExportMode.SchemaOnly ? T("僅結構：不開啟資料快照交易。", "Schema only: no data snapshot transaction.") : "SNAPSHOT: " + MssqlSnapshotState.Describe(check.SnapshotState) + T("；全部資料使用同一交易。", "; all data uses one transaction.")) + "\r\n" + ViewScope(mode, include, check.Schema.Views.Count) + "\r\n" + T("計算欄位與 rowversion 值由目標重新產生。", "Computed and rowversion values are regenerated by the target.") + (mode == MssqlExportMode.SchemaOnly ? "" : "\r\n" + T("長時間 SNAPSHOT 可能增加來源 version store 使用量。", "Long SNAPSHOT exports may increase source version-store usage.")) + "\r\n\r\n" + string.Join("\r\n", check.Issues.Select(FormatIssue));
+                if (mode != MssqlExportMode.SchemaOnly && check.SnapshotState != 1)
+                    confirmation.Text += "\r\n" + T("含資料匯出需要 ALLOW_SNAPSHOT_ISOLATION ON；請 DBA 評估設定，若正在轉換則完成後重新檢查。也可返回改選僅結構。程式不變更資料庫設定；已為 ON 時不需要 ALTER 權限。", "Data export requires ALLOW_SNAPSHOT_ISOLATION ON. Ask the DBA to review the setting; if transitioning, recheck after it completes. You may go back and choose schema only. The exporter does not change database settings; ALTER permission is not required when already ON.");
                 if (check.CanStart && (mode == MssqlExportMode.SchemaOnly || check.SnapshotState == 1))
                     prepared = request;
                 status.Text = prepared != null ? T("預檢通過；開始時會再次檢查來源。", "Preflight passed; source is checked again at start.") : T("預檢未通過，無法開始。", "Preflight failed; start is blocked.");
@@ -706,9 +737,21 @@ namespace mySQLPunk
             {
                 status.Text = T("已取消", "Canceled");
             }
+            catch (MssqlExportPrerequisiteException ex)
+            {
+                if (!closing && version == generation && !cancelRequested)
+                {
+                    confirmation.Text = PrerequisiteText(ex.Reason);
+                    status.Text = T("必要條件未符合，請處理後重新檢查。", "A prerequisite is missing. Resolve it and recheck.");
+                }
+            }
             catch (Exception)
             {
-                status.Text = T("目的路徑或預檢失敗，請返回檢查設定。", "Destination or preflight failed. Go back and check settings.");
+                if (!closing && version == generation && !cancelRequested)
+                {
+                    confirmation.Text = T("目的路徑或預檢失敗，請檢查設定後重新檢查。", "Destination or preflight failed. Review settings and recheck.");
+                    status.Text = T("預檢未通過，無法開始。", "Preflight failed; start is blocked.");
+                }
             }
             finally
             {
@@ -840,6 +883,22 @@ namespace mySQLPunk
         internal static string FormatDuration(TimeSpan duration)
         {
             return ((long)Math.Floor(duration.TotalHours)).ToString("00") + ":" + duration.Minutes.ToString("00") + ":" + duration.Seconds.ToString("00");
+        }
+
+        private static string PrerequisiteText(MssqlPrerequisite reason)
+        {
+            switch (reason)
+            {
+                case MssqlPrerequisite.ViewDefinitionRequired:
+                    return "[ViewDefinitionRequired] " + T("需要資料庫 VIEW DEFINITION 權限，才能完整檢查物件定義與相依性。請 DBA 確認定義讀取權限後重試；僅結構模式也需要此權限。", "Database VIEW DEFINITION is required to inspect complete definitions and dependencies, including schema-only export. Ask the DBA to review definition visibility, then retry.");
+                case MssqlPrerequisite.SqlPermissionDenied:
+                    return "[SqlPermissionDenied] " + T("SQL Server 拒絕必要操作。請 DBA 檢查定義讀取權限；含資料匯出另需資料表 SELECT。確認後重試，這不代表需要 ALTER 或管理員權限。", "SQL Server denied a required operation. Ask the DBA to review definition-read permissions and, for data export, table SELECT permissions, then retry. This does not imply ALTER or administrator permission is required.");
+                case MssqlPrerequisite.LoginRejected:
+                    return "[LoginRejected] " + T("SQL Server 拒絕登入；請檢查連線帳號與驗證設定後重試。", "SQL Server rejected the login. Review the connection account and authentication configuration, then retry.");
+                case MssqlPrerequisite.DatabaseUnavailable:
+                    return "[DatabaseUnavailable] " + T("指定或預設資料庫無法使用，或帳號存取遭拒。請檢查資料庫名稱、可用狀態及存取設定後重試。", "The requested or default database is unavailable or access was rejected. Review the database name, availability and account access, then retry.");
+                default: return T("預檢未通過，請檢查設定後重試。", "Preflight failed. Review settings and retry.");
+            }
         }
 
         private static string FormatIssue(MssqlExportIssue issue)

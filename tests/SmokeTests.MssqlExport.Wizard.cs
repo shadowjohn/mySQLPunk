@@ -10,6 +10,96 @@ using mySQLPunk.lib.MssqlExport;
 
 public static partial class SmokeTests
 {
+    private static void Diagnostic_WizardSnapshot()
+    {
+        foreach (int state in new[] { 0, 1, 2, 3, 9 })
+        using (var form = WForm(new WizardService { SnapshotOverride = state }, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"))) {
+            form.Show(); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+            WClick(form, "mssqlStart"); WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+            string text = WControl<Label>(form, "mssqlConfirmation").Text;
+            string expected = state == 0 ? "OFF (0)" : state == 1 ? "ON (1)" : state == 2 ? "IN_TRANSITION_TO_OFF (2)" : state == 3 ? "IN_TRANSITION_TO_ON (3)" : "UNKNOWN (9)";
+            AssertContains(text, expected, "Confirmation reports exact source state instead of treating transitions as OFF");
+            Assert(WControl<Button>(form, "mssqlStart").Enabled == (state == 1), "Non-ON states cannot prepare a data export");
+            form.Close();
+        }
+    }
+    private static void Diagnostic_WizardRetry()
+    {
+        var service = new WizardService { CatalogFailure = DiagnosticFailure(DiagnosticSql(229), true) };
+        using (var form = WForm(service, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"), new[] { new MssqlObjectKey(2, "sales", "orders") })) {
+            form.Show(); WPump(() => WControl<Button>(form, "mssqlCancel").Enabled && WControl<Label>(form, "mssqlStatus").Text.Contains("SqlPermissionDenied"));
+            Assert(form.Controls.Find("mssqlRetry", true).Length == 1, "Failed catalog has an in-place retry action");
+            Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Catalog permission failure blocks Next");
+            service.CatalogFailure = null; WClick(form, "mssqlRetry"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+            var grid = WControl<DataGridView>(form, "mssqlTableList");
+            Assert(!(bool)grid.Rows[0].Cells[0].Value && (bool)grid.Rows[1].Cells[0].Value, "Catalog retry retains narrow initial selection");
+            WControl<TextBox>(form, "mssqlTableSearch").Text = "searchable";
+            WClick(form, "mssqlStart"); WControl<RadioButton>(form, "mssqlDataOnly").Checked = true;
+            string path = WControl<TextBox>(form, "mssqlOutputPath").Text;
+            service.PreflightFailure = DiagnosticFailure(DiagnosticSql(4060), false);
+            WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+            AssertContains(WControl<Label>(form, "mssqlConfirmation").Text, "DatabaseUnavailable", "Confirmation retains safe prerequisite failure");
+            Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Failed preflight blocks Start");
+            service.PreflightFailure = null; WClick(form, "mssqlRetry"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+            Assert(service.Seen.Tables.Count == 1 && service.Seen.Tables[0].ObjectId == 2 && service.Seen.Mode == MssqlExportMode.DataOnly && !service.Seen.IncludeViews && service.Seen.TargetPath == path, "Recheck preserves selection, mode, views and path");
+            service.BlockPreflight = true; service.IgnoreInspectionCancellation = true;
+            WClick(form, "mssqlRetry"); WPump(() => service.Inspecting);
+            int calls = service.PreflightCalls; WClick(form, "mssqlRetry");
+            Assert(service.PreflightCalls == calls && !WControl<Button>(form, "mssqlStart").Enabled, "Running recheck cannot duplicate or leave earlier Start enabled");
+            WClick(form, "mssqlCancel"); service.Release.Set(); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+            Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Canceled provider returning success cannot prepare stale request");
+            string canceled = WControl<Label>(form, "mssqlStatus").Text;
+            Assert(canceled.Contains("已取消") || canceled.Contains("Canceled"), "Canceled recheck reaches a terminal canceled message even if provider ignores cancellation");
+            form.Close();
+        }
+    }
+    private static void Diagnostic_WizardErrors()
+    {
+        foreach (bool catalog in new[] { true, false })
+        foreach (bool known in new[] { true, false }) {
+            var failure = known ? (Exception)new MssqlExportPrerequisiteException(MssqlPrerequisite.ViewDefinitionRequired) : new IOException("Password=private-secret;SELECT confidential");
+            var service = new WizardService { CatalogFailure = catalog ? failure : null, PreflightFailure = catalog ? null : failure };
+            using (var form = WForm(service, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"))) {
+                form.Show();
+                if (catalog) WPump(() => service.CatalogCalls == 1 && WControl<Panel>(form, "mssqlStep0").Enabled);
+                else {
+                    WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+                    WClick(form, "mssqlStart"); WControl<RadioButton>(form, "mssqlSchemaOnly").Checked = true;
+                    WClick(form, "mssqlStart"); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+                }
+                string message = WControl<Label>(form, catalog ? "mssqlStatus" : "mssqlConfirmation").Text;
+                Assert(message.Contains("ViewDefinitionRequired") == known, "Both wizard surfaces distinguish missing definitions from unknown failures");
+                Assert(!message.Contains("private-secret") && !message.Contains("confidential"), "Wizard never displays raw exceptions");
+                Assert(!WControl<Button>(form, "mssqlStart").Enabled && WControl<Button>(form, "mssqlRetry").Enabled, "Missing definitions blocks even schema-only; failures remain retryable");
+                if (catalog) {
+                    service.CatalogFailure = null; service.BlockCatalog = true; service.IgnoreInspectionCancellation = true;
+                    WClick(form, "mssqlRetry"); WPump(() => service.Inspecting); WClick(form, "mssqlRetry");
+                    Assert(service.CatalogCalls == 2, "Catalog reentry does not launch another load");
+                    WClick(form, "mssqlCancel"); service.Release.Set(); WPump(() => WControl<Button>(form, "mssqlRetry").Enabled);
+                    Assert(!WControl<Button>(form, "mssqlStart").Enabled && WControl<DataGridView>(form, "mssqlTableList").Rows.Count == 0, "Canceled catalog success does not populate stale selection");
+                    service.BlockCatalog = false; WClick(form, "mssqlRetry"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+                    Assert(WControl<DataGridView>(form, "mssqlTableList").Rows.Count == 2, "Catalog can recover after cancellation");
+                }
+                form.Close();
+            }
+        }
+    }
+    private static void Diagnostic_WizardGeneration()
+    {
+        var service = new WizardService();
+        using (var form = WForm(service, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"))) {
+            form.Show(); WPump(() => WControl<Button>(form, "mssqlStart").Enabled); WConfirm(form);
+            service.BlockPreflight = true; WClick(form, "mssqlRetry"); WPump(() => service.Inspecting);
+            // Simulate invalidation while a slow response is in flight; the old response must not enable Start.
+            string nextPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql");
+            WControl<TextBox>(form, "mssqlOutputPath").Text = nextPath;
+            service.Release.Set(); WPump(() => WControl<Button>(form, "mssqlBack").Enabled);
+            Assert(!WControl<Button>(form, "mssqlStart").Enabled, "Old preflight generation cannot prepare a changed request");
+            service.BlockPreflight = false; WClick(form, "mssqlRetry"); WPump(() => WControl<Button>(form, "mssqlStart").Enabled);
+            Assert(service.Seen.TargetPath == nextPath, "Fresh retry captures updated path after stale response was ignored");
+            form.Close();
+        }
+    }
     private static void Wizard_RequiresForm()
     {
         Assert(typeof(MssqlObjectKey).Assembly.GetType("mySQLPunk.MssqlExportWizardForm") != null, "Native export wizard must exist");
@@ -49,7 +139,10 @@ public static partial class SmokeTests
         internal bool Exporting, Canceled, Block, Deny, Preview, BlockCatalog, BlockPreflight, Inspecting;
         internal MssqlExportIssue[] IssueOverride;
         internal MssqlTableDefinition[] CatalogOverride;
-        internal int UiThread, CatalogThread, PreflightThread;
+        internal int UiThread, CatalogThread, PreflightThread, CatalogCalls, PreflightCalls;
+        internal Exception CatalogFailure, PreflightFailure;
+        internal int? SnapshotOverride;
+        internal bool IgnoreInspectionCancellation;
         internal WizardService() : base(() =>
         {
             throw new Exception("Fixture must not open DB");
@@ -66,6 +159,8 @@ public static partial class SmokeTests
         internal override MssqlExportCatalog LoadCatalog(string db, CancellationToken token)
         {
             CatalogThread = Thread.CurrentThread.ManagedThreadId;
+            Interlocked.Increment(ref CatalogCalls);
+            if (CatalogFailure != null) throw CatalogFailure;
             if (BlockCatalog)
                 WaitInspection(token);
             return new MssqlExportCatalog(CatalogOverride ?? new[] { Table(1, "dbo", "訂單主檔"), Table(2, "sales", "long comment searchable 測試搜尋") }, 1, null);
@@ -74,9 +169,12 @@ public static partial class SmokeTests
         internal override MssqlExportPreflight Preflight(MssqlExportRequest request, CancellationToken token)
         {
             PreflightThread = Thread.CurrentThread.ManagedThreadId;
+            Interlocked.Increment(ref PreflightCalls);
+            if (PreflightFailure != null) throw PreflightFailure;
             if (BlockPreflight)
                 WaitInspection(token);
             Seen = request;
+            if (SnapshotOverride.HasValue) return new MssqlExportPreflight(new MssqlExportSchema(request.Tables.Select(k => Table(k.ObjectId, k.Schema, "")), null, null, SnapshotOverride.Value, null), null);
             return new MssqlExportPreflight(new MssqlExportSchema(request.Tables.Select(k => Table(k.ObjectId, k.Schema, "")), null, null, Deny ? 0 : 1, null), IssueOverride ?? (Deny ? new[] { new MssqlExportIssue("snapshot", null, null, "SNAPSHOT unavailable") } : null));
         }
 
@@ -107,11 +205,11 @@ public static partial class SmokeTests
         private void WaitInspection(CancellationToken token)
         {
             Inspecting = true;
-            while (!token.IsCancellationRequested)
+            while (!token.IsCancellationRequested && !Release.IsSet)
                 Thread.Sleep(10);
-            Canceled = true;
+            Canceled = token.IsCancellationRequested;
             Release.Wait();
-            token.ThrowIfCancellationRequested();
+            if (!IgnoreInspectionCancellation) token.ThrowIfCancellationRequested();
         }
 
         internal void Frame(Guid id, long bytes, bool stale = false)

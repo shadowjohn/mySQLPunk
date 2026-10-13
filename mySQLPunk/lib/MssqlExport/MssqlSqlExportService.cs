@@ -36,6 +36,8 @@ namespace mySQLPunk.lib.MssqlExport
         private static Exception SafeInspectionFailure(string operation, Exception error, CancellationToken cancellation)
         {
             if (cancellation.IsCancellationRequested) return new OperationCanceledException(cancellation);
+            var prerequisite = MssqlExportPrerequisiteException.From(error);
+            if (prerequisite != null) return prerequisite;
             // No original exception as InnerException: even ToString must remain safe for a UI log.
             return new InvalidOperationException("Export " + operation + " failed (" + error.GetType().Name + ").");
         }
@@ -123,7 +125,8 @@ namespace mySQLPunk.lib.MssqlExport
             {
                 canceled = cancellation.IsCancellationRequested;
                 // SQL/provider messages can contain credentials or row values. Return only a safe category.
-                error = canceled ? "Export canceled." : "Export failed during " + stage + " (" + ex.GetType().Name + ").";
+                var prerequisite = canceled ? null : MssqlExportPrerequisiteException.From(ex);
+                error = canceled ? "Export canceled." : prerequisite != null ? "Export failed during " + stage + ". " + prerequisite.Message : "Export failed during " + stage + " (" + ex.GetType().Name + ").";
             }
             finally
             {

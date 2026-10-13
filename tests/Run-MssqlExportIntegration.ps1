@@ -1,7 +1,7 @@
 param(
     [switch]$Run,
     [string]$Server,
-    [ValidateSet('Core','Large','Concurrency','ClientProbe','FinalFix','Geometry','Ssh')][string]$Profile = 'Core',
+    [ValidateSet('Core','Large','Concurrency','ClientProbe','FinalFix','Geometry','Properties','References','Ssh')][string]$Profile = 'Core',
     [string]$OutputDirectory,
     [ValidateSet('Classic','Go')][string]$Client = 'Classic',
     [string]$SqlcmdPath,
@@ -9,7 +9,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if (!$Run) {
-    Write-Host 'Opt-in isolated MSSQL acceptance. Supply -Run -Server "(localdb)\mySQLPunkExportTest_20261012" -Profile Core|Large|Concurrency|Geometry -OutputDirectory <new empty C: fixture directory>.'
+    Write-Host 'Opt-in isolated MSSQL acceptance. Supply -Run -Server "(localdb)\mySQLPunkExportTest_20261012" -Profile Core|Large|Concurrency|Geometry|Properties|References -OutputDirectory <new empty C: fixture directory>.'
     Write-Host 'Uses Integrated Security; creates only token-owned GUID source/target databases; requires an already running authorized fixture and sqlcmd. Never reads saved connections or installs/starts a server.'
     return
 }

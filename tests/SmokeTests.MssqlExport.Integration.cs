@@ -21,12 +21,14 @@ public static partial class SmokeTests
     {
         string profile = Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_INTEGRATION");
         if (string.IsNullOrEmpty(profile)) { Console.WriteLine("SKIP live integration (explicit runner -Run required)"); return; }
-        Assert(new[] { "Core", "Large", "Concurrency", "ClientProbe", "FinalFix", "Geometry" }.Contains(profile), "Known integration profile");
+        Assert(new[] { "Core", "Large", "Concurrency", "ClientProbe", "FinalFix", "Geometry", "Properties", "References" }.Contains(profile), "Known integration profile");
         using (var fixture = new IntegrationFixture(profile))
         {
             if (profile == "ClientProbe") IntegrationClientProbe(fixture);
             else if (profile == "FinalFix") IntegrationFinalFix(fixture);
             else if (profile == "Geometry") IntegrationGeometry(fixture);
+            else if (profile == "Properties") IntegrationProperties(fixture);
+            else if (profile == "References") IntegrationReferences(fixture);
             else if (profile == "Core") IntegrationCore(fixture);
             else if (profile == "Large") IntegrationLarge(fixture);
             else IntegrationConcurrency(fixture);

@@ -25,6 +25,20 @@ public static partial class SmokeTests
         }
     }
 
+    private static void Diagnostic_MetadataModes()
+    {
+        foreach (var mode in new[] { MssqlExportMode.SchemaOnly, MssqlExportMode.SchemaAndData, MssqlExportMode.DataOnly })
+        foreach (int state in new[] { 0, 1, 2, 3, 9 })
+        foreach (bool? select in new bool?[] { false, true, null }) {
+            var table = new MssqlTableDefinition(new MssqlObjectKey(1, "dbo", "visible"), new Dictionary<string, object> { { "can_select", select.HasValue ? (object)select.Value : DBNull.Value } }, null, null, null);
+            var request = new MssqlExportRequest(Guid.NewGuid(), "fixture", new[] { table.Key }, mode, false, Path.Combine(Path.GetTempPath(), "matrix.sql"), null, null);
+            var schema = new MssqlExportSchema(new[] { table }, null, null, state, null);
+            var issues = new MssqlExportMetadataReader().Validate(schema, request);
+            Assert(issues.Any(x => x.Code == "UnreadableTable") == (select != true && mode != MssqlExportMode.SchemaOnly), "Schema-only needs readable definitions, not SELECT; both data modes need SELECT");
+            Assert(issues.Any(x => x.Code == "SnapshotUnavailable") == (state != 1 && mode != MssqlExportMode.SchemaOnly), "Snapshot state gates only data modes, including unknown states");
+            Assert(new MssqlExportPreflight(schema, issues).CanStart == (mode == MssqlExportMode.SchemaOnly || (select == true && state == 1)), "Mode/state/permission matrix cannot silently pass missing data prerequisites");
+        }
+    }
     private static void Metadata_RequiresNativeReader()
     {
         Assert(typeof(MssqlObjectKey).Assembly.GetType("mySQLPunk.lib.MssqlExport.MssqlExportMetadataReader") != null, "Native metadata reader must exist");

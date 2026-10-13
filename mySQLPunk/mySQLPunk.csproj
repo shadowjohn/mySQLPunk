@@ -63,6 +63,9 @@
     <Reference Include="Microsoft.Extensions.Logging.Abstractions, Version=8.0.0.3, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
       <HintPath>..\packages\Microsoft.Extensions.Logging.Abstractions.8.0.3\lib\net462\Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
     </Reference>
+    <Reference Include="Microsoft.SqlServer.TransactSql.ScriptDom, Version=18.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91">
+      <HintPath>..\packages\Microsoft.SqlServer.TransactSql.ScriptDom.180.117.0\lib\net472\Microsoft.SqlServer.TransactSql.ScriptDom.dll</HintPath>
+    </Reference>
     <Reference Include="Microsoft.VisualBasic" />
     <Reference Include="MySqlConnector, Version=2.0.0.0, Culture=neutral, PublicKeyToken=d33d3e53aa5f8c92, processorArchitecture=MSIL">
       <HintPath>..\packages\MySqlConnector.2.3.7\lib\net471\MySqlConnector.dll</HintPath>
@@ -370,6 +373,7 @@
     <Compile Include="lib\MssqlExport\MssqlExportMetadataReader.cs" />
     <Compile Include="lib\MssqlExport\MssqlExportSource.cs" />
     <Compile Include="lib\MssqlExport\MssqlSchemaScriptWriter.cs" />
+    <Compile Include="lib\MssqlExport\MssqlViewReferenceRewriter.cs" />
     <Compile Include="lib\MssqlExport\MssqlValueCodec.cs" />
     <Compile Include="lib\MssqlExport\MssqlDataScriptWriter.cs" />
     <Compile Include="lib\MssqlExport\MssqlLobScriptWriter.cs" />

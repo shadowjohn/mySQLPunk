@@ -29,6 +29,19 @@ public static partial class SmokeTests
     {
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MSSQL export references integration preparation", Reference_IntegratesPreparationAndOrdering, ref passed);
+        Run("MSSQL export references integration gates", Reference_IntegrationGatesAndFingerprint, ref passed);
+        Run("MSSQL export references token rewrite", Reference_RewritesTokens, ref passed);
+        Run("MSSQL export references quoted names and headers", Reference_QuotedNamesAndHeaders, ref passed);
+        Run("MSSQL export references unsupported contexts", Reference_RejectsUnsupportedContexts, ref passed);
+        Run("MSSQL export references catalog identity", Reference_RequiresCatalogIdentity, ref passed);
+        Run("MSSQL export references invalid modules", Reference_RejectsInvalidModules, ref passed);
+        Run("MSSQL export diagnostic service", Diagnostic_Service, ref passed);
+        Run("MSSQL export diagnostic metadata modes", Diagnostic_MetadataModes, ref passed);
+        Run("MSSQL export diagnostic wizard snapshot", Diagnostic_WizardSnapshot, ref passed);
+        Run("MSSQL export diagnostic wizard retry", Diagnostic_WizardRetry, ref passed);
+        Run("MSSQL export diagnostic wizard errors", Diagnostic_WizardErrors, ref passed);
+        Run("MSSQL export diagnostic wizard generation", Diagnostic_WizardGeneration, ref passed);
         Run("MSSQL export routing handlers", Routing_FourHandlers, ref passed);
         Run("MSSQL export routing legacy branches", Routing_LegacyBranches, ref passed);
         Run("MSSQL export routing seed resolution", Routing_SeedResolution, ref passed);
@@ -48,6 +61,11 @@ public static partial class SmokeTests
         Run("MSSQL export worker lifecycle", Worker_Lifecycle, ref passed);
         Run("MSSQL export worker failures", Worker_Failures, ref passed);
         Run("MSSQL export worker service", Worker_RequiresService, ref passed);
+        Run("MSSQL export properties ordinary named metadata", Properties_AllowsOrdinaryNamedProperties, ref passed);
+        Run("MSSQL export properties native variants and scopes", Properties_WritesVariantValuesAndScopes, ref passed);
+        Run("MSSQL export properties unsupported and malformed", Properties_RejectsUnsupportedAndMalformedMetadata, ref passed);
+        Run("MSSQL export properties immutable fingerprint", Properties_FingerprintsImmutableNativeFacts, ref passed);
+        Run("MSSQL export properties modes and cancellation", Properties_RespectsModesAndCancellation, ref passed);
         Run("MSSQL export schema view headers", Schema_NormalizesOnlyViewHeader, ref passed);
         Run("MSSQL export schema index option gate", Schema_RejectsUndocumentedIndexOption, ref passed);
         Run("MSSQL export schema legacy ANSI gates", Schema_RejectsLegacyAnsiSemantics, ref passed);

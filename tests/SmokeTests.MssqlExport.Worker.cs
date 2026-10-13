@@ -7,6 +7,59 @@ using System.Threading;
 using mySQLPunk.lib.MssqlExport;
 public static partial class SmokeTests
 {
+    // SQL provider is the external boundary; run the actual service sanitizer.
+    private static System.Data.SqlClient.SqlException DiagnosticSql(params int[] numbers)
+    {
+        const string secret = "private-server;Password=private-secret;SELECT confidential";
+        var errors = (System.Data.SqlClient.SqlErrorCollection)Activator.CreateInstance(typeof(System.Data.SqlClient.SqlErrorCollection), true);
+        var constructor = typeof(System.Data.SqlClient.SqlError).GetConstructors(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .OrderByDescending(c => c.GetParameters().Length).First();
+        var add = typeof(System.Data.SqlClient.SqlErrorCollection).GetMethod("Add", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        foreach (int number in numbers) {
+            var args = new object[] { number, (byte)1, (byte)16, secret, secret, secret, 1 }.Concat(constructor.GetParameters().Skip(7).Select(p => p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null)).ToArray();
+            add.Invoke(errors, new[] { constructor.Invoke(args) });
+        }
+        var create = typeof(System.Data.SqlClient.SqlException).GetMethod("CreateException", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic, null,
+            new[] { typeof(System.Data.SqlClient.SqlErrorCollection), typeof(string) }, null);
+        return (System.Data.SqlClient.SqlException)create.Invoke(null, new object[] { errors, "test" });
+    }
+    private static Exception DiagnosticFailure(Exception input, bool catalog)
+    {
+        var service = new MssqlSqlExportService(() => { throw input; });
+        try {
+            if (catalog) service.LoadCatalog("fixture", CancellationToken.None);
+            else service.Preflight(WorkerRequest(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql"), WorkerSchema(), MssqlExportMode.SchemaOnly, null), CancellationToken.None);
+        } catch (Exception safe) { return safe; }
+        throw new Exception("Expected failed inspection");
+    }
+    private static void Diagnostic_Service()
+    {
+        foreach (bool catalog in new[] { true, false })
+        foreach (var example in new[] {
+            new { Number = 229, Code = "SqlPermissionDenied" }, new { Number = 230, Code = "SqlPermissionDenied" },
+            new { Number = 297, Code = "SqlPermissionDenied" }, new { Number = 300, Code = "SqlPermissionDenied" },
+            new { Number = 18456, Code = "LoginRejected" }, new { Number = 18452, Code = "LoginRejected" },
+            new { Number = 916, Code = "DatabaseUnavailable" }, new { Number = 4060, Code = "DatabaseUnavailable" }, new { Number = 4064, Code = "DatabaseUnavailable" } }) {
+            var safe = DiagnosticFailure(DiagnosticSql(50000, example.Number), catalog);
+            AssertContains(safe.Message, example.Code, "Inspection keeps a safe actionable category even when a later SqlError carries it");
+            Assert(safe.InnerException == null && !safe.ToString().Contains("private-") && !safe.ToString().Contains("confidential"), "No original provider payload or inner exception");
+        }
+        foreach (bool catalog in new[] { true, false }) {
+            var safe = DiagnosticFailure(new MssqlExportPrerequisiteException(MssqlPrerequisite.ViewDefinitionRequired), catalog);
+            Assert(safe is MssqlExportPrerequisiteException && ((MssqlExportPrerequisiteException)safe).Reason == MssqlPrerequisite.ViewDefinitionRequired && safe.InnerException == null, "VIEW DEFINITION diagnostic crosses either service inspection boundary without losing its type");
+        }
+        var workerService = new MssqlSqlExportService(() => { throw DiagnosticSql(229); });
+        var target = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql");
+        var result = workerService.Export(WorkerRequest(target, WorkerSchema(), MssqlExportMode.DataOnly, null), null, CancellationToken.None);
+        Assert(result.Stage == MssqlExportStage.Failed && result.PublishedPath == null && !File.Exists(target), "Start-time permission rejection cannot publish an artifact");
+        AssertContains(result.ErrorMessage, "SqlPermissionDenied", "Permission revoked after confirmation retains safe reason at worker failure");
+        Assert(!result.ErrorMessage.Contains("private-") && !result.ErrorMessage.Contains("confidential"), "Worker result keeps provider details redacted");
+        foreach (Exception raw in new Exception[] { DiagnosticSql(50000), new IOException("Password=private-secret") }) {
+            var safe = DiagnosticFailure(raw, true);
+            Assert(!safe.ToString().Contains("private-secret") && safe.InnerException == null, "Unknown inspection remains redacted");
+            Assert(!safe.Message.Contains("SqlPermissionDenied") && !safe.Message.Contains("LoginRejected"), "Unknown failure does not invent a permission cause");
+        }
+    }
     private static void Worker_RequiresService()
     {
         Assert(typeof(MssqlObjectKey).Assembly.GetType("mySQLPunk.lib.MssqlExport.MssqlSqlExportService") != null, "Worker must orchestrate owned source and verified publication");

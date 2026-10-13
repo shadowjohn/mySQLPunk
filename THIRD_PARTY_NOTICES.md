@@ -13,6 +13,7 @@ cross-platform SDK projects, including:
 - Google.Protobuf 3.34.1 - BSD-3-Clause
 - Microsoft.Bcl.AsyncInterfaces 10.0.7 - MIT
 - Microsoft.Bcl.HashCode 6.0.0 - MIT
+- Microsoft.SqlServer.TransactSql.ScriptDom 180.117.0 - MIT
 - Microsoft.Extensions.DependencyInjection.Abstractions 8.0.2 - MIT
 - Microsoft.Extensions.Logging.Abstractions 8.0.3 - MIT
 - MongoDB.Bson 3.11.0 - Apache-2.0
@@ -48,6 +49,30 @@ from the NuGet package must be included with release packages.
 System.Data.SQLite states that the main System.Data.SQLite code and
 documentation are dedicated to the public domain, with the LINQ SQL generation
 directory under MS-PL.
+
+## Microsoft SQL ScriptDOM License
+
+Microsoft.SqlServer.TransactSql.ScriptDom is distributed under the MIT License.
+
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ## SSH.NET License
 
