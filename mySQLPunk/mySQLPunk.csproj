@@ -297,6 +297,8 @@
     <Compile Include="lib\SchemaReportOpenXmlWriter.Specification.cs" />
     <Compile Include="lib\SchemaReportPdfWriter.cs" />
     <Compile Include="ReportExportWizardForm.cs" />
+    <Compile Include="MssqlExportWizardForm.cs" />
+    <Compile Include="Form1.MssqlExport.cs" />
     <Compile Include="ReportTemplatePreviewForm.cs" />
     <Compile Include="PunkyReportLoadingControl.cs" />
     <Compile Include="Localization.cs" />
@@ -359,6 +361,18 @@
     <Compile Include="lib\AutoRecoveryDraftService.cs" />
     <Compile Include="lib\ConnectionDialogMessageService.cs" />
     <Compile Include="lib\ConnectionOpenService.cs" />
+    <Compile Include="lib\MssqlExport\MssqlExportModels.cs" />
+    <Compile Include="lib\MssqlExport\MssqlExportProgressEstimator.cs" />
+    <Compile Include="lib\MssqlExport\MssqlSqlExportService.cs" />
+    <Compile Include="lib\MssqlExport\MssqlExportArtifact.cs" />
+    <Compile Include="lib\MssqlExport\MssqlExportMirror.cs" />
+    <Compile Include="lib\MssqlExport\MssqlOwnedSession.cs" />
+    <Compile Include="lib\MssqlExport\MssqlExportMetadataReader.cs" />
+    <Compile Include="lib\MssqlExport\MssqlExportSource.cs" />
+    <Compile Include="lib\MssqlExport\MssqlSchemaScriptWriter.cs" />
+    <Compile Include="lib\MssqlExport\MssqlValueCodec.cs" />
+    <Compile Include="lib\MssqlExport\MssqlDataScriptWriter.cs" />
+    <Compile Include="lib\MssqlExport\MssqlLobScriptWriter.cs" />
     <Compile Include="lib\ConnectionConfigurationService.cs" />
     <Compile Include="lib\ConnectionBatchPropertiesService.cs" />
     <Compile Include="lib\ConnectionUriImportService.cs" />

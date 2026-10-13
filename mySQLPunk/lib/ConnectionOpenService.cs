@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using MySqlConnector;
+using System.Data.SqlClient;
+using mySQLPunk.lib.MssqlExport;
 
 namespace mySQLPunk.lib
 {
@@ -11,8 +13,16 @@ namespace mySQLPunk.lib
         public List<string> Databases { get; private set; }
         public string ConnectionString { get; private set; }
 
+        internal SqlConnection NativeMssqlConnection { get; private set; }
+
         public ConnectionOpenResult(IDatabase database, List<string> databases, string connectionString = null)
+            : this(database, databases, connectionString, null)
         {
+        }
+
+        internal ConnectionOpenResult(IDatabase database, List<string> databases, string connectionString, SqlConnection nativeMssqlConnection)
+        {
+            NativeMssqlConnection = nativeMssqlConnection;
             Database = database;
             Databases = databases ?? new List<string>();
             ConnectionString = connectionString ?? string.Empty;
@@ -68,12 +78,30 @@ namespace mySQLPunk.lib
                 database.SetConn(connectionString);
                 database.Open();
                 List<string> databases = loadDatabases ? database.GetDatabases() : new List<string>();
-                return new ConnectionOpenResult(database, databases, connectionString);
+                return new ConnectionOpenResult(database, databases, connectionString, (rawDatabase as my_mssql)?.MCT);
             }
             catch
             {
                 try { if (database != null) database.Dispose(); } catch { }
                 try { if (tunnel != null) tunnel.Dispose(); } catch { }
+                throw;
+            }
+        }
+
+        internal static MssqlOwnedSession OpenMssqlSession(Dictionary<string, object> connection)
+        {
+            if (connection == null) throw new ArgumentNullException(nameof(connection));
+            string provider = ConnectionConfigurationService.NormalizeProvider(ConnectionConfigurationService.GetValue(connection, "db_kind"));
+            if (provider != "mssql") throw new ArgumentException("MSSQL export requires a SQL Server connection", nameof(connection));
+            ConnectionOpenResult result = Open(connection, false);
+            try
+            {
+                if (result.NativeMssqlConnection == null) throw new InvalidOperationException("SQL Server provider connection is unavailable");
+                return new MssqlOwnedSession(result.Database, result.NativeMssqlConnection);
+            }
+            catch
+            {
+                try { result.Database.Dispose(); } catch { }
                 throw;
             }
         }

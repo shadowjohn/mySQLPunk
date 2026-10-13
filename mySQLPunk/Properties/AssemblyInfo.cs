@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 // 組件的一般資訊是由下列的屬性集控制。
 // 變更這些屬性的值即可修改組件的相關
 // 資訊。
+[assembly: InternalsVisibleTo("mySQLPunk.SmokeTests")]
 [assembly: AssemblyTitle("mySQLPunk")]
 [assembly: AssemblyDescription("免費開源的多資料庫管理工具：MySQL / MariaDB、PostgreSQL、SQL Server、Oracle、SQLite")]
 [assembly: AssemblyConfiguration("")]
