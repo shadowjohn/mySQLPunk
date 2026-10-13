@@ -1,7 +1,7 @@
 # MSSQL 匯出：可選 SNAPSHOT 與自動還原資料庫設定
 
 日期：2026-10-13
-狀態：2026-10-13 使用者核准後完成 Task1–5 實作與逐項覆核；Task6 隔離驗收、194組 Release smoke 及 Debug/Release build 已通過。Task6 與全分支獨立覆核仍待完成；正式 SQL2019 未驗證。
+狀態：2026-10-13 六項實作與逐項覆核完成；全分支覆核的兩項問題已修正並通過 scoped review，最後 adapter 能力檢查邊界由 controller 補齊並驗證。最終 Release smoke 199組、AutoReleasePolicy、Debug/Release build 通過；正式 SQL2019 未驗證。
 基底：codex/mssql-export-preflight-compat，34024b7。
 
 ## 使用者需求與取代範圍

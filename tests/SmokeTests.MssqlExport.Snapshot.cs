@@ -40,6 +40,52 @@ public static partial class SmokeTests
         lifecycle = new MssqlSnapshotLifecycle(backend, store, Guid.NewGuid()); lifecycle.Prepare(null, CancellationToken.None);
         Assert(lifecycle.Restore(null).State == MssqlSnapshotCleanupState.RestoredOff && !store.Exists, "Lost OFF response resolved by actual readback");
     }
+    private static void SnapshotWorker_AdapterStartUnavailable()
+    {
+        foreach (int fault in new[] { 0, 1, 2 })
+        using (var connection = new SqlConnection())
+        {
+            var calls = new List<string>();
+            var backend = new SnapshotFakeBackend(calls);
+            MssqlSnapshotCapability observed = null;
+            backend.SettingAdapter = new SnapshotCapabilityGuardAdapter(connection, () => {
+                backend.CanAlter = fault != 0; backend.State = fault == 0 ? 0 : fault;
+                return observed = backend.ReadCapability(CancellationToken.None);
+            });
+            var store = new SnapshotFakeStore(calls);
+            var source = new WorkerSource(WorkerSchema(), calls) {
+                SnapshotLifecycle = new MssqlSnapshotLifecycle(backend, store, Guid.NewGuid())
+            };
+            string target = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sql");
+            var request = WorkerRequest(target, WorkerSchema(), MssqlExportMode.DataOnly, null);
+            var result = new MssqlSqlExportService(() => source).Export(request, null, CancellationToken.None);
+            Assert(result.StartRejection == MssqlSnapshotStartRejection.SnapshotUnavailable && ReferenceEquals(result.StartCapability, observed),
+                "Final adapter capability refusal retains exact safe decision after lifecycle checks passed");
+            Assert(result.Stage == MssqlExportStage.Failed && result.PublishedPath == null && !File.Exists(target) && !calls.Contains("source.rows"),
+                "Final adapter refusal cannot publish or silently fall back");
+            Assert(backend.AlterCalls.Count == 0 && backend.State == observed.State && !store.Exists,
+                "Positive pre-dispatch refusal must not own external state or issue cleanup OFF");
+            Assert(calls.Contains("source.dispose") && connection.State == System.Data.ConnectionState.Closed,
+                "Worker releases source and adapter fixture never opens a database");
+        }
+        var valid = new MssqlSnapshotCapability(WIdentity(), 0, true, true);
+        MssqlSnapshotBackend.RequireSettingCapability(true, valid);
+        Exception off = null;
+        try { MssqlSnapshotBackend.RequireSettingCapability(false, valid); } catch (Exception ex) { off = ex; }
+        Assert(off is MssqlSnapshotSettingNotAttemptedException && off.InnerException == null,
+            "OFF cleanup refusal remains cleanup-only, never a new start rejection");
+    }
+    private sealed class SnapshotCapabilityGuardAdapter : MssqlSnapshotBackend
+    {
+        private readonly Func<MssqlSnapshotCapability> capability;
+        internal SnapshotCapabilityGuardAdapter(SqlConnection connection, Func<MssqlSnapshotCapability> capability) : base(connection)
+        { this.capability = capability; }
+        internal override SqlCommand PrepareSettingCommand(bool enabled, CancellationToken cancellation)
+        {
+            RequireSettingCapability(enabled, capability());
+            return new SqlCommand();
+        }
+    }
     private static void SnapshotLifecycle_AdapterPreDispatchFailures()
     {
         foreach (int fault in new[] { 0, 1, 2 })

@@ -85,7 +85,7 @@ SELECT @result;", cancellation))
             if (!lockHeld || transaction != null || !IsUsable) throw new MssqlSnapshotSettingNotAttemptedException();
             var fresh = ReadCapability(cancellation);
             if (!MssqlSnapshotLifecycle.SameIdentity(lockedIdentity, fresh.Identity)) throw new MssqlSnapshotSettingNotAttemptedException();
-            if (!fresh.CanManage || fresh.State != (enabled ? 0 : 1)) throw new MssqlSnapshotSettingNotAttemptedException();
+            RequireSettingCapability(enabled, fresh);
             // Guard in the SAME batch as ALTER: transparent provider reconnect must not authorize an unlocked session.
             var command = Command(@"IF ISNULL(APPLOCK_MODE('public',@resource,'Session'),'NoLock') <> 'Exclusive'
  OR ISNULL(CONVERT(nvarchar(128),SERVERPROPERTY('ServerName')),'') COLLATE Latin1_General_100_BIN2 <> @server COLLATE Latin1_General_100_BIN2
@@ -104,6 +104,12 @@ ALTER DATABASE " + MssqlExportMetadataReader.Quote(fresh.Identity.DatabaseName) 
                 return command;
             }
             catch { command.Dispose(); throw; }
+        }
+        // Keep the final known capability decision distinct from unknown adapter/provider failures.
+        internal static void RequireSettingCapability(bool enabled, MssqlSnapshotCapability fresh)
+        {
+            if (!fresh.CanManage || fresh.State != (enabled ? 0 : 1))
+                throw new MssqlSnapshotSettingNotAttemptedException(enabled ? new MssqlSnapshotStartException(MssqlSnapshotStartRejection.SnapshotUnavailable, fresh) : null);
         }
         public void ReleaseLock(CancellationToken cancellation)
         {

@@ -6,7 +6,7 @@
 **Architecture:** 保留現有 native wizard、owned DB/SSH session、單一資料交易、逐表串流及安全發布。新增獨立 capability、credential-free recovery journal 與 snapshot lifecycle；來源交易結束後先完成有限設定清理，再釋放連線與執行本機階段。
 **Tech Stack:** .NET Framework 4.7.2、WinForms、System.Data.SqlClient、既有 Newtonsoft.Json、MSBuild、既有 smoke/LocalDB harness；不加套件。
 **Spec:** [snapshot-options-design.md](snapshot-options-design.md)，使用者於 2026-10-13 明確核准。
-**Status:** 2026-10-13 已完成 Task1–5 實作與逐項覆核；Task6 七項隔離 profile、194組 Release smoke、AutoReleasePolicy、Debug/Release build 通過，證據見 verification.md。Task6 與全分支獨立覆核待完成，未 merge/push/release。
+**Status:** 2026-10-13 Task1–6 實作、逐項覆核與全分支覆核完成；兩項覆核修正通過 scoped review，controller 補齊最後 adapter 能力檢查邊界。七項隔離 profile 的原始證據、最終 199組 Release smoke、AutoReleasePolicy、Debug/Release build 及收尾判定見 verification.md。保留分支/worktree，未 merge/push/release。
 **Execution:** 延續已選定的分工實作與逐項覆核；完成每項後再交給下一位 implementer，最後整體覆核。所有 build/DB/native UI 執行由單一 owner 串行控制。
 **Checkout:** `D:/mytools/mySQLPunk/.worktrees/mssql-export`，`codex/mssql-export-preflight-compat`；產品基底 `34024b7`，設計 checkpoint `4286d57`。
 
@@ -155,7 +155,7 @@ foreach ($profile in @('OptionalSnapshot','SnapshotLifecycle','Core','Concurrenc
 
 Runner保留原本server/token/path/reparse/20GiB gates。需要時依既有授權啟動該專用instance；不更改runner自動啟動policy，不使用正式連線。已授權test teardown的generatedDB強制清理與產品禁止強制OFF分開。
 
-- [ ] 清除本task測試環境變數後跑完整Release smoke及AutoReleasePolicy，再串行Debug/Release build。指令見下方；AV攔截就報pending，不改名重跑或變更防毒。獨立全分支review聚焦DB狀態殘留、混合時間資料／FK、權限與檔案真實性；無新material finding即停止review循環。
+- [x] 清除本task測試環境變數後跑完整Release smoke及AutoReleasePolicy，再串行Debug/Release build。指令見下方；AV攔截就報pending，不改名重跑或變更防毒。獨立全分支review聚焦DB狀態殘留、混合時間資料／FK、權限與檔案真實性；無新material finding即停止review循環。
 - [x] 更新使用說明與舊spec的被取代段落，保留歷史證據原日期。SQL2025 LocalDB與正式SQL2019、模擬與真實失敗、nativefixture與真人長作業分開。先前>2GiB未重跑不得稱本版已重驗；此改動不改buffer/codec尺寸，Geometry/Core回歸覆蓋新的來源生命週期。精確提交程式/測試/文件，保留worktree供使用者試跑，不自行merge/push。
 
 本機七 profile、完整 Release smoke/AutoReleasePolicy、串行 Debug/Release 與原生 fixture 已通過；上項仍未勾選是因獨立 Task6/全分支 review 待 controller 完成。
