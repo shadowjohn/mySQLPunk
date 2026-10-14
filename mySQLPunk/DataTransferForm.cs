@@ -175,7 +175,7 @@ namespace mySQLPunk
             resumeButton.Visible = unfinished != null;
             RenderPlan();
             statusLabel.Text = unfinished != null
-                ? Localization.Format("Transfer.ResumeFound", unfinished.Items.Count(item => item.Include && item.Status != TransferItemStatus.Done), unfinished.UpdatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture))
+                ? Localization.Format("Transfer.ResumeFound", unfinished.Items.Count(item => item.NeedsProcessing), unfinished.UpdatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture))
                 : Localization.Format("Transfer.TablesFound", plan.Items.Count);
         }
 
@@ -221,7 +221,7 @@ namespace mySQLPunk
         {
             if (running || plan == null) return;
             if (resume) UseUnfinished();
-            List<TransferItem> included = plan.Items.Where(item => item.Include && item.Status != TransferItemStatus.Done).ToList();
+            List<TransferItem> included = plan.Items.Where(item => item.NeedsProcessing).ToList();
             if (included.Count == 0)
             {
                 statusLabel.Text = Localization.T("Transfer.NothingSelected");

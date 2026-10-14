@@ -60,6 +60,10 @@ namespace mySQLPunk.lib
         public TransferItemStatus Status { get; set; }
         public long CopiedRows { get; set; }
         public bool RetryBlocked { get; set; }
+        [JsonIgnore]
+        public bool IsComplete { get { return Status == TransferItemStatus.Done && Verified == true && !RetryBlocked; } }
+        [JsonIgnore]
+        public bool NeedsProcessing { get { return Include && !IsComplete; } }
         public long SourceRows { get; set; }
         public long TargetRowsBefore { get; set; }
         public long TargetRowsAfter { get; set; }
@@ -95,7 +99,7 @@ namespace mySQLPunk.lib
         [JsonIgnore]
         public bool IsFinished
         {
-            get { return Items.Where(item => item.Include).All(item => item.Status == TransferItemStatus.Done && item.Verified == true); }
+            get { return !Items.Any(item => item.NeedsProcessing); }
         }
 
         public string RouteKey()
@@ -177,7 +181,7 @@ namespace mySQLPunk.lib
             Action<TransferPlan> checkpoint,
             CancellationToken cancellationToken)
         {
-            List<TransferItem> items = plan.Items.Where(item => item.Include && (item.Status != TransferItemStatus.Done || item.Verified != true)).ToList();
+            List<TransferItem> items = plan.Items.Where(item => item.NeedsProcessing).ToList();
             int index = 0;
             foreach (TransferItem item in items)
             {

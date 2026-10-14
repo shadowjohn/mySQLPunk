@@ -502,6 +502,17 @@ public static partial class SmokeTests
     /// </summary>
     public static void AssertDataTransferSemantics(IDatabase source, IDatabase target, string checkpointDirectory)
     {
+        foreach (bool? verified in new bool?[] { null, false, true })
+        foreach (bool blocked in new[] { false, true })
+        {
+            var legacy = new TransferItem { Status = TransferItemStatus.Done, Verified = verified, RetryBlocked = blocked };
+            bool complete = verified == true && !blocked;
+            Assert(legacy.IsComplete == complete && legacy.NeedsProcessing != complete, "Legacy checkpoint UI/service predicate agrees on verification and retry blocking.");
+            var legacyPlan = new TransferPlan(); legacyPlan.Items.Add(legacy);
+            Assert(legacyPlan.IsFinished == complete, "Legacy Done is finished only when verified and not blocked.");
+            legacy.Include = false;
+            Assert(!legacy.NeedsProcessing && legacyPlan.IsFinished, "Excluded items are not resume candidates.");
+        }
         Action<IDatabase, string> exec = (db, sql) => AssertEquals("OK", db.ExecSQL(sql)["status"], "Transfer fixture: " + sql);
         exec(source, "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, city TEXT)");
         exec(source, "CREATE TABLE logs (msg TEXT)");

@@ -13249,6 +13249,29 @@ public static partial class SmokeTests
                     AssertEquals("2", target.CountRows("main", "extra_copy").ToString(), "The copy should contain every row.");
                     AssertContains(form.BuildReport(), "extra_copy", "The report should list the transferred table.");
                 }
+                foreach (bool? verified in new bool?[] { null, false, true })
+                foreach (bool blocked in new[] { false, true })
+                {
+                    string checkpoints = Path.Combine(dir, "legacy-" + (verified.HasValue ? verified.Value.ToString() : "null") + "-" + blocked);
+                    var legacy = DataTransferService.BuildPlan(source, "main", "Source", target, "main", "Target", new[] { "extra" });
+                    var item = legacy.Items[0]; item.Mode = TransferMode.CreateNew; item.TargetTable = "extra_copy"; item.CopiedRows = 2;
+                    item.Status = TransferItemStatus.Done; item.Verified = verified; item.RetryBlocked = blocked;
+                    DataTransferService.SaveCheckpoint(legacy, checkpoints);
+                    using (var form = new DataTransferForm(from, to, checkpoints))
+                    {
+                        form.CreateControl(); form.LoadTables();
+                        bool complete = verified == true && !blocked;
+                        Assert(form.ResumeAvailable != complete, "Legacy checkpoint resume availability agrees with service completion.");
+                        if (!complete)
+                        {
+                            form.UseUnfinished();
+                            Assert(form.Plan.Items.Count(candidate => candidate.NeedsProcessing) == 1, "Legacy unverified/blocked Done remains in UI execution selection.");
+                            form.Execute(System.Threading.CancellationToken.None);
+                            Assert(form.Plan.IsFinished == (verified == null && !blocked), "Legacy null verification can be rechecked; failed or uncertain transfer stays blocked.");
+                            AssertEquals("2", target.CountRows("main", "extra_copy").ToString(), "Legacy checkpoint never duplicates target rows.");
+                        }
+                    }
+                }
             }
         }
         finally
