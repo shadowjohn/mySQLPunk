@@ -13035,6 +13035,13 @@ namespace mySQLPunk
             ToolStripMenuItem dataTransferItem = new ToolStripMenuItem(Localization.T("Tool.DataTransfer"));
             dataTransferItem.Click += (s, ev) => OpenDataTransfer(GetTargetFromCurrentSelection());
             menu.Items.Add(dataTransferItem);
+            TreeDatabaseTarget migrationTarget = BuildTargetFromNode(node);
+            if (migrationTarget != null && migrationTarget.ProviderName == "mssql")
+            {
+                ToolStripMenuItem migrationItem = new ToolStripMenuItem("SQL Server 降版相容搬移...");
+                migrationItem.Click += (s, ev) => OpenSqlServerMigration(migrationTarget);
+                menu.Items.Add(migrationItem);
+            }
 
             ToolStripMenuItem biDashboardItem = new ToolStripMenuItem(Localization.T("Tool.BiDashboard"));
             biDashboardItem.Click += (s, ev) => ShowBiDashboard(GetTargetFromCurrentSelection());
@@ -13153,6 +13160,18 @@ namespace mySQLPunk
                 DataTransferForm form = new DataTransferForm(source, dialog.SelectedTarget);
                 form.FormClosed += (s, e) => form.Dispose();
                 form.Show(this);
+            }
+        }
+
+        private void OpenSqlServerMigration(TreeDatabaseTarget sourceTarget)
+        {
+            var source = BuildSchemaComparisonEndpoint(sourceTarget);
+            var targets = GetOpenSchemaComparisonEndpoints().Where(candidate => candidate.ProviderName == "mssql" &&
+                !(ReferenceEquals(candidate.Database, source.Database) && candidate.DatabaseName == source.DatabaseName)).ToList();
+            using (var dialog = new SchemaComparisonTargetDialog(source, targets, "選取另建的空 SQL Server 目標資料庫"))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK || dialog.SelectedTarget == null) return;
+                using (var form = new SqlServerMigrationForm(source, dialog.SelectedTarget)) form.ShowDialog(this);
             }
         }
 

@@ -10,6 +10,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../mySQLPunk/lib/SqlServerBatchInsert.cs" Link="SqlServerBatchInsert.cs" />
+    <Compile Include="../tests/SqlServerBatchInsertTests.cs" Link="SqlServerBatchInsertTests.cs" />
+    <Compile Include="../mySQLPunk/lib/SqlServerCompatibilityMigration.cs" Link="SqlServerCompatibilityMigration.cs" />
+    <Compile Include="../mySQLPunk/lib/SqlServerRestoreCompatibility.cs" Link="SqlServerRestoreCompatibility.cs" />
+    <Compile Include="../tests/SqlServerRestoreCompatibilityTests.cs" Link="SqlServerRestoreCompatibilityTests.cs" />
+    <Compile Include="../tests/SqlServerMigrationTests.cs" Link="SqlServerMigrationTests.cs" />
     <ProjectReference Include="../mySQLPunk.Core/mySQLPunk.Core.csproj" />
   </ItemGroup>
 

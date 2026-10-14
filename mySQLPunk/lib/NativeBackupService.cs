@@ -125,6 +125,12 @@ namespace mySQLPunk.lib
             try
             {
                 ValidateNewDatabaseName(newDatabase);
+                DataTable headers = database.SelectSQL("RESTORE HEADERONLY FROM DISK = N'" + serverPath.Replace("'", "''") + "'");
+                DataSyncService.ThrowIfQueryFailed(headers);
+                DataTable version = database.SelectSQL("SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)) AS version");
+                DataSyncService.ThrowIfQueryFailed(version);
+                if (version.Rows.Count != 1) throw new InvalidOperationException("無法確認 SQL Server 引擎版本。");
+                SqlServerRestoreCompatibility.Validate(headers, Convert.ToString(version.Rows[0][0], CultureInfo.InvariantCulture));
                 DataTable exists = database.SelectSQL("SELECT DB_ID(@name) AS id", new Dictionary<string, object> { { "name", newDatabase } });
                 DataSyncService.ThrowIfQueryFailed(exists);
                 if (exists.Rows.Count > 0 && !(exists.Rows[0][0] is DBNull)) throw new InvalidOperationException(Localization.Format("NativeBackup.Error.DatabaseExists", newDatabase));

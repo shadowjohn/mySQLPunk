@@ -30,6 +30,7 @@ public sealed partial class MainWindow : Window
     private IReadOnlyList<DatabaseObjectInfo> _databaseObjects = Array.Empty<DatabaseObjectInfo>();
     private QueryResult? _lastResult;
     private CancellationTokenSource? _operationCancellation;
+    private readonly OperationGate _operationGate = new();
     private bool _loadingDatabases;
     private readonly string? _initialSqlDocumentPath;
     private string? _pendingActivatedSqlPath;
@@ -605,6 +606,7 @@ public sealed partial class MainWindow : Window
 
     private async void ConnectProfile_Click(object? sender, RoutedEventArgs e)
     {
+        if (_operationCancellation is not null) return;
         if (_profilesList.SelectedItem is not ConnectionProfile selected)
         {
             return;
@@ -616,14 +618,16 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        Disconnect($"準備連線至 {connectionProfile.Name}…");
+        if (_operationCancellation is not null) return;
         await RunOperationAsync($"正在連線至 {connectionProfile.Name}…", async cancellationToken =>
         {
-            var session = DatabaseProviderFactory.Create(connectionProfile);
+            Disconnect($"準備連線至 {connectionProfile.Name}…");
+            using var lease = new SessionLease<IDatabaseSession>(DatabaseProviderFactory.Create(connectionProfile));
+            var session = lease.Session;
             await session.TestConnectionAsync(cancellationToken);
             var databases = await session.GetDatabasesAsync(cancellationToken);
 
-            _session = session;
+            _session = lease.Transfer(cancellationToken);
             _loadingDatabases = true;
             try
             {
@@ -913,6 +917,7 @@ public sealed partial class MainWindow : Window
         if (e.Key is Key.Enter or Key.Return)
         {
             e.Handled = true;
+            if (_operationCancellation is not null) return;
             await ExecuteCurrentSqlAsync(
                 executeDocument: e.KeyModifiers.HasFlag(KeyModifiers.Shift));
         }
@@ -1149,6 +1154,7 @@ public sealed partial class MainWindow : Window
 
     private async Task ExecuteCurrentSqlAsync(bool executeDocument = false)
     {
+        if (_operationCancellation is not null) return;
         if (_session is null || _databaseCombo.SelectedItem is not string database)
         {
             await MessageDialog.ShowAsync(this, "尚未連線", "請先選擇連線設定並連線。", showCancel: false);
@@ -1182,6 +1188,7 @@ public sealed partial class MainWindow : Window
         await RunOperationAsync(operationStatus, async cancellationToken =>
         {
             var result = await _session.ExecuteAsync(database, execution.Sql, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             stopwatch.Stop();
             DisplayResult(result);
             var historyRecorded = _queryHistory.Add(new QueryExecutionHistoryEntry(
@@ -1228,6 +1235,7 @@ public sealed partial class MainWindow : Window
         }
 
         var objects = await _session.GetObjectsAsync(database, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         _databaseObjects = objects;
         var filteredCount = ApplyObjectFilter();
         SetStatus($"{database}：已載入 {objects.Count} 個物件，目前顯示 {filteredCount} 個。");
@@ -1467,8 +1475,8 @@ public sealed partial class MainWindow : Window
 
     private async Task RunOperationAsync(string status, Func<CancellationToken, Task> operation)
     {
-        _operationCancellation?.Cancel();
-        _operationCancellation?.Dispose();
+        using var operationLease = _operationGate.TryEnter();
+        if (operationLease is null) return;
         var cancellation = new CancellationTokenSource();
         _operationCancellation = cancellation;
         SetBusy(true, status);

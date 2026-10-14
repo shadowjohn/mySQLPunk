@@ -11,6 +11,11 @@ using Npgsql;
 
 var tests = new List<(string Name, Func<Task> Run)>
 {
+    ("SQL Server 分批交易與重試", BatchInsertAsync),
+    ("SQL Server 原生還原版本預檢", RestoreCompatibilityAsync),
+    ("SQL Server 降版預檢與交易 mock", MigrationAsync),
+    ("桌面 session 失敗與取消所有權", SessionOwnershipAsync),
+    ("桌面操作互斥與取消結果防護", OperationOwnershipAsync),
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("連線 URI 安全匯入", ConnectionUriImportAsync),
     ("TLS 憑證檔案安全套用", TlsCertificateFilesAsync),
@@ -36,6 +41,76 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
+
+static Task BatchInsertAsync()
+{
+    using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+    connection.Open();
+    SqlServerBatchInsertTests.Run(connection);
+    return Task.CompletedTask;
+}
+
+static Task RestoreCompatibilityAsync()
+{
+    SqlServerRestoreCompatibilityTests.Run();
+    return Task.CompletedTask;
+}
+
+static Task MigrationAsync()
+{
+    SqlServerMigrationTests.Run();
+    return Task.CompletedTask;
+}
+
+static async Task OperationOwnershipAsync()
+{
+    var gate = new OperationGate();
+    var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    using var cancellation = new CancellationTokenSource();
+    var published = false;
+    var running = Task.Run(async () =>
+    {
+        using var operation = gate.TryEnter();
+        Assert(operation is not null, "First operation admitted");
+        entered.SetResult();
+        await release.Task;
+        cancellation.Token.ThrowIfCancellationRequested();
+        published = true;
+    });
+    await entered.Task;
+    Assert(gate.TryEnter() is null, "Duplicate SQL rejected");
+    cancellation.Cancel();
+    Assert(gate.TryEnter() is null, "Cancellation does not release gate before provider returns");
+    release.SetResult();
+    try { await running; throw new Exception("Cancellation ignored"); } catch (OperationCanceledException) { }
+    Assert(!published, "Cancelled provider result not published");
+    using var next = gate.TryEnter();
+    Assert(next is not null, "Gate reusable after completion");
+}
+
+static async Task SessionOwnershipAsync()
+{
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    foreach (var failure in new[] { "test", "databases", "cancel" })
+    {
+        var session = new DisposableSession();
+        try
+        {
+            using var lease = new SessionLease<DisposableSession>(session);
+            await Task.Yield();
+            if (failure == "cancel") lease.Transfer(cancellation.Token);
+            throw new InvalidOperationException(failure);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException) { }
+        Assert(session.Disposals == 1, "Failed preparation disposes session exactly once");
+    }
+    var owned = new DisposableSession();
+    using (var lease = new SessionLease<DisposableSession>(owned)) lease.Transfer(CancellationToken.None);
+    Assert(owned.Disposals == 0, "Successful transfer retains session");
+    owned.Dispose();
+}
 
 static Task ConnectionUriImportAsync()
 {
@@ -11186,4 +11261,10 @@ enum LiveSyncTarget
     SqlServer,
     TiDb,
     OceanBase
+}
+
+sealed class DisposableSession : IDisposable
+{
+    public int Disposals { get; private set; }
+    public void Dispose() => Disposals++;
 }
