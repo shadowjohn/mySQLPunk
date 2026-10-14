@@ -12,6 +12,7 @@ using Npgsql;
 var tests = new List<(string Name, Func<Task> Run)>
 {
     ("SQL Server 分批交易與重試", BatchInsertAsync),
+    ("桌面 session 失敗與取消所有權", SessionOwnershipAsync),
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("連線 URI 安全匯入", ConnectionUriImportAsync),
     ("TLS 憑證檔案安全套用", TlsCertificateFilesAsync),
@@ -44,6 +45,29 @@ static Task BatchInsertAsync()
     connection.Open();
     SqlServerBatchInsertTests.Run(connection);
     return Task.CompletedTask;
+}
+
+static async Task SessionOwnershipAsync()
+{
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    foreach (var failure in new[] { "test", "databases", "cancel" })
+    {
+        var session = new DisposableSession();
+        try
+        {
+            using var lease = new SessionLease<DisposableSession>(session);
+            await Task.Yield();
+            if (failure == "cancel") lease.Transfer(cancellation.Token);
+            throw new InvalidOperationException(failure);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException) { }
+        Assert(session.Disposals == 1, "Failed preparation disposes session exactly once");
+    }
+    var owned = new DisposableSession();
+    using (var lease = new SessionLease<DisposableSession>(owned)) lease.Transfer(CancellationToken.None);
+    Assert(owned.Disposals == 0, "Successful transfer retains session");
+    owned.Dispose();
 }
 
 static Task ConnectionUriImportAsync()
@@ -11195,4 +11219,10 @@ enum LiveSyncTarget
     SqlServer,
     TiDb,
     OceanBase
+}
+
+sealed class DisposableSession : IDisposable
+{
+    public int Disposals { get; private set; }
+    public void Dispose() => Disposals++;
 }

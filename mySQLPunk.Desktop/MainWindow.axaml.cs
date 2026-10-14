@@ -605,6 +605,7 @@ public sealed partial class MainWindow : Window
 
     private async void ConnectProfile_Click(object? sender, RoutedEventArgs e)
     {
+        if (_operationCancellation is not null) return;
         if (_profilesList.SelectedItem is not ConnectionProfile selected)
         {
             return;
@@ -616,14 +617,16 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        Disconnect($"準備連線至 {connectionProfile.Name}…");
+        if (_operationCancellation is not null) return;
         await RunOperationAsync($"正在連線至 {connectionProfile.Name}…", async cancellationToken =>
         {
-            var session = DatabaseProviderFactory.Create(connectionProfile);
+            Disconnect($"準備連線至 {connectionProfile.Name}…");
+            using var lease = new SessionLease<IDatabaseSession>(DatabaseProviderFactory.Create(connectionProfile));
+            var session = lease.Session;
             await session.TestConnectionAsync(cancellationToken);
             var databases = await session.GetDatabasesAsync(cancellationToken);
 
-            _session = session;
+            _session = lease.Transfer(cancellationToken);
             _loadingDatabases = true;
             try
             {
