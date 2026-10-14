@@ -54,6 +54,7 @@
 - **Linux／macOS SSH Tunnel**：跨平台連線設定可勾選「透過 SSH Tunnel 連線」，填入 SSH 主機、port、使用者、密碼或 OpenSSH／PEM 私鑰（含密語）與必填的主機金鑰 SHA256 指紋；連線時以 SSH.NET 建立只綁定 127.0.0.1 動態 port 的本機轉送，MySQL／MariaDB、PostgreSQL、SQL Server 的所有查詢與資料表操作都改走轉送端點，session 中斷或程式關閉時一併關閉；SSH 連線被跳板機中斷（閒置逾時、重啟、網路中斷）後，下一次資料庫操作會以同樣的指紋規則自動重建轉送，而不是把死掉的端點交給驅動程式。主機金鑰與指紋完全比對、不符即中止並回報伺服器實際指紋；MD5 或格式錯誤的指紋、缺主機／使用者／指紋、非絕對路徑私鑰、私鑰權限過寬與 MySQL／PostgreSQL 的 VerifyFull（127.0.0.1 主機名稱必定不符）一律 fail closed，SQL Server 則改以原始主機名稱驗證憑證。SSH 密碼與私鑰密語不寫入 `connections.json`（設定檔含這兩個欄位會拒絕載入），勾選系統密碼庫時與資料庫密碼一樣以獨立項目存入 Linux Secret Service／macOS Keychain，否則只保留到本次程式關閉；smoke test 會以本機臨時 sshd 實機驗證金鑰登入、加密私鑰、錯誤密語、指紋不符、權限過寬與 provider session 整合，實機矩陣另會經 tunnel 對 MySQL 8／MariaDB 11.4（Required）、PostgreSQL 16（VerifyCA＋CA）與 SQL Server 2022（Mandatory＋伺服器憑證，以原始主機名稱驗證）實際查詢與列出資料庫。
 
 ### 🛠️ 問題修正與優化
+- PostgreSQL 邏輯搬移保留並校驗主鍵 constraint／索引名稱；跨 SQLite 無法保留的自訂名稱與 PostgreSQL 目標名稱碰撞改在預檢阻擋，避免已驗證卻靜默更名。
 - **PostgreSQL 索引鍵預檢**：讀取實際 block_size，標準 8 KiB page 下逐列檢查 PK 與普通索引的保守 2048-byte tuple 預算，包含 UTF-8、複合鍵與對齊成本。超限在確認前拒絕，不依賴壓縮或等 INSERT 才失敗；未索引文字仍保留原欄位限額。
 - **SQL Server 搬移參數**：TimeSpan 不再被 DbType.Time 轉成 DateTime，NULL time 明確保留 SQL time；binary 欄位的 NULL 不再推導成 nvarchar。每批資料參數改為 2098，保留 RPC 額度。新增正式來源 SQL Server 2019 ↔ 2022 隔離雙向回歸與末批失敗／安全重試測試，不宣稱 PK/FK/index/identity 搬移或所有版本已驗證。
 - 邏輯搬移先取得 byte length 與 SQL 限額投影再讀取 BLOB／文字，避免超過 1 MiB 才拒絕時已配置整個大陣列；單欄與累計預算在 materialize 前檢查，超限保持空目標。

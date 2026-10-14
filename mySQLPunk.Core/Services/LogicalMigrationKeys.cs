@@ -26,12 +26,19 @@ public static partial class LogicalMigrationService
         return true;
     }
 
-    private sealed record Keys(IReadOnlyList<string> PrimaryKey, IReadOnlyList<LogicalMigrationIndex> Indexes);
+    private static string DefaultPrimaryKeyName(string table) => table[..Math.Min(table.Length, 58)] + "_pkey";
+
+    private static LogicalMigrationTable TargetTable(DatabaseProviderKind provider, LogicalMigrationTable table) =>
+        table with { PrimaryKeyName = table.PrimaryKey.Count == 0 || provider == DatabaseProviderKind.Sqlite
+            ? null : table.PrimaryKeyName ?? DefaultPrimaryKeyName(table.Name) };
+
+    private sealed record Keys(IReadOnlyList<string> PrimaryKey, IReadOnlyList<LogicalMigrationIndex> Indexes, string? PrimaryKeyName);
 
     private static async Task<Keys> ReadKeysAsync(DbConnection connection, DbTransaction? transaction,
         DatabaseProviderKind provider, string table, List<LogicalMigrationColumn> columns, List<string> blockers, CancellationToken token)
     {
         var primary = new List<string>();
+        string? primaryName = null;
         var indexes = new List<LogicalMigrationIndex>();
         if (provider == DatabaseProviderKind.Sqlite)
         {
@@ -92,14 +99,24 @@ public static partial class LogicalMigrationService
         else
         {
             await using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT ic.relname, i.indisprimary, a.attname FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_class ic ON ic.oid=i.indexrelid CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum,position) LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum=k.attnum WHERE n.nspname='public' AND c.relname=@table ORDER BY ic.relname COLLATE \"C\", k.position;";
+            command.CommandText = "SELECT ic.relname, i.indisprimary, a.attname, pc.conname FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_class ic ON ic.oid=i.indexrelid LEFT JOIN pg_constraint pc ON pc.conrelid=c.oid AND pc.conindid=i.indexrelid AND pc.contype='p' CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum,position) LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum=k.attnum WHERE n.nspname='public' AND c.relname=@table ORDER BY ic.relname COLLATE \"C\", k.position;";
             var parameter = command.CreateParameter(); parameter.ParameterName = "@table"; parameter.Value = table; command.Parameters.Add(parameter);
             await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
             var indexFields = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
             while (await reader.ReadAsync(token).ConfigureAwait(false))
             {
                 if (reader.IsDBNull(2)) { blockers.Add("不支援 expression 索引：" + reader.GetString(0)); continue; }
-                if (reader.GetBoolean(1)) primary.Add(reader.GetString(2));
+                if (reader.GetBoolean(1))
+                {
+                    primary.Add(reader.GetString(2));
+                    if (reader.IsDBNull(3)) blockers.Add("無法識別主鍵 constraint 名稱：" + table);
+                    else
+                    {
+                        primaryName = reader.GetString(3);
+                        if (!Identifier.IsMatch(primaryName) || primaryName != reader.GetString(0))
+                            blockers.Add("主鍵 constraint／索引名稱超出可忠實保留子集：" + table);
+                    }
+                }
                 else
                 {
                     var name = reader.GetString(0);
@@ -112,6 +129,6 @@ public static partial class LogicalMigrationService
         }
         if (primary.Any(name => columns.All(column => column.Name != name || column.Nullable)))
             blockers.Add("主鍵必須明確 NOT NULL：" + table);
-        return new(primary.ToArray(), indexes.OrderBy(index => index.Name, StringComparer.Ordinal).ToArray());
+        return new(primary.ToArray(), indexes.OrderBy(index => index.Name, StringComparer.Ordinal).ToArray(), primaryName);
     }
 }
