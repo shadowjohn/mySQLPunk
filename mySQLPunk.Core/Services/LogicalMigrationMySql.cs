@@ -26,11 +26,17 @@ public static partial class LogicalMigrationService
     private static string MySqlQuote(string name) => "`" + name.Replace("`", "``") + "`";
     private static bool IsMariaDb(string version) => version.Contains("MariaDB", StringComparison.Ordinal);
     private static string MySqlCollation(string version) => IsMariaDb(version) ? "utf8mb4_nopad_bin" : "utf8mb4_0900_bin";
+    internal static bool SupportedMySqlVersion(string version) => IsMariaDb(version)
+        ? Regex.IsMatch(version, "\\A(?:10\\.11|11\\.4)\\.[0-9]+-MariaDB(?:-[A-Za-z0-9.+~_-]+)?\\z", RegexOptions.CultureInvariant)
+        : Regex.IsMatch(version, "\\A8\\.(?:0|4)\\.[0-9]+\\z", RegexOptions.CultureInvariant);
+    internal static bool SupportedMySqlIdentity(string version, string comment) => SupportedMySqlVersion(version) &&
+        comment == (IsMariaDb(version) ? "mariadb.org binary distribution" : "MySQL Community Server - GPL");
 
     private static void ValidateMySqlDirection(ConnectionProfile source, ConnectionProfile target, Snapshot origin, Snapshot destination, List<string> blockers)
     {
-        if (source.Provider != DatabaseProviderKind.PostgreSql && target.Provider != DatabaseProviderKind.PostgreSql)
-            blockers.Add("MySQL／MariaDB 本階段只允許與 PostgreSQL 雙向邏輯搬移，不開放其他配對。");
+        if (source.Provider == DatabaseProviderKind.MySql && target.Provider == DatabaseProviderKind.MySql &&
+            IsMariaDb(origin.Version) != IsMariaDb(destination.Version))
+            blockers.Add("只允許 MySQL 8.0 ↔ 8.4 或 MariaDB 10.11 ↔ 11.4 的同引擎搬移；MySQL ↔ MariaDB 不開放。");
         if (origin.Tables.Count > 100) blockers.Add("MySQL 配對最多 100 表，限制單次 staging 與 RENAME 語句規模。");
         if (target.Provider == DatabaseProviderKind.MySql &&
             (destination.PacketBytes < 65536 || origin.Data.Values.SelectMany(rows => rows).Any(row => MySqlRowBytes(row) + 16384 > MySqlBatchBytes(destination.PacketBytes))))
@@ -43,10 +49,10 @@ public static partial class LogicalMigrationService
             var keys = table.Indexes.Select(index => index.Columns).Concat(table.PrimaryKey.Count == 0 ? Array.Empty<IReadOnlyList<string>>() : new[] { table.PrimaryKey });
             if (keys.Any(key => key.Count is < 1 or > 16 || key.Any(name => table.Columns.All(column => column.Name != name || column.Kind != "integer"))))
                 blockers.Add(table.Name + "：MySQL 配對只保留最多 16 欄 signed bigint 主鍵／普通索引；TEXT／BLOB 前綴索引不能忠實替代完整鍵。");
-            if (target.Provider == DatabaseProviderKind.MySql && table.PrimaryKeyName != null && table.PrimaryKeyName != DefaultPrimaryKeyName(table.Name))
+            if (source.Provider == DatabaseProviderKind.PostgreSql && target.Provider == DatabaseProviderKind.MySql && table.PrimaryKeyName != null && table.PrimaryKeyName != DefaultPrimaryKeyName(table.Name))
                 blockers.Add(table.Name + "：MySQL 的 PRIMARY 無法保留自訂 PostgreSQL constraint 名稱。");
         }
-        if (origin.Tables.SelectMany(table => table.Indexes).Select(index => index.Name).GroupBy(name => name, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        if (target.Provider == DatabaseProviderKind.PostgreSql && origin.Tables.SelectMany(table => table.Indexes).Select(index => index.Name).GroupBy(name => name, StringComparer.Ordinal).Any(group => group.Count() > 1))
             blockers.Add("MySQL 表內索引名稱在 PostgreSQL 全域名稱空間重複，不能靜默更名。");
     }
 
@@ -63,8 +69,8 @@ public static partial class LogicalMigrationService
         var blockers = new List<string>();
         var version = Convert.ToString(await ScalarAsync(connection, transaction, "SELECT VERSION();", token)) ?? "";
         var packetBytes = Convert.ToInt64(await ScalarAsync(connection, transaction, "SELECT @@max_allowed_packet;", token));
-        var validVersion = IsMariaDb(version) ? Regex.IsMatch(version, "\\A11\\.4\\.[0-9]+-MariaDB") : Regex.IsMatch(version, "\\A8\\.4\\.[0-9]+\\z");
-        if (!validVersion) blockers.Add("只驗證 MySQL 8.4.x／MariaDB 11.4.x；其他相容伺服器或版本不放行。");
+        var versionComment = Convert.ToString(await ScalarAsync(connection, transaction, "SELECT @@version_comment;", token)) ?? "";
+        if (!SupportedMySqlIdentity(version, versionComment)) blockers.Add("只驗證 MySQL Community 8.0.x／8.4.x、MariaDB 官方 binary 10.11.x／11.4.x；VERSION／version_comment 不符、其他 fork 或版本不放行。");
         var collation = MySqlCollation(version);
         if (Convert.ToInt64(await ScalarAsync(connection, transaction, "SELECT @@lower_case_table_names;", token)) != 0)
             blockers.Add("要求 lower_case_table_names=0；不更改伺服器設定。");

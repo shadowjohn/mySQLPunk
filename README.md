@@ -40,9 +40,9 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 未發版的可驗證邏輯搬移：Windows SQL Server 專用工具支援 2016–2025 受限雙向跨版本；Avalonia「邏輯搬移」提供 SQLite STRICT ↔ PostgreSQL 的 INTEGER/bigint、BLOB/bytea、UTF-8 TEXT（BINARY/C）、非自增單欄／複合主鍵及普通升冪索引子集，使用單一交易與結構／內容校驗。
 
-另已加入 MySQL 8.4／MariaDB 11.4 ↔ PostgreSQL 的 signed BIGINT、LONGBLOB/bytea、LONGTEXT utf8mb4 NO PAD binary/text C 子集，主鍵與普通索引只允許整數欄。MySQL 目標先建立本輪專屬 staging、交易分批寫入／校驗，再單次 RENAME 發布並重新校驗；DDL 隱含提交，失敗可能留下 staging，發布結果不明時禁止盲重試，不自動刪除或聲稱完整回滾。
+另已加入 MySQL Community 8.0／8.4、MariaDB 官方 binary 10.11／11.4 ↔ PostgreSQL，以及 MySQL 8.0 ↔ 8.4、MariaDB 10.11 ↔ 11.4 同引擎新舊版的 signed BIGINT、LONGBLOB/bytea、LONGTEXT utf8mb4 NO PAD binary/text C 子集，主鍵與普通索引只允許整數欄。MySQL 目標先建立本輪專屬 staging、交易分批寫入／校驗，再單次 RENAME 發布並重新校驗；DDL 隱含提交，失敗可能留下 staging，發布結果不明時禁止盲重試，不自動刪除或聲稱完整回滾。
 
-所有路徑只接受另建空目標與明確確認；FK、default、identity、其他定序、時間與未忠實轉換的功能在預檢阻擋。PG 自訂主鍵名稱往 MySQL、MySQL 配對的文字／binary 索引鍵等限制另見矩陣。實機證據限 PG16.15 ↔ MySQL8.4.11／MariaDB11.4.13、PG17.10 ↔ 14.24／16.15 及各自的合成 fixture，不代表全部版本或 schema。其他 MySQL/MariaDB 配對與 SQL Server 跨引擎轉換仍未開放，不宣稱整體完成或任意引擎／版本的原生 restore；版本與發布維持 hold。支援方向與實機／mock 證據區分見 [搬移矩陣](docs/LOGICAL_MIGRATION_MATRIX.md)。
+所有路徑只接受另建空目標與明確確認；FK、default、identity、其他定序、時間與未忠實轉換的功能在預檢阻擋。PG 自訂主鍵名稱往 MySQL、MySQL 配對的文字／binary 索引鍵等限制另見矩陣。實機證據限 PG16.15 ↔ MySQL8.4.11／MariaDB11.4.13、MySQL8.0.46 ↔ 8.4.11、MariaDB10.11.19 ↔ 11.4.13、PG17.10 ↔ 14.24／16.15 及各自的合成 fixture，不代表全部版本或 schema。MySQL ↔ MariaDB、其他 MySQL/MariaDB 配對與 SQL Server 跨引擎轉換仍未開放，不宣稱整體完成或任意引擎／版本的原生 restore；版本與發布維持 hold。支援方向與實機／mock 證據區分見 [搬移矩陣](docs/LOGICAL_MIGRATION_MATRIX.md)。
 
 目前的 `v1.0.0.22` GitHub Release 同時提供 Windows x64 完整版 setup、self-contained Linux x64／ARM64 安裝壓縮檔，以及 macOS Intel／Apple Silicon `.app.zip`。Linux 壓縮檔內附使用者層級的 `install.sh`／`uninstall.sh`；macOS 預覽目前採 ad-hoc 簽署、尚未 Apple notarize。每個跨平台資產都有獨立 `.sha256` 可驗證完整性。完整變更請見 `CHANGELOG.md`。
 

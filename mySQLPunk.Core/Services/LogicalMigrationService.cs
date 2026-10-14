@@ -40,7 +40,8 @@ public static partial class LogicalMigrationService
     private static bool SupportedPair(ConnectionProfile source, ConnectionProfile target) => Supported(source) && Supported(target) &&
         (source.Provider != DatabaseProviderKind.MySql && target.Provider != DatabaseProviderKind.MySql ||
          source.Provider == DatabaseProviderKind.MySql && target.Provider == DatabaseProviderKind.PostgreSql ||
-         source.Provider == DatabaseProviderKind.PostgreSql && target.Provider == DatabaseProviderKind.MySql);
+         source.Provider == DatabaseProviderKind.PostgreSql && target.Provider == DatabaseProviderKind.MySql ||
+         source.Provider == DatabaseProviderKind.MySql && target.Provider == DatabaseProviderKind.MySql);
 
     private static LogicalMigrationPreview Refused(ConnectionProfile target, string reason) =>
         new("未識別", "未識別", target.Database, Array.Empty<LogicalMigrationTable>(), Array.Empty<string>(), new[] { reason }, "");
@@ -49,7 +50,7 @@ public static partial class LogicalMigrationService
         int selectedTargetMajor, CancellationToken token)
     {
         if (!SupportedPair(source, target))
-            return Refused(target, "可驗證路徑為 SQLite STRICT ↔ PostgreSQL，以及 MySQL 8.4／MariaDB 11.4 ↔ PostgreSQL 受控子集；其他配對在開連線前拒絕，不當成原生 restore。請見方向矩陣。");
+            return Refused(target, "可驗證路徑為 SQLite STRICT ↔ PostgreSQL、MySQL 8.0／8.4 與 MariaDB 10.11／11.4 ↔ PostgreSQL，以及各自同引擎新舊版本受控搬移；其他配對拒絕，不當成原生 restore。請見方向矩陣。");
         using var sourceOwner = (AdoDatabaseSession)DatabaseProviderFactory.Create(source);
         using var targetOwner = (AdoDatabaseSession)DatabaseProviderFactory.Create(target);
         await using var origin = await sourceOwner.OpenMigrationConnectionAsync(source.Database, token, readOnly: true).ConfigureAwait(false);

@@ -8,6 +8,14 @@ internal static class LogicalMigrationTests
 {
     public static async Task RunAsync()
     {
+        foreach (var version in new[] { "8.0.46", "8.4.11", "10.11.19-MariaDB-ubu2204", "11.4.13-MariaDB-ubu2404" })
+            Check(LogicalMigrationService.SupportedMySqlVersion(version), "Explicit supported MySQL family version " + version);
+        foreach (var version in new[] { "8.1.0", "8.0.46-Percona", "8.4.11-other", "10.6.0-MariaDB", "11.5.0-MariaDB", "11.4.13-MariaDB-other fork", "unknown" })
+            Check(!LogicalMigrationService.SupportedMySqlVersion(version), "Unknown version/fork fails closed " + version);
+        Check(LogicalMigrationService.SupportedMySqlIdentity("8.0.46", "MySQL Community Server - GPL") &&
+            LogicalMigrationService.SupportedMySqlIdentity("10.11.19-MariaDB", "mariadb.org binary distribution"), "Official family identity matches");
+        Check(!LogicalMigrationService.SupportedMySqlIdentity("8.0.46", "Percona Server (GPL)") &&
+            !LogicalMigrationService.SupportedMySqlIdentity("10.11.19-MariaDB", "unknown fork"), "Bare version with unknown vendor fails closed");
         Check(LogicalMigrationService.PostgreSqlIndexKeyFits(8192, new object?[] { new string('a', 1996), 1L }), "PG conservative tuple boundary fits");
         Check(!LogicalMigrationService.PostgreSqlIndexKeyFits(8192, new object?[] { new string('a', 1997), 1L }), "PG tuple alignment boundary rejects");
         Check(!LogicalMigrationService.PostgreSqlIndexKeyFits(8192, new object?[] { new string('中', 700) }), "PG UTF8 byte budget not character count");

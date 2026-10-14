@@ -56,6 +56,75 @@ internal sealed class MySqlMigrationRegressions(int pgPort, int myPort)
     private async Task<long> ObjectsAsync(string database) => Convert.ToInt64(await SqlAsync(true, database,
         "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()"));
 
+    public async Task RunVersionsAsync(int newerPort, int otherFamilyPort)
+    {
+        var newer = new MySqlMigrationRegressions(pgPort, newerPort);
+        var oldEngine = await EngineAsync(); var newEngine = await newer.EngineAsync();
+        if (!LogicalMigrationService.SupportedMySqlVersion(oldEngine.Version) || !LogicalMigrationService.SupportedMySqlVersion(newEngine.Version) ||
+            new[] { "8.1.0", "8.0.46-Percona", "8.4.11-other", "10.6.0-MariaDB", "11.5.0-MariaDB", "11.4.13-MariaDB-other fork" }.Any(LogicalMigrationService.SupportedMySqlVersion))
+            throw new Exception("Unknown version/fork accepted.");
+        var source = "version_seed_" + myPort;
+        await CreateSeedAsync(source);
+        await CreateMyAsync("original", oldEngine.Collation);
+        await MigrateAsync(Pg(source), My("original"), oldEngine.Major);
+        await newer.CreateMyAsync("upgrade", newEngine.Collation);
+        var approved = await LogicalMigrationService.PreviewAsync(My("original"), newer.My("upgrade"), newEngine.Major);
+        if (!approved.CanStart || approved.SourceVersion != oldEngine.Version || approved.TargetVersion != newEngine.Version ||
+            approved.Tables.Single(table => table.Name == "records").PrimaryKeyName != "PRIMARY") throw new Exception("Actual versions/PRIMARY lost in preview.");
+        var result = await LogicalMigrationService.RunAsync(My("original"), newer.My("upgrade"), newEngine.Major, approved, "upgrade");
+        if (result.Outcome != LogicalMigrationOutcome.Verified) throw new Exception(result.Report);
+        await CreateMyAsync("downgrade", oldEngine.Collation);
+        await MigrateAsync(newer.My("upgrade"), My("downgrade"), oldEngine.Major);
+        await SqlAsync(false, "postgres", "CREATE DATABASE version_back_" + myPort);
+        await MigrateAsync(My("downgrade"), Pg("version_back_" + myPort), 16);
+        await using (var connection = Connection(true, "downgrade"))
+        {
+            await connection.OpenAsync(); await using var command = connection.CreateCommand(); command.CommandText = "INSERT INTO records(id,number) VALUES(1,1)";
+            try { await command.ExecuteNonQueryAsync(); throw new Exception("Duplicate PRIMARY accepted."); }
+            catch (MySqlException exception) when (exception.Number == 1062) { }
+        }
+        if (Convert.ToInt64(await SqlAsync(true, "downgrade", "SELECT COUNT(*) FROM records")) != 1007 ||
+            Convert.ToInt64(await SqlAsync(true, "downgrade", "SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='records' AND INDEX_NAME='records_optional'")) != 1)
+            throw new Exception("Rows or named nullable bigint index lost.");
+        Console.WriteLine("PASS actual " + oldEngine.Version + " -> " + newEngine.Version + " -> " + oldEngine.Version +
+            "; 1007 rows + empty table; composite PRIMARY, named nullable bigint index, Int64 extrema, UTF8/emoji/NULL/empty; production schema/SHA256 and PG seed/roundtrip Verified");
+
+        await CreateMyAsync("fault", oldEngine.Collation);
+        approved = await LogicalMigrationService.PreviewAsync(newer.My("upgrade"), My("fault"), oldEngine.Major);
+        var fired = false;
+        result = await LogicalMigrationService.RunWithMySqlObserverAsync(newer.My("upgrade"), My("fault"), oldEngine.Major, approved, CancellationToken.None,
+            (stage, _, _) => { if (stage == "batch") { fired = true; throw new IOException("Synthetic version batch fault."); } });
+        if (!fired || result.Outcome != LogicalMigrationOutcome.StagingRemains || !result.RetryBlocked || !result.Report.Contains("_mp_", StringComparison.Ordinal))
+            throw new Exception("Version fault failed closed incorrectly.");
+        if ((await LogicalMigrationService.PreviewAsync(newer.My("upgrade"), My("fault"), oldEngine.Major)).CanStart)
+            throw new Exception("Residue allowed blind restart.");
+
+        await newer.CreateMyAsync("stale", newEngine.Collation);
+        approved = await LogicalMigrationService.PreviewAsync(My("original"), newer.My("stale"), newEngine.Major);
+        await SqlAsync(true, "original", "UPDATE records SET note='changed' WHERE id=1");
+        result = await LogicalMigrationService.RunAsync(My("original"), newer.My("stale"), newEngine.Major, approved, "stale");
+        if (result.Outcome != LogicalMigrationOutcome.Refused || await newer.ObjectsAsync("stale") != 0) throw new Exception("Same-count stale source wrote DDL.");
+        var wrongVersion = await LogicalMigrationService.PreviewAsync(My("original"), newer.My("stale"), newEngine.Major + 1);
+        if (wrongVersion.CanStart || !wrongVersion.Blockers.Any(blocker => blocker.Contains("版本與實際", StringComparison.Ordinal))) throw new Exception("Wrong selected major accepted.");
+        if ((await LogicalMigrationService.PreviewAsync(My("original"), My("original"), oldEngine.Major)).CanStart)
+            throw new Exception("Same database accepted.");
+        var other = new MySqlMigrationRegressions(pgPort, otherFamilyPort);
+        var otherEngine = await other.EngineAsync();
+        var forkTarget = "fork_" + myPort;
+        await other.CreateMyAsync(forkTarget, otherEngine.Collation);
+        var forkPreview = await LogicalMigrationService.PreviewAsync(My("original"), other.My(forkTarget), otherEngine.Major);
+        if (forkPreview.CanStart || !forkPreview.Blockers.Any(blocker => blocker.Contains("MySQL ↔ MariaDB", StringComparison.Ordinal)) || await other.ObjectsAsync(forkTarget) != 0)
+            throw new Exception("Cross-fork direction accepted.");
+
+        await SqlAsync(true, "original", "ALTER TABLE empty_table ADD INDEX records_optional(id)");
+        await newer.CreateMyAsync("table_scoped_index", newEngine.Collation);
+        await MigrateAsync(My("original"), newer.My("table_scoped_index"), newEngine.Major);
+        await SqlAsync(false, "postgres", "CREATE DATABASE collision_back_" + myPort);
+        if ((await LogicalMigrationService.PreviewAsync(My("original"), Pg("collision_back_" + myPort), 16)).CanStart)
+            throw new Exception("PostgreSQL index namespace collision accepted.");
+        Console.WriteLine("PASS same-engine staging fault/retry blocked, stale source pre-DDL refusal, selected version mismatch/self and cross-fork refusal; table-scoped duplicate index names preserved, PG collision refused");
+    }
+
     public async Task RunBoundariesAsync(long packetBytes, bool crash)
     {
         var engine = await EngineAsync();
