@@ -13038,7 +13038,7 @@ namespace mySQLPunk
             TreeDatabaseTarget migrationTarget = BuildTargetFromNode(node);
             if (migrationTarget != null && migrationTarget.ProviderName == "mssql")
             {
-                ToolStripMenuItem migrationItem = new ToolStripMenuItem("SQL Server 降版相容搬移...");
+                ToolStripMenuItem migrationItem = new ToolStripMenuItem("SQL Server 雙向跨版本相容搬移...");
                 migrationItem.Click += (s, ev) => OpenSqlServerMigration(migrationTarget);
                 menu.Items.Add(migrationItem);
             }

@@ -1,0 +1,109 @@
+using System.Text;
+using Avalonia.Controls;
+using Avalonia.Layout;
+using MySqlPunk.Core.Models;
+using MySqlPunk.Core.Services;
+
+namespace MySqlPunk.Desktop;
+
+public sealed class LogicalMigrationWindow : Window
+{
+    private readonly ConnectionProfile _source;
+    private readonly ComboBox _target = new() { Name = "MigrationTarget", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox _version = new() { ItemsSource = new[] { "SQLite 3（3.37–3.53）", "PostgreSQL 14", "PostgreSQL 15", "PostgreSQL 16", "PostgreSQL 17" } };
+    private readonly TextBox _database = new() { Name = "MigrationDatabase", PlaceholderText = "另建空目標資料庫名稱／SQLite 完整檔案路徑" };
+    private readonly TextBox _password = new() { PasswordChar = '●', PlaceholderText = "目標密碼（只留記憶體，不讀秘密庫）" };
+    private readonly TextBox _sshPassword = new() { PasswordChar = '●', PlaceholderText = "目標 SSH 密碼（如需要）" };
+    private readonly TextBox _passphrase = new() { PasswordChar = '●', PlaceholderText = "目標 SSH key passphrase（如需要）" };
+    private readonly TextBox _confirmation = new() { Name = "MigrationConfirmation", PlaceholderText = "確認後完整輸入目標名稱／路徑" };
+    private readonly TextBox _report = new() { Name = "MigrationReport", IsReadOnly = true, AcceptsReturn = true, TextWrapping = Avalonia.Media.TextWrapping.Wrap, MinHeight = 240 };
+    private readonly Button _inspect = new() { Name = "MigrationInspect", Content = "唯讀預檢與 SQL 預覽" };
+    private readonly Button _apply = new() { Name = "MigrationApply", Content = "確認並搬移至空目標", IsEnabled = false };
+    private readonly Button _cancel = new() { Name = "MigrationCancel", Content = "取消", IsEnabled = false };
+    private CancellationTokenSource? _running;
+    private readonly CancellationToken _parentToken;
+    private LogicalMigrationPreview? _preview;
+    private ConnectionProfile? _approvedTarget;
+    private int _approvedMajor;
+    private bool _retryBlocked;
+
+    public LogicalMigrationWindow(ConnectionProfile source, IReadOnlyList<ConnectionProfile> targets, CancellationToken parentToken)
+    {
+        _source = source.Clone(); _parentToken = parentToken;
+        Title = "可驗證邏輯搬移（階段一）"; Width = 850; Height = 790; WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        var profiles = targets.Select(profile => profile.Clone()).ToArray();
+        _target.ItemsSource = profiles.Select(profile => profile.Name + " · " + profile.ProviderDisplayName).ToArray();
+        var fields = new StackPanel { Spacing = 8, Margin = new Avalonia.Thickness(16) };
+        fields.Children.Add(new TextBlock { Text = "來源：" + source.ProviderDisplayName + " / " + source.Database, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+        fields.Children.Add(new TextBlock { Text = "不是原生備份 restore。此階段僅 SQLite STRICT ↔ PostgreSQL 14–17：INTEGER/bigint、BLOB/bytea、NULL/NOT NULL；其他型別、PK/FK、索引、default、identity/sequence、trigger/procedure、schema 相依一律預檢阻擋。目標須事先另建且為空。最多 100,000 列／64 MiB，單一交易＋內容校驗，不提供逐表續寫。", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+        foreach (var control in new Control[] { _target, _database, _version, _password, _sshPassword, _passphrase, _confirmation }) fields.Children.Add(control);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        buttons.Children.Add(_inspect); buttons.Children.Add(_apply); buttons.Children.Add(_cancel); fields.Children.Add(buttons);
+        fields.Children.Add(_report); Content = new ScrollViewer { Content = fields };
+        _target.SelectionChanged += (_, _) =>
+        {
+            _preview = null; _apply.IsEnabled = false;
+            if (_target.SelectedIndex >= 0) _database.Text = profiles[_target.SelectedIndex].Database;
+        };
+        _version.SelectionChanged += (_, _) => InvalidatePreview();
+        foreach (var input in new[] { _database, _password, _sshPassword, _passphrase })
+            input.PropertyChanged += (_, args) => { if (args.Property == TextBox.TextProperty) InvalidatePreview(); };
+        _inspect.Click += async (_, _) => await WorkAsync(async token =>
+        {
+            if (_target.SelectedIndex < 0 || _version.SelectedIndex < 0) throw new InvalidOperationException("請明確選取目標連線與版本。");
+            var target = profiles[_target.SelectedIndex].Clone(); target.Database = _database.Text ?? "";
+            target.Password = _password.Text ?? ""; target.SshPassword = _sshPassword.Text ?? ""; target.SshKeyPassphrase = _passphrase.Text ?? "";
+            int major = _version.SelectedIndex == 0 ? 3 : 13 + _version.SelectedIndex;
+            var preview = await LogicalMigrationService.PreviewAsync(_source, target, major, token);
+            token.ThrowIfCancellationRequested();
+            _preview = preview; _approvedTarget = target; _approvedMajor = major;
+            var text = new StringBuilder("來源 " + preview.SourceVersion + " → 目標 " + preview.TargetVersion + "\n目標：" + preview.TargetDatabase + "\n");
+            foreach (var table in preview.Tables) text.AppendLine(table.Name + "：" + table.Rows + " 列；整數／二進位逐欄校驗（預覽不顯示資料值）");
+            foreach (var sql in preview.Statements) text.AppendLine(sql);
+            foreach (var blocker in preview.Blockers) text.AppendLine("阻擋：" + blocker);
+            _report.Text = text.ToString();
+        });
+        _apply.Click += async (_, _) => await WorkAsync(async token =>
+        {
+            if (_preview?.CanStart != true || _approvedTarget == null || _confirmation.Text != _approvedTarget.Database ||
+                _database.Text != _approvedTarget.Database || _target.SelectedIndex < 0 ||
+                profiles[_target.SelectedIndex].Id != _approvedTarget.Id ||
+                (_version.SelectedIndex == 0 ? 3 : 13 + _version.SelectedIndex) != _approvedMajor ||
+                (_password.Text ?? "") != _approvedTarget.Password || (_sshPassword.Text ?? "") != _approvedTarget.SshPassword ||
+                (_passphrase.Text ?? "") != _approvedTarget.SshKeyPassphrase)
+                throw new InvalidOperationException("請完成預檢並輸入完整目標名稱；沒有寫入。");
+            var result = await LogicalMigrationService.RunAsync(_source, _approvedTarget, _approvedMajor, _preview, _confirmation.Text!, token);
+            _preview = null;
+            _retryBlocked = result.RetryBlocked;
+            _report.Text = result.Outcome + "：" + result.Rows + " 列\n" + result.Report;
+        });
+        _cancel.Click += (_, _) => _running?.Cancel();
+        Closing += (_, args) => { if (_running != null) { args.Cancel = true; _running.Cancel(); } };
+        Closed += (_, _) => { _password.Text = ""; _sshPassword.Text = ""; _passphrase.Text = ""; _approvedTarget = null; };
+    }
+
+    private async Task WorkAsync(Func<CancellationToken, Task> operation)
+    {
+        if (_running != null || _retryBlocked || _parentToken.IsCancellationRequested) return;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_parentToken);
+        _running = cancellation;
+        SetBusy(true);
+        try { await operation(cancellation.Token); }
+        catch (OperationCanceledException) { _preview = null; _report.Text = "已取消預檢／尚未寫入的操作；需重新預檢。"; }
+        catch (Exception exception) { _preview = null; _report.Text = exception is InvalidOperationException ? exception.Message : "預檢／連線失敗：" + exception.GetType().Name + "；沒有自動重試。"; }
+        finally { _running = null; SetBusy(false); }
+    }
+
+    private void SetBusy(bool busy)
+    {
+        foreach (var control in new Control[] { _target, _database, _version, _password, _sshPassword, _passphrase, _confirmation }) control.IsEnabled = !busy && !_retryBlocked;
+        _inspect.IsEnabled = !busy && !_retryBlocked;
+        _apply.IsEnabled = !busy && !_retryBlocked && _preview?.CanStart == true;
+        _cancel.IsEnabled = busy;
+    }
+
+    private void InvalidatePreview()
+    {
+        _preview = null; _approvedTarget = null; _apply.IsEnabled = false;
+    }
+}

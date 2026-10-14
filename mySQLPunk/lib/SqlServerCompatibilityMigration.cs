@@ -79,7 +79,6 @@ namespace mySQLPunk.lib
             if (!SupportedTargetMajors.Contains(target.MajorVersion) || !SupportedTargetMajors.Contains(source.MajorVersion))
                 preview.Blockers.Add("僅規劃支援 SQL Server 2016–2025；未知或更早引擎禁止執行。");
             if (target.MajorVersion != selectedTargetMajor) preview.Blockers.Add("選取的最低目標版本與實際引擎版本不符。");
-            if (source.MajorVersion <= target.MajorVersion) preview.Blockers.Add("此工具只接受新版來源搬至舊版目標。");
             if (string.IsNullOrWhiteSpace(source.Identity) || string.IsNullOrWhiteSpace(target.Identity) || source.Identity == target.Identity)
                 preview.Blockers.Add("無法確認來源／目標識別，或兩者為同一資料庫。");
             if (target.ObjectCount != 0 || target.Tables.Count != 0) preview.Blockers.Add("目標必須是使用者另建的空資料庫，不允許覆蓋。");

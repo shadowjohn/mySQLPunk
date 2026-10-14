@@ -624,3 +624,6 @@
 
 桌面 gate 等完整 task 停止才釋放，取消結果不寫回 grid。隔離 smoke 實際執行 50,000,000 次 recursive 計算，驗證快速返回、三次取消與後續查詢、一般 SQL 錯誤及已提交 DML 不回滾。Xvfb harness 使用正式 SQL/Cancel handlers 驗證 UI tick、重複點擊、busy edit/delete/connect、取消後查詢。這不是資料同步或所有 metadata 路徑的背景化保證；鎖等待仍受 provider timeout 限制。
 
+# 可驗證雙向與跨引擎邏輯搬移
+
+Windows SQL Server 專用工具加入受限升版／降版／同版本方向；Avalonia 工作台新增 SQLite STRICT 與 PostgreSQL 的 INTEGER/bigint、BLOB/bytea 搬移。兩種工具都只寫入明確確認的新空目標，不把未支援型別、鍵、索引、預設值、trigger/procedure 等靜默丟掉。方向、實際版本、交易／取消／不確定重試及測試矩陣見 [LOGICAL_MIGRATION_MATRIX.md](LOGICAL_MIGRATION_MATRIX.md)。一般資料傳輸與 SQL 文字轉換不等於此處的可驗證邏輯還原。

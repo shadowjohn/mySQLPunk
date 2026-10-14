@@ -1490,6 +1490,17 @@ public sealed partial class MainWindow : Window
         });
     }
 
+    private async void LogicalMigration_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_operationCancellation != null || _session == null || _databaseCombo.SelectedItem is not string database) return;
+        await RunOperationAsync("正在預覽邏輯搬移…", async token =>
+        {
+            var source = _session.Profile.Clone(); source.Database = database;
+            var dialog = new LogicalMigrationWindow(source, _profiles.ToArray(), token);
+            await dialog.ShowDialog(this);
+        });
+    }
+
     private async Task RunOperationAsync(string status, Func<CancellationToken, Task> operation)
     {
         using var operationLease = _operationGate.TryEnter();

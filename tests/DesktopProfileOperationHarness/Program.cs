@@ -17,7 +17,7 @@ using (var database = new SqliteConnection("Data Source=" + databasePath))
 {
     database.Open();
     using var command = database.CreateCommand();
-    command.CommandText = "CREATE TABLE fixture (id INTEGER PRIMARY KEY, label TEXT); INSERT INTO fixture VALUES (1, 'synthetic');";
+    command.CommandText = "CREATE TABLE fixture (id INTEGER NOT NULL, label BLOB) STRICT; INSERT INTO fixture VALUES (1, X'00FF');";
     command.ExecuteNonQuery();
 }
 await store.SaveAsync(new[] { new ConnectionProfile { Name = "Isolated profile operations", Provider = DatabaseProviderKind.Sqlite, Database = databasePath } });
@@ -78,6 +78,46 @@ return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().AfterSetu
                 await Wait(() => Field(window, "_operationCancellation") == null);
                 Check(ReferenceEquals(session, Field(window, "_session")) && ((ConnectionProfile)profiles.SelectedItem!).Name == originalName, "Actual " + handler + " post-await cancellation preserves profile and live isolated session");
             }
+            var migrationTarget = Path.Combine(fixtureRoot, "logical-target.db");
+            using (var database = new SqliteConnection("Data Source=" + migrationTarget)) database.Open();
+            Invoke(window, "LogicalMigration_Click", null!, null!);
+            await Wait(() => window.OwnedWindows.OfType<LogicalMigrationWindow>().Any());
+            var migration = window.OwnedWindows.OfType<LogicalMigrationWindow>().Single();
+            var migrationCancellation = Field(window, "_operationCancellation");
+            Invoke(window, "ExecuteSql_Click", null!, null!);
+            Invoke(window, "EditProfile_Click", null!, null!);
+            Invoke(window, "DeleteProfile_Click", null!, null!);
+            Check(window.OwnedWindows.Count() == 1 && ReferenceEquals(migrationCancellation, Field(window, "_operationCancellation")), "Actual migration dialog holds parent SQL/profile gate");
+            ((ComboBox)Field(migration, "_target")!).SelectedIndex = 0;
+            ((ComboBox)Field(migration, "_version")!).SelectedIndex = 0;
+            ((TextBox)Field(migration, "_database")!).Text = migrationTarget;
+            var inspectMigration = (Button)Field(migration, "_inspect")!;
+            var applyMigration = (Button)Field(migration, "_apply")!;
+            inspectMigration.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            await Wait(() => inspectMigration.IsEnabled && applyMigration.IsEnabled);
+            Check(((TextBox)Field(migration, "_report")!).Text!.Contains("STRICT"), "Actual migration UI renders schema/data preview without row values");
+            ((TextBox)Field(migration, "_database")!).Text = migrationTarget + ".changed";
+            Check(!applyMigration.IsEnabled, "Changed target invalidates UI approval");
+            ((TextBox)Field(migration, "_database")!).Text = migrationTarget;
+            inspectMigration.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            await Wait(() => inspectMigration.IsEnabled && applyMigration.IsEnabled);
+            ((TextBox)Field(migration, "_confirmation")!).Text = "wrong";
+            applyMigration.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            await Wait(() => inspectMigration.IsEnabled && !applyMigration.IsEnabled);
+            Check(((TextBox)Field(migration, "_report")!).Text!.Contains("沒有寫入"), "Actual migration UI rejects wrong target confirmation");
+            inspectMigration.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            await Wait(() => inspectMigration.IsEnabled && applyMigration.IsEnabled);
+            ((TextBox)Field(migration, "_confirmation")!).Text = migrationTarget;
+            applyMigration.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            await Wait(() => ((TextBox)Field(migration, "_report")!).Text!.StartsWith("Verified"));
+            Check(!inspectMigration.IsEnabled && !applyMigration.IsEnabled, "Verified UI completion forbids duplicate resume");
+            using (var database = new SqliteConnection("Data Source=" + migrationTarget))
+            {
+                database.Open(); using var command = database.CreateCommand(); command.CommandText = "SELECT count(*) FROM fixture WHERE id=1 AND label=X'00FF';";
+                Check(Convert.ToInt64(command.ExecuteScalar()) == 1, "Actual UI transfer preserves integer and binary data");
+            }
+            migration.Close();
+            await Wait(() => Field(window, "_operationCancellation") == null);
             Invoke(window, "EditProfile_Click", null!, null!);
             await Wait(() => window.OwnedWindows.Any());
             var saved = selected.Clone(); saved.Name = "Isolated edited profile";

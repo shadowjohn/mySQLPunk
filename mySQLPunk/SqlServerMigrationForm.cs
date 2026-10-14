@@ -25,7 +25,7 @@ namespace mySQLPunk
         public SqlServerMigrationForm(SchemaComparisonEndpoint source, SchemaComparisonEndpoint target)
         {
             this.source = source; this.target = target;
-            Text = "SQL Server 降版相容搬移（有限範圍預覽版）";
+            Text = "SQL Server 雙向跨版本相容搬移（有限範圍預覽版）";
             Width = 1000; Height = 680; StartPosition = FormStartPosition.CenterParent;
             version.Items.AddRange(new object[] { "2016 (13)", "2017 (14)", "2019 (15)", "2022 (16)", "2025 (17)" });
             var controls = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 76 };
@@ -36,7 +36,7 @@ namespace mySQLPunk
             var notice = new Label { Dock = DockStyle.Top, Height = 100, Padding = new Padding(8), Text =
                 "來源：" + source.DisplayName + " → 目標：" + target.DisplayName + "\n" +
                 "只接受另建的空資料庫；不建立資料庫、不覆蓋、不自動重試。僅 dbo 一般 heap／白名單型別；identity、constraints、indexes、triggers、procs、schema 相依與進階功能全部阻擋。定序必須相同。\n" +
-                "每次最多 100,000 列；分批寫入同一交易並逐欄內容驗證。2016–2025 目前僅 mock 驗證，尚無真實降版矩陣。來源使用 SERIALIZABLE，可能暫時阻擋其他寫入。" };
+                "2016–2025 可雙向及同版本邏輯搬移，不是 .bak 還原。每次最多 100,000 列；分批寫入同一交易並逐欄內容驗證。目前僅 mock 驗證，尚無真實跨版本矩陣。來源使用 SERIALIZABLE，可能暫時阻擋其他寫入。" };
             Controls.Add(preview); Controls.Add(controls); Controls.Add(notice);
             inspect.Click += Inspect;
             start.Click += Start;

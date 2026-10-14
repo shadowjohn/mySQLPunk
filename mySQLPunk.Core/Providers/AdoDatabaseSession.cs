@@ -33,6 +33,31 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
 
     protected abstract DbConnection CreateConnection(string? database);
 
+    internal async Task<DbConnection> OpenMigrationConnectionAsync(string database, CancellationToken cancellationToken, bool readOnly = false)
+    {
+        var connection = await CreateConnectionAsync(database, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (connection is Microsoft.Data.Sqlite.SqliteConnection sqlite)
+            {
+                var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(sqlite.ConnectionString)
+                {
+                    Mode = readOnly ? Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly : Microsoft.Data.Sqlite.SqliteOpenMode.ReadWrite,
+                    Cache = Microsoft.Data.Sqlite.SqliteCacheMode.Private,
+                    Pooling = false
+                };
+                sqlite.ConnectionString = builder.ConnectionString;
+            }
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
     /// <summary>
     /// Creates a closed connection after making sure the SSH tunnel (if the profile enables one) is up. All
     /// database work goes through here so a tunnelled profile can never fall back to dialling the host directly.
