@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <NoWarn>CS0618</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+    <Compile Include="../../mySQLPunk/lib/SqlServerBatchInsert.cs" Link="SqlServerBatchInsert.cs" />
+    <Compile Include="../SqlServerBatchInsertTests.cs" Link="SqlServerBatchInsertTests.cs" />
+    <Compile Include="../../mySQLPunk/lib/SqlServerCompatibilityMigration.cs" Link="SqlServerCompatibilityMigration.cs" />
+    <Compile Include="../../mySQLPunk/lib/SqlServerMigrationSession.cs" Link="SqlServerMigrationSession.cs" />
+    <Compile Include="../../mySQLPunk/lib/SqlServerMigrationCatalogReader.cs" Link="SqlServerMigrationCatalogReader.cs" />
+    <Compile Include="../../mySQLPunk/lib/MssqlExport/MssqlOwnedSession.cs" Link="MssqlOwnedSession.cs" />
+  </ItemGroup>
+</Project>

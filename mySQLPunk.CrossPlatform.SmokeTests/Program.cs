@@ -51,6 +51,7 @@ static Task BatchInsertAsync()
     using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
     connection.Open();
     SqlServerBatchInsertTests.Run(connection);
+    SqlServerBatchInsertTests.RunParameterTypes(() => new Microsoft.Data.SqlClient.SqlParameter());
     return Task.CompletedTask;
 }
 
