@@ -16,6 +16,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("SQL Server 降版預檢與交易 mock", MigrationAsync),
     ("桌面 session 失敗與取消所有權", SessionOwnershipAsync),
     ("桌面操作互斥與取消結果防護", OperationOwnershipAsync),
+    ("連線編輯刪除與等待對話框的操作互斥", ProfileMutationOwnershipAsync),
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("連線 URI 安全匯入", ConnectionUriImportAsync),
     ("TLS 憑證檔案安全套用", TlsCertificateFilesAsync),
@@ -60,6 +61,37 @@ static Task MigrationAsync()
 {
     SqlServerMigrationTests.Run();
     return Task.CompletedTask;
+}
+
+static async Task ProfileMutationOwnershipAsync()
+{
+    foreach (var mutation in new[] { "edit", "delete", "connect" })
+    {
+        var gate = new OperationGate();
+        using (var sqlLease = gate.TryEnter())
+            Assert(gate.TryEnter() is null, $"Busy SQL rejects {mutation} at entry");
+        var dialog = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var changes = 0;
+        async Task MutateAsync()
+        {
+            using var lease = gate.TryEnter();
+            Assert(lease is not null, "Dialog preparation obtains shared operation lease");
+            await dialog.Task;
+            cancellation.Token.ThrowIfCancellationRequested();
+            changes++;
+        }
+        var pending = MutateAsync();
+        foreach (var competing in new[] { "SQL", "connect", "edit", "delete" })
+            Assert(gate.TryEnter() is null, $"{mutation} dialog blocks competing {competing}");
+        cancellation.Cancel();
+        Assert(gate.TryEnter() is null, "Cancel does not release awaiting profile operation");
+        dialog.SetResult(true);
+        try { await pending; } catch (OperationCanceledException) { }
+        Assert(changes == 0, "Cancelled dialog cannot save profile or disconnect session");
+        using var next = gate.TryEnter();
+        Assert(next is not null, "Profile operation releases lease after dialog returns");
+    }
 }
 
 static async Task OperationOwnershipAsync()
