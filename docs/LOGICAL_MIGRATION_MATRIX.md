@@ -103,7 +103,7 @@ SQLite／PostgreSQL 工具入口在 Avalonia 工作台「邏輯搬移」。來�
 | Oracle/Snowflake 與其他引擎 | NUMBER／時間、空字串 NULL、identifier/collation 與交易 DDL 不等價 | 專用 catalog／codec／交易恢復設計；本輪不開連線 |
 | MongoDB、Redis/Garnet 與表格引擎 | document/key-value model、TTL／原子操作／巢狀內容沒有通用無損表格映射 | 明確專用模型轉換契約，不當成同義 restore |
 
-SQLite/SQLServer 與 MySQL 配對、非關聯式等方向在開連線前拒絕；MySQL↔MariaDB、未知 fork／版本須讀實際 engine catalog 後拒絕，仍在任何目標 DDL 前停止。雙向跨版本／換引擎的整體需求仍未全部完成；目前已擴充 SQLite/PG、MySQL/MariaDB↔PG 與上述兩組同引擎版本的可驗證子集，不是全引擎完成或發版宣告。release 仍 hold。
+SQLite/SQLServer 與 MySQL 配對、非關聯式等方向在開連線前拒絕；MySQL↔MariaDB、未知 fork／版本須讀實際 engine catalog 後拒絕，仍在任何目標 DDL 前停止。雙向跨版本／換引擎的整體需求仍未全部完成；目前已擴充 SQLite/PG、MySQL/MariaDB↔PG 與上述兩組同引擎版本的可驗證子集，不代表任意引擎／版本或所有 schema 都可忠實轉換。
 
 有 FK、其他字串定序、時間、decimal、identity、procedure/trigger 的一般資料庫仍須使用引擎官方 schema/data migration 工具與人工轉換／驗證，不是宣稱 bacpac 可無限制降版。新版 SQL Server .bak 仍不能直接還原到舊引擎，compatibility level 不改備份格式；既有原生 restore 預檢繼續保留。
 
