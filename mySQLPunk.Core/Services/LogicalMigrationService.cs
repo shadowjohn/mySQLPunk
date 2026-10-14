@@ -14,6 +14,7 @@ namespace MySqlPunk.Core.Services;
 public static class LogicalMigrationService
 {
     public const int MaximumRows = 100_000;
+    internal const int MaximumFieldBytes = 1024 * 1024;
     private const long MaximumBytes = 64 * 1024 * 1024;
     private static readonly Regex Identifier = new("\\A[A-Za-z_][A-Za-z0-9_]{0,62}\\z", RegexOptions.CultureInvariant);
     private sealed record Snapshot(string Version, string Identity, List<LogicalMigrationTable> Tables,
@@ -238,20 +239,28 @@ public static class LogicalMigrationService
             if (readData && blockers.Count == 0)
             {
                 await using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT " + string.Join(",", columns.Select(column => Quote(column.Name))) + " FROM " + Qualified(provider, definition.Name);
-                await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+                command.CommandText = "SELECT " + string.Join(",", columns.Select(column =>
+                {
+                    var name = Quote(column.Name);
+                    if (column.Kind == "integer") return name;
+                    var length = (provider == DatabaseProviderKind.Sqlite ? "length(" : "octet_length(") + name + ")";
+                    return length + ",CASE WHEN " + length + " <= " + MaximumFieldBytes + " THEN " + name + " ELSE NULL END";
+                })) + " FROM " + Qualified(provider, definition.Name);
+                await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, token).ConfigureAwait(false);
                 while (await reader.ReadAsync(token).ConfigureAwait(false))
                 {
                     if (++totalRows > MaximumRows) throw new InvalidOperationException("來源超過 100,000 列，請使用專用搬移器。");
                     var row = new object?[columns.Count];
+                    var ordinal = 0;
                     for (var columnIndex = 0; columnIndex < columns.Count; columnIndex++)
                     {
-                        var value = reader.IsDBNull(columnIndex) ? null : reader.GetValue(columnIndex);
-                        if (value != null && (columns[columnIndex].Kind == "integer" ? value is not long : value is not byte[]))
-                            throw new InvalidOperationException("實際儲存型別與宣告不符。");
-                        var bytes = value is byte[] binary ? binary.Length : 8;
+                        var binary = columns[columnIndex].Kind == "binary";
+                        var bytes = reader.IsDBNull(ordinal) ? 0 : binary ? reader.GetInt64(ordinal) : 8;
                         totalBytes += bytes;
-                        if (bytes > 1024 * 1024 || totalBytes > MaximumBytes) throw new InvalidOperationException("超過單欄 1 MiB／總量 64 MiB 預覽上限。");
+                        if (bytes > MaximumFieldBytes || totalBytes > MaximumBytes) throw new InvalidOperationException("超過單欄 1 MiB／總量 64 MiB 預覽上限。");
+                        if (binary) ordinal++;
+                        object? value = reader.IsDBNull(ordinal) ? null : binary ? ReadBoundedBytes(reader, ordinal, bytes, token) : reader.GetInt64(ordinal);
+                        ordinal++;
                         row[columnIndex] = value;
                     }
                     rows.Add(row);
@@ -261,6 +270,28 @@ public static class LogicalMigrationService
             data.Add(definition.Name, rows);
         }
         return new(version, identity, tables, data, blockers);
+    }
+
+    internal static byte[] ReadBoundedBytes(DbDataReader reader, int ordinal, long length, CancellationToken token)
+    {
+        if (length < 0 || length > MaximumFieldBytes) throw new InvalidOperationException("超過單欄 1 MiB 預覽上限。");
+        token.ThrowIfCancellationRequested();
+        if (reader is SqliteDataReader)
+        {
+            var bounded = reader.GetFieldValue<byte[]>(ordinal);
+            if (bounded.LongLength != length) throw new InvalidOperationException("欄位長度在讀取期間改變。");
+            return bounded;
+        }
+        var result = new byte[(int)length];
+        var offset = 0;
+        while (offset < result.Length)
+        {
+            token.ThrowIfCancellationRequested();
+            var read = (int)reader.GetBytes(ordinal, offset, result, offset, Math.Min(8192, result.Length - offset));
+            if (read == 0) throw new InvalidOperationException("欄位長度在讀取期間改變。");
+            offset += read;
+        }
+        return result;
     }
 
     internal const string PostgreSqlUnsupportedCatalogSql = """

@@ -63,6 +63,20 @@ internal static class LogicalMigrationTests
             catch (SqliteException) { Check(!File.Exists(missing.Database), "No automatic creation of missing target"); }
             var unsupported = source.Clone(); unsupported.Provider = DatabaseProviderKind.MySql;
             Check(!(await LogicalMigrationService.PreviewAsync(unsupported, reverse, 3)).CanStart, "Unsupported engine refused without opening a network connection");
+            var large = Profile(Path.Combine(root, "large.db"));
+            using (var owner = DatabaseProviderFactory.Create(large))
+            {
+                await owner.ExecuteAsync(large.Database, "CREATE TABLE large (payload BLOB) STRICT; INSERT INTO large VALUES (zeroblob(33554432));");
+                var empty = Profile(Path.Combine(root, "large-target.db")); CreateEmpty(empty.Database);
+                var allocatedBefore = GC.GetTotalAllocatedBytes(true);
+                try { await LogicalMigrationService.PreviewAsync(large, empty, 3); throw new Exception("Oversize BLOB must be denied"); }
+                catch (InvalidOperationException error) { Check(error.Message.Contains("1 MiB"), "Length refusal before materialization"); }
+                Check(GC.GetTotalAllocatedBytes(true) - allocatedBefore < 8 * 1024 * 1024, "32 MiB BLOB is not materialized in managed memory");
+                Check(await ObjectCountAsync(empty) == 0, "Oversize read leaves target empty");
+                await owner.ExecuteAsync(large.Database, "UPDATE large SET payload=zeroblob(1048576);");
+                var boundary = await LogicalMigrationService.PreviewAsync(large, empty, 3);
+                Check(boundary.CanStart && (await LogicalMigrationService.RunAsync(large, empty, 3, boundary, empty.Database)).Outcome == LogicalMigrationOutcome.Verified, "1 MiB inclusive boundary transfers in bounded chunks");
+            }
             foreach (var definition in new[]
             {
                 "CREATE TABLE bad (id INTEGER PRIMARY KEY, payload BLOB) STRICT;",
