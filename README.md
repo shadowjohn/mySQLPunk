@@ -265,6 +265,7 @@ SQLite / PostgreSQL / SQL Server database rename 實機矩陣（需先啟動 Doc
 | Table/View 複製 | 可用 | 跨 provider 複製 Table/View；View SQL 無法安全轉換時會改用 table snapshot。 |
 | SQL Dump | 可用 | 支援多 provider Table dump；SQLite 欄位註解 sidecar metadata 會隨結構匯出；各 provider 的 DDL 細節仍會依 metadata 能力不同而有差異。 |
 | 匯出 / Dump / Backup service | 可用 | 查詢結果多格式匯出、SQL dump 與邏輯 SQL 備份已抽出 service，Form UI 只負責觸發、檔案對話框與狀態呈現。 |
+| SQL Server 降版相容搬移 | 有限範圍預覽版（Windows） | 明確選版本、預檢與確認後，只搬移一般 dbo heap 到新的空目標；分批交易與內容驗證。identity／索引／constraints／routines 等拒絕；2016–2025 尚無真引擎矩陣驗證，詳見 [範圍與矩陣](docs/MSSQL_COMPATIBILITY_MIGRATION.md)。 |
 | 自動執行作業 | 可用 | 「工具 > 自動執行作業」可建立唯讀查詢、查詢結果匯出與 SQL 備份；支援立即執行、每日 Windows 工作排程與 JSON 執行紀錄。排程使用同一個已登入的 Windows 帳號讀取 Credential Manager，不把帳密寫進作業檔。詳見 [`docs/AUTOMATION.md`](docs/AUTOMATION.md)。 |
 | 連線與 metadata service | 可用 | 連線開啟、retry 判斷與 database metadata snapshot 已抽出 service，Form UI 保留 TreeView 呈現與錯誤提示。 |
 | 選項中心 | 部分可用 | 已補齊主要分類頁與 `application-options.json` 保存；查詢視窗已套用記錄限制、編輯器字型/換行/Tab 空格、自動完成開關、大型 SQL 停用編輯器輔助、資料表儲存自動交易、SQL 檔案位置、匯出位置、還原差異抽樣列數、結果網格字型與列高度、日期/時間與數字格式、工具提示顯示開關、診斷記錄、自動復原草稿、索引標籤開啟偏好、HTTP 代理與進階註冊設定。 |

@@ -13220,6 +13220,7 @@ public static partial class SmokeTests
             SqlServerBatchInsertTests.Run(batchConnection);
         }
         SqlServerRestoreCompatibilityTests.Run();
+        SqlServerMigrationTests.Run();
         string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-transfer-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try

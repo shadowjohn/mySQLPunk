@@ -13,6 +13,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 {
     ("SQL Server 分批交易與重試", BatchInsertAsync),
     ("SQL Server 原生還原版本預檢", RestoreCompatibilityAsync),
+    ("SQL Server 降版預檢與交易 mock", MigrationAsync),
     ("桌面 session 失敗與取消所有權", SessionOwnershipAsync),
     ("桌面操作互斥與取消結果防護", OperationOwnershipAsync),
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
@@ -52,6 +53,12 @@ static Task BatchInsertAsync()
 static Task RestoreCompatibilityAsync()
 {
     SqlServerRestoreCompatibilityTests.Run();
+    return Task.CompletedTask;
+}
+
+static Task MigrationAsync()
+{
+    SqlServerMigrationTests.Run();
     return Task.CompletedTask;
 }
 

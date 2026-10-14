@@ -4,6 +4,7 @@
 
 ### 🚀 新增功能
 
+- **SQL Server 降版相容搬移（Windows，有限範圍預覽版）**：選取實際目標版本，預覽結構與列數並輸入目標名稱確認後，只寫入另建的空資料庫。僅 dbo 一般 heap 與白名單型別；identity、constraints、indexes、triggers、procs、schema 相依與進階功能明確阻擋，定序必須相同。分批寫入單一交易，內容與結構驗證通過才提交，不自動重試；2016–2025 尚僅離線／mock 驗證，不宣稱真引擎矩陣通過。
 
 - **系統資料庫規格書樣版（Windows，待最終匯出驗收）**：DOCX 新增第三種樣版，提供 A4 直式資料表清單、主鍵與索引摘要、淡藍色可編輯欄位表，以及 PK／NN 和長度／精度欄；中文名稱沿用資料庫註解。
 - **Windows 建置與啟動腳本**：根目錄新增 `build.bat` 與 `run.bat`，支援 `debug` / `release` 且預設 Debug；自動尋找 MSBuild 並還原套件，`run.bat` 只在編譯成功後啟動對應版本。
