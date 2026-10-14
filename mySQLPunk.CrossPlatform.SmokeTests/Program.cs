@@ -13,6 +13,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 {
     ("SQL Server 分批交易與重試", BatchInsertAsync),
     ("桌面 session 失敗與取消所有權", SessionOwnershipAsync),
+    ("桌面操作互斥與取消結果防護", OperationOwnershipAsync),
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("連線 URI 安全匯入", ConnectionUriImportAsync),
     ("TLS 憑證檔案安全套用", TlsCertificateFilesAsync),
@@ -45,6 +46,33 @@ static Task BatchInsertAsync()
     connection.Open();
     SqlServerBatchInsertTests.Run(connection);
     return Task.CompletedTask;
+}
+
+static async Task OperationOwnershipAsync()
+{
+    var gate = new OperationGate();
+    var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    using var cancellation = new CancellationTokenSource();
+    var published = false;
+    var running = Task.Run(async () =>
+    {
+        using var operation = gate.TryEnter();
+        Assert(operation is not null, "First operation admitted");
+        entered.SetResult();
+        await release.Task;
+        cancellation.Token.ThrowIfCancellationRequested();
+        published = true;
+    });
+    await entered.Task;
+    Assert(gate.TryEnter() is null, "Duplicate SQL rejected");
+    cancellation.Cancel();
+    Assert(gate.TryEnter() is null, "Cancellation does not release gate before provider returns");
+    release.SetResult();
+    try { await running; throw new Exception("Cancellation ignored"); } catch (OperationCanceledException) { }
+    Assert(!published, "Cancelled provider result not published");
+    using var next = gate.TryEnter();
+    Assert(next is not null, "Gate reusable after completion");
 }
 
 static async Task SessionOwnershipAsync()
