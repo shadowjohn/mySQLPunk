@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### 🚀 新增功能
+
+### 🛠️ 問題修正與優化
+
+## [1.0.0.23] - 2026-10-14
+
+### 🚀 新增功能
 - **MySQL／MariaDB 同引擎新舊版邏輯搬移**：開放 MySQL Community 8.0 ↔ 8.4、MariaDB 官方 binary 10.11 ↔ 11.4 的既有 BIGINT／LONGTEXT／LONGBLOB、整數主鍵及普通索引子集。核對完整版本與引擎標記，保留 MySQL 固定 PRIMARY 和表內索引名稱；仍用專屬 staging、內容校驗及單次發布，不允許 MySQL ↔ MariaDB 或未知 fork。版本選項與預覽一致。
 - **MySQL／MariaDB ↔ PostgreSQL 受控邏輯搬移**：加入 signed BIGINT、LONGTEXT NO PAD binary／text C、LONGBLOB／bytea、整數單欄／複合主鍵與具名普通索引。MySQL 8.4／MariaDB 11.4 目標用本輪 staging、分批 DML 交易、schema／SHA256 校驗後單次 RENAME 發布並再次驗證，不假稱 DDL 可完整回滾。失敗／取消列出殘留物件，發布結果不明禁止盲重試，不自動刪除。其他型別、文字前綴鍵、自訂 PK 名稱與相依物件明確拒絕；仍不是任意引擎／版本無損搬移。
 - **邏輯搬移的文字、主鍵與索引子集**：SQLite STRICT ↔ PostgreSQL 保留有效 UTF-8 TEXT（BINARY/C）、明確非自增單欄／複合主鍵、普通升冪索引與欄位順序。預覽包含索引 DDL，來源變更失效、取消、缺索引或內容不符仍整批回滾；FK、其他定序、default、identity、特殊索引依舊預檢拒絕，不宣稱所有跨引擎組合完成。
