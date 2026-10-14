@@ -11,6 +11,8 @@ on:
       - "tests/Run-CrossPlatformLiveTests.sh"
       - "tests/Run-PostgreSqlVersionMigration.py"
       - "tests/PostgreSqlVersionMigrationHarness/**"
+      - "tests/Run-MySqlLogicalMigration.py"
+      - "tests/MySqlLogicalMigrationHarness/**"
       - "tests/Run-DesktopProfileOperationTests.sh"
       - "tests/DesktopProfileOperationHarness/**"
       - "tests/Test-LinuxCrossPlatformPackage.sh"
@@ -28,6 +30,8 @@ on:
       - "tests/Run-CrossPlatformLiveTests.sh"
       - "tests/Run-PostgreSqlVersionMigration.py"
       - "tests/PostgreSqlVersionMigrationHarness/**"
+      - "tests/Run-MySqlLogicalMigration.py"
+      - "tests/MySqlLogicalMigrationHarness/**"
       - "tests/Run-DesktopProfileOperationTests.sh"
       - "tests/DesktopProfileOperationHarness/**"
       - "tests/Test-LinuxCrossPlatformPackage.sh"
@@ -89,6 +93,9 @@ jobs:
       - name: Build formal PostgreSQL version fixture
         run: dotnet build tests/PostgreSqlVersionMigrationHarness/Review.csproj -c Release
 
+      - name: Build formal MySQL logical migration fixture
+        run: dotnet build tests/MySqlLogicalMigrationHarness/Review.csproj -c Release
+
       - name: Run isolated Avalonia profile operation handlers
         if: matrix.name == 'Linux x64'
         run: ./tests/Run-DesktopProfileOperationTests.sh
@@ -96,6 +103,22 @@ jobs:
       - name: Run MySQL, MariaDB, PostgreSQL and SQL Server live round-trip
         if: matrix.live_tests == true
         run: ./tests/Run-CrossPlatformLiveTests.sh
+
+      - name: Run isolated MySQL 8.4 and MariaDB 11.4 bidirectional logical migration
+        if: matrix.live_tests == true
+        run: |
+          docker pull mysql:8.4
+          docker pull mariadb:11.4
+          docker pull postgres:16-alpine
+          python3 tests/Run-MySqlLogicalMigration.py "$RUNNER_TEMP/mysqlpunk-logical-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+      - name: Preserve synthetic logical migration evidence
+        if: always() && matrix.live_tests == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-logical-migration-evidence
+          path: ${{ runner.temp }}/mysqlpunk-logical-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: ignore
 
       - name: Build self-contained installable archives
         run: |

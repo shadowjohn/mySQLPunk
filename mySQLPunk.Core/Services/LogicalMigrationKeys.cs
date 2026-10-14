@@ -30,7 +30,7 @@ public static partial class LogicalMigrationService
 
     private static LogicalMigrationTable TargetTable(DatabaseProviderKind provider, LogicalMigrationTable table) =>
         table with { PrimaryKeyName = table.PrimaryKey.Count == 0 || provider == DatabaseProviderKind.Sqlite
-            ? null : table.PrimaryKeyName ?? DefaultPrimaryKeyName(table.Name) };
+            ? null : provider == DatabaseProviderKind.MySql ? "PRIMARY" : table.PrimaryKeyName is null or "PRIMARY" ? DefaultPrimaryKeyName(table.Name) : table.PrimaryKeyName };
 
     private sealed record Keys(IReadOnlyList<string> PrimaryKey, IReadOnlyList<LogicalMigrationIndex> Indexes, string? PrimaryKeyName);
 

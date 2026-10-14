@@ -10,7 +10,7 @@ public sealed class LogicalMigrationWindow : Window
 {
     private readonly ConnectionProfile _source;
     private readonly ComboBox _target = new() { Name = "MigrationTarget", HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly ComboBox _version = new() { ItemsSource = new[] { "SQLite 3（3.37–3.53）", "PostgreSQL 14", "PostgreSQL 15", "PostgreSQL 16", "PostgreSQL 17" } };
+    private readonly ComboBox _version = new() { ItemsSource = new[] { "SQLite 3（3.37–3.53）", "PostgreSQL 14", "PostgreSQL 15", "PostgreSQL 16", "PostgreSQL 17", "MySQL 8.4", "MariaDB 11.4" } };
     private readonly TextBox _database = new() { Name = "MigrationDatabase", PlaceholderText = "另建空目標資料庫名稱／SQLite 完整檔案路徑" };
     private readonly TextBox _password = new() { PasswordChar = '●', PlaceholderText = "目標密碼（只留記憶體，不讀秘密庫）" };
     private readonly TextBox _sshPassword = new() { PasswordChar = '●', PlaceholderText = "目標 SSH 密碼（如需要）" };
@@ -30,7 +30,7 @@ public sealed class LogicalMigrationWindow : Window
     public LogicalMigrationWindow(ConnectionProfile source, IReadOnlyList<ConnectionProfile> targets, CancellationToken parentToken)
     {
         _source = source.Clone(); _parentToken = parentToken;
-        Title = "可驗證邏輯搬移（階段一）"; Width = 850; Height = 790; WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Title = "可驗證邏輯搬移（受控關聯式子集）"; Width = 850; Height = 790; WindowStartupLocation = WindowStartupLocation.CenterOwner;
         var profiles = targets.Select(profile => profile.Clone()).ToArray();
         _target.ItemsSource = profiles.Select(profile => profile.Name + " · " + profile.ProviderDisplayName).ToArray();
         var fields = new StackPanel { Spacing = 8, Margin = new Avalonia.Thickness(16) };
@@ -40,6 +40,7 @@ public sealed class LogicalMigrationWindow : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         buttons.Children.Add(_inspect); buttons.Children.Add(_apply); buttons.Children.Add(_cancel); fields.Children.Add(buttons);
         fields.Children.Add(_report); Content = new ScrollViewer { Content = fields };
+        fields.Children.Insert(2, new TextBlock { Text = "MySQL 8.4／MariaDB 11.4 ↔ PostgreSQL：signed BIGINT、LONGTEXT utf8mb4 NO PAD binary ↔ text C、LONGBLOB ↔ bytea，主鍵／普通索引只允許整數欄。MySQL 目標 DDL 隱含提交：先建立本輪專屬 staging、交易分批寫入／校驗，再單次 RENAME 發布／再次校驗；取消或失敗可能殘留 staging，列明物件並禁止盲重試，不自動刪除。發布送出後取消須等實際結果，不保證撤銷。MySQL 只驗證 InnoDB Dynamic、lower_case_table_names=0，要求目前帳號有可證明的完整 catalog 可見權限，不新增權限。此路徑不是下述 SQLite／PG 的單一 DDL 交易。", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
         _target.SelectionChanged += (_, _) =>
         {
             _preview = null; _apply.IsEnabled = false;
@@ -53,7 +54,7 @@ public sealed class LogicalMigrationWindow : Window
             if (_target.SelectedIndex < 0 || _version.SelectedIndex < 0) throw new InvalidOperationException("請明確選取目標連線與版本。");
             var target = profiles[_target.SelectedIndex].Clone(); target.Database = _database.Text ?? "";
             target.Password = _password.Text ?? ""; target.SshPassword = _sshPassword.Text ?? ""; target.SshKeyPassphrase = _passphrase.Text ?? "";
-            int major = _version.SelectedIndex == 0 ? 3 : 13 + _version.SelectedIndex;
+            int major = SelectedMajor();
             var preview = await LogicalMigrationService.PreviewAsync(_source, target, major, token);
             token.ThrowIfCancellationRequested();
             _preview = preview; _approvedTarget = target; _approvedMajor = major;
@@ -68,7 +69,7 @@ public sealed class LogicalMigrationWindow : Window
             if (_preview?.CanStart != true || _approvedTarget == null || _confirmation.Text != _approvedTarget.Database ||
                 _database.Text != _approvedTarget.Database || _target.SelectedIndex < 0 ||
                 profiles[_target.SelectedIndex].Id != _approvedTarget.Id ||
-                (_version.SelectedIndex == 0 ? 3 : 13 + _version.SelectedIndex) != _approvedMajor ||
+                SelectedMajor() != _approvedMajor ||
                 (_password.Text ?? "") != _approvedTarget.Password || (_sshPassword.Text ?? "") != _approvedTarget.SshPassword ||
                 (_passphrase.Text ?? "") != _approvedTarget.SshKeyPassphrase)
                 throw new InvalidOperationException("請完成預檢並輸入完整目標名稱；沒有寫入。");
@@ -106,4 +107,6 @@ public sealed class LogicalMigrationWindow : Window
     {
         _preview = null; _approvedTarget = null; _apply.IsEnabled = false;
     }
+
+    private int SelectedMajor() => _version.SelectedIndex switch { 0 => 3, 5 => 8, 6 => 11, _ => 13 + _version.SelectedIndex };
 }
