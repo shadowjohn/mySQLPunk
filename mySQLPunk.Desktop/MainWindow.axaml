@@ -65,7 +65,7 @@
 
       <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
         <Border Grid.Row="0" BorderBrush="#CDD5E0" BorderThickness="0,0,0,1" Padding="12,9">
-          <Grid ColumnDefinitions="Auto,280,Auto,*,Auto,Auto,Auto,Auto">
+          <Grid ColumnDefinitions="Auto,220,Auto,*,Auto,Auto,Auto,Auto,Auto">
             <TextBlock Grid.Column="0" Text="資料庫" VerticalAlignment="Center" Margin="0,0,8,0" />
             <ComboBox x:Name="DatabaseCombo"
                       Grid.Column="1"
@@ -98,6 +98,7 @@
                     Click="CancelOperation_Click"
                     Margin="8,0,0,0"
                     IsEnabled="False" />
+            <Button Grid.Column="8" Content="邏輯搬移" Click="LogicalMigration_Click" Margin="8,0,0,0" />
           </Grid>
         </Border>
 

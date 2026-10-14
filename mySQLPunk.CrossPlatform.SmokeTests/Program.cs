@@ -33,6 +33,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
     ("SQLite 背景查詢與原生取消", SqliteResponsiveCancellationAsync),
+    ("關聯式邏輯搬移與真實 SQLite 交易回歸", LogicalMigrationTests.RunAsync),
     ("執行計畫解析與安全規則", QueryPlanParsingAsync),
     ("資料字典結構與 HTML 匯出", DataDictionaryAsync),
     ("結構比較差異與報告", SchemaComparisonAsync),
@@ -672,6 +673,7 @@ static Task DatabaseObjectFilteringAsync()
 
 if (string.Equals(Environment.GetEnvironmentVariable("MYSQLPUNK_LIVE_TESTS"), "1", StringComparison.Ordinal))
 {
+    tests.Add(("SQLite 與 PostgreSQL 雙向邏輯搬移實機", LogicalMigrationTests.PostgreSqlLiveAsync));
     tests.Add(("MySQL 實機連線、metadata 與 SQL", MySqlLiveRoundTripAsync));
     tests.Add(("MariaDB 實機連線、metadata 與 SQL", MariaDbLiveRoundTripAsync));
     tests.Add(("PostgreSQL 實機連線、metadata 與 SQL", PostgreSqlLiveRoundTripAsync));

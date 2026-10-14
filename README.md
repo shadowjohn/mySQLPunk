@@ -38,6 +38,8 @@ Windows 完整版介面支援繁體中文與英文；資料庫密碼、SSH 密�
 
 目前發版版本：`v1.0.0.22`，最新版請看 [GitHub Releases](https://github.com/shadowjohn/mySQLPunk/releases)。
 
+未發版的可驗證邏輯搬移：Windows SQL Server 專用工具支援 2016–2025 受限雙向跨版本；Avalonia「邏輯搬移」提供 SQLite STRICT ↔ PostgreSQL 的 INTEGER/bigint、BLOB/bytea 子集。只接受另建空目標、明確確認、單一交易與內容校驗；PK/FK、索引、default、identity、字串定序、時間與其他未忠實轉換的功能在預檢阻擋，不是任意引擎／版本的原生 restore。支援方向與實機／mock 證據區分見 [搬移矩陣](docs/LOGICAL_MIGRATION_MATRIX.md)。
+
 目前的 `v1.0.0.22` GitHub Release 同時提供 Windows x64 完整版 setup、self-contained Linux x64／ARM64 安裝壓縮檔，以及 macOS Intel／Apple Silicon `.app.zip`。Linux 壓縮檔內附使用者層級的 `install.sh`／`uninstall.sh`；macOS 預覽目前採 ad-hoc 簽署、尚未 Apple notarize。每個跨平台資產都有獨立 `.sha256` 可驗證完整性。完整變更請見 `CHANGELOG.md`。
 
 ## 開發環境
