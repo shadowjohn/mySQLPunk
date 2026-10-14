@@ -6,6 +6,26 @@ namespace MySqlPunk.Core.Services;
 
 public static partial class LogicalMigrationService
 {
+    internal static bool PostgreSqlIndexKeyFits(int blockSize, IReadOnlyList<object?> values)
+    {
+        if (blockSize != 8192 || values.Count is < 1 or > 32) return false;
+        long bytes = 40;
+        foreach (var value in values)
+        {
+            long width = value switch
+            {
+                null => 0,
+                long => 8,
+                string text => 4L + System.Text.Encoding.UTF8.GetByteCount(text),
+                byte[] binary => 4L + binary.Length,
+                _ => 2049
+            };
+            bytes += (width + 7) / 8 * 8;
+            if (bytes > 2048) return false;
+        }
+        return true;
+    }
+
     private sealed record Keys(IReadOnlyList<string> PrimaryKey, IReadOnlyList<LogicalMigrationIndex> Indexes);
 
     private static async Task<Keys> ReadKeysAsync(DbConnection connection, DbTransaction? transaction,

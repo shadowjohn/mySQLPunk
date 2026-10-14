@@ -8,6 +8,12 @@ internal static class LogicalMigrationTests
 {
     public static async Task RunAsync()
     {
+        Check(LogicalMigrationService.PostgreSqlIndexKeyFits(8192, new object?[] { new string('a', 1996), 1L }), "PG conservative tuple boundary fits");
+        Check(!LogicalMigrationService.PostgreSqlIndexKeyFits(8192, new object?[] { new string('a', 1997), 1L }), "PG tuple alignment boundary rejects");
+        Check(!LogicalMigrationService.PostgreSqlIndexKeyFits(8192, new object?[] { new string('中', 700) }), "PG UTF8 byte budget not character count");
+        Check(!LogicalMigrationService.PostgreSqlIndexKeyFits(8192, new object?[] { new string('a', 1000), new string('a', 1000) }), "PG composite budget aggregates columns");
+        Check(!LogicalMigrationService.PostgreSqlIndexKeyFits(4096, new object?[] { 1L }) && !LogicalMigrationService.PostgreSqlIndexKeyFits(0, new object?[] { 1L }), "PG unknown/custom page fails closed");
+        Check(LogicalMigrationService.PostgreSqlIndexKeyFits(8192, new object?[] { null, Array.Empty<byte>(), "😀", 1L }), "PG NULL/empty/multibyte key costs");
         var root = Path.Combine(Path.GetTempPath(), "mysqlpunk-logical-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
@@ -120,6 +126,7 @@ internal static class LogicalMigrationTests
         try
         {
             await admin.ExecuteAsync("postgres", "CREATE DATABASE \"" + postgres.Database + "\";"); created = true;
+            await PostgreSqlKeyBudgetAsync(root, postgres, admin);
             var sqlite = Profile(Path.Combine(root, "source.db"));
             using var origin = DatabaseProviderFactory.Create(sqlite);
             await origin.ExecuteAsync(sqlite.Database, "CREATE TABLE sample (number INTEGER, payload BLOB NOT NULL) STRICT; INSERT INTO sample VALUES (-9223372036854775808,X'00FF'),(9223372036854775807,X''),(NULL,X'01'),(NULL,X'01');" + BusinessSql);
@@ -175,6 +182,67 @@ internal static class LogicalMigrationTests
             Npgsql.NpgsqlConnection.ClearAllPools();
             if (created) await admin.ExecuteAsync("postgres", "DROP DATABASE \"" + postgres.Database + "\";");
             Directory.Delete(root, true);
+        }
+    }
+
+    private static async Task PostgreSqlKeyBudgetAsync(string root, ConnectionProfile postgres, IDatabaseSession admin)
+    {
+        var version = await admin.ExecuteAsync(postgres.Database, "SHOW server_version;");
+        var page = await admin.ExecuteAsync(postgres.Database, "SHOW block_size;");
+        Console.WriteLine("Isolated PostgreSQL version=" + version.Rows.Single()[0] + "; block_size=" + page.Rows.Single()[0]);
+        foreach (var scenario in new[] { "pk", "composite", "index", "utf8", "boundary", "unindexed" })
+        {
+            var source = Profile(Path.Combine(root, "budget-" + scenario + ".db"));
+            using (var connection = new SqliteConnection("Data Source=" + source.Database))
+            {
+                connection.Open();
+                using var command = connection.CreateCommand();
+                var constraint = scenario is "pk" or "utf8" ? ", PRIMARY KEY(label)" : scenario is "composite" ? ", PRIMARY KEY(label,other)" : scenario == "boundary" ? ", PRIMARY KEY(id,label)" : "";
+                command.CommandText = "CREATE TABLE budget(id INTEGER NOT NULL,label TEXT NOT NULL,other TEXT NOT NULL" + constraint + ") STRICT" + (constraint.Length == 0 ? ";" : ", WITHOUT ROWID;") +
+                    (scenario == "index" ? "CREATE INDEX budget_label ON budget(label);" : "");
+                command.ExecuteNonQuery();
+                var random = new Random(20261014);
+                var buffer = new byte[6000]; random.NextBytes(buffer);
+                var text = Convert.ToBase64String(buffer);
+                command.CommandText = "INSERT INTO budget VALUES(1,@label,@other);";
+                command.Parameters.AddWithValue("@label", scenario == "utf8" ? new string('中', 700) : scenario == "composite" ? text[..1000] : scenario == "boundary" ? text[..1996] : text);
+                command.Parameters.AddWithValue("@other", scenario == "composite" ? text[1000..2000] : "");
+                command.ExecuteNonQuery();
+            }
+            var preview = await LogicalMigrationService.PreviewAsync(source, postgres, 16);
+            var allowed = scenario is "boundary" or "unindexed";
+            Check(preview.CanStart == allowed, "Real PG key preflight " + scenario + ": " + string.Join(";", preview.Blockers));
+            Console.WriteLine("PASS real PG index key preflight: " + scenario + "; CanStart=" + preview.CanStart + "; " + string.Join(";", preview.Blockers));
+            if (scenario == "boundary")
+            {
+                using var connection = new SqliteConnection("Data Source=" + source.Database); connection.Open();
+                using var update = connection.CreateCommand();
+                update.CommandText = "UPDATE budget SET label=@label;";
+                update.Parameters.AddWithValue("@label", new string('x', 8000)); update.ExecuteNonQuery();
+                var stale = await LogicalMigrationService.RunAsync(source, postgres, 16, preview, postgres.Database);
+                Check(stale.Outcome == LogicalMigrationOutcome.RolledBack, "Changed indexed key invalidates approved preview before writing");
+                var empty = await admin.ExecuteAsync(postgres.Database, "SELECT count(*) FROM pg_tables WHERE schemaname='public';");
+                Check(Convert.ToInt64(empty.Rows.Single()[0]) == 0, "Stale oversized key leaves real PG target empty");
+                update.Parameters[0].Value = new string('x', 1996); update.ExecuteNonQuery();
+                preview = await LogicalMigrationService.PreviewAsync(source, postgres, 16);
+                Check(preview.CanStart, "Fresh boundary preview after restoring indexed key");
+                Console.WriteLine("PASS real PG stale indexed key refused before DDL; fresh preview required");
+            }
+            var result = await LogicalMigrationService.RunAsync(source, postgres, 16, preview, postgres.Database);
+            Check(result.Outcome == (allowed ? LogicalMigrationOutcome.Verified : LogicalMigrationOutcome.Refused), "Real PG key execution " + scenario);
+            if (allowed)
+            {
+                if (scenario == "boundary")
+                {
+                    try { await admin.ExecuteAsync(postgres.Database, "INSERT INTO budget SELECT * FROM budget;"); throw new Exception("Boundary key must be enforced"); }
+                    catch (Npgsql.PostgresException error) { Check(error.SqlState == "23505", "Real PG 2048-byte conservative tuple boundary PK enforced"); }
+                }
+                await admin.ExecuteAsync(postgres.Database, "DROP TABLE budget;");
+            }
+            else Check(preview.Blockers.Any(reason => reason.Contains("2048-byte")), "Real PG rejected key has explicit byte budget reason");
+            var count = await admin.ExecuteAsync(postgres.Database, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public';");
+            Check(Convert.ToInt64(count.Rows.Single()[0]) == 0, "Real PG target empty after key scenario " + scenario);
+            Console.WriteLine("PASS real PG key outcome: " + scenario + "; " + result.Outcome + "; target public objects=0 after owned fixture cleanup");
         }
     }
 

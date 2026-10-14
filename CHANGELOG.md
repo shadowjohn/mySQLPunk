@@ -6,7 +6,7 @@
 - **邏輯搬移的文字、主鍵與索引子集**：SQLite STRICT ↔ PostgreSQL 保留有效 UTF-8 TEXT（BINARY/C）、明確非自增單欄／複合主鍵、普通升冪索引與欄位順序。預覽包含索引 DDL，來源變更失效、取消、缺索引或內容不符仍整批回滾；FK、其他定序、default、identity、特殊索引依舊預檢拒絕，不宣稱所有跨引擎組合完成。
 - **可驗證邏輯搬移的第一階段**：SQL Server 專用相容工具加入受限雙向跨版本；Avalonia 新增 SQLite STRICT ↔ PostgreSQL 的整數／二進位搬移，預覽來源／目標版本、schema/data 轉換與阻擋原因，確認後才寫入另建空目標。單一交易、分批、內容校驗與不確定狀態禁止重試，不將一般資料傳輸或原生備份宣稱為無限制跨版本／跨引擎還原。
 
-- **SQL Server 降版相容搬移（Windows，有限範圍預覽版）**：選取實際目標版本，預覽結構與列數並輸入目標名稱確認後，只寫入另建的空資料庫。僅 dbo 一般 heap 與白名單型別；identity、constraints、indexes、triggers、procs、schema 相依與進階功能明確阻擋，定序必須相同。分批寫入單一交易，內容與結構驗證通過才提交，不自動重試；2016–2025 尚僅離線／mock 驗證，不宣稱真引擎矩陣通過。
+- **SQL Server 降版相容搬移（Windows，有限範圍預覽版）**：選取實際目標版本，預覽結構與列數並輸入目標名稱確認後，只寫入另建的空資料庫。僅 dbo 一般 heap 與白名單型別；identity、constraints、indexes、triggers、procs、schema 相依與進階功能明確阻擋，定序必須相同。分批寫入單一交易，內容與結構驗證通過才提交，不自動重試；2016–2025 完整矩陣仍僅離線／mock，2019 ↔ 2022 另有受限隔離真引擎回歸，不宣稱全部版本組合通過。
 
 - **系統資料庫規格書樣版（Windows，待最終匯出驗收）**：DOCX 新增第三種樣版，提供 A4 直式資料表清單、主鍵與索引摘要、淡藍色可編輯欄位表，以及 PK／NN 和長度／精度欄；中文名稱沿用資料庫註解。
 - **Windows 建置與啟動腳本**：根目錄新增 `build.bat` 與 `run.bat`，支援 `debug` / `release` 且預設 Debug；自動尋找 MSBuild 並還原套件，`run.bat` 只在編譯成功後啟動對應版本。
@@ -54,6 +54,7 @@
 - **Linux／macOS SSH Tunnel**：跨平台連線設定可勾選「透過 SSH Tunnel 連線」，填入 SSH 主機、port、使用者、密碼或 OpenSSH／PEM 私鑰（含密語）與必填的主機金鑰 SHA256 指紋；連線時以 SSH.NET 建立只綁定 127.0.0.1 動態 port 的本機轉送，MySQL／MariaDB、PostgreSQL、SQL Server 的所有查詢與資料表操作都改走轉送端點，session 中斷或程式關閉時一併關閉；SSH 連線被跳板機中斷（閒置逾時、重啟、網路中斷）後，下一次資料庫操作會以同樣的指紋規則自動重建轉送，而不是把死掉的端點交給驅動程式。主機金鑰與指紋完全比對、不符即中止並回報伺服器實際指紋；MD5 或格式錯誤的指紋、缺主機／使用者／指紋、非絕對路徑私鑰、私鑰權限過寬與 MySQL／PostgreSQL 的 VerifyFull（127.0.0.1 主機名稱必定不符）一律 fail closed，SQL Server 則改以原始主機名稱驗證憑證。SSH 密碼與私鑰密語不寫入 `connections.json`（設定檔含這兩個欄位會拒絕載入），勾選系統密碼庫時與資料庫密碼一樣以獨立項目存入 Linux Secret Service／macOS Keychain，否則只保留到本次程式關閉；smoke test 會以本機臨時 sshd 實機驗證金鑰登入、加密私鑰、錯誤密語、指紋不符、權限過寬與 provider session 整合，實機矩陣另會經 tunnel 對 MySQL 8／MariaDB 11.4（Required）、PostgreSQL 16（VerifyCA＋CA）與 SQL Server 2022（Mandatory＋伺服器憑證，以原始主機名稱驗證）實際查詢與列出資料庫。
 
 ### 🛠️ 問題修正與優化
+- **PostgreSQL 索引鍵預檢**：讀取實際 block_size，標準 8 KiB page 下逐列檢查 PK 與普通索引的保守 2048-byte tuple 預算，包含 UTF-8、複合鍵與對齊成本。超限在確認前拒絕，不依賴壓縮或等 INSERT 才失敗；未索引文字仍保留原欄位限額。
 - **SQL Server 搬移參數**：TimeSpan 不再被 DbType.Time 轉成 DateTime，NULL time 明確保留 SQL time；binary 欄位的 NULL 不再推導成 nvarchar。每批資料參數改為 2098，保留 RPC 額度。新增正式來源 SQL Server 2019 ↔ 2022 隔離雙向回歸與末批失敗／安全重試測試，不宣稱 PK/FK/index/identity 搬移或所有版本已驗證。
 - 邏輯搬移先取得 byte length 與 SQL 限額投影再讀取 BLOB／文字，避免超過 1 MiB 才拒絕時已配置整個大陣列；單欄與累計預算在 materialize 前檢查，超限保持空目標。
 - SQLite SQL 與執行計畫改在背景執行，長查詢透過原生 progress handler 中斷，不再凍結 UI；取消後等實際語句停止才釋放操作鎖。取消訊息明示先前已提交語句不會自動回滾，避免盲目重試。
