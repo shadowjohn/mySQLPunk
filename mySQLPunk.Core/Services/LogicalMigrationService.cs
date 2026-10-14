@@ -269,8 +269,8 @@ public static partial class LogicalMigrationService
                     for (var columnIndex = 0; columnIndex < columns.Count; columnIndex++)
                     {
                         var binary = columns[columnIndex].Kind != "integer";
-                        var bytes = reader.IsDBNull(ordinal) ? 0 : binary ? reader.GetInt64(ordinal) : 8;
-                        totalBytes += bytes;
+                        var bytes = reader.IsDBNull(ordinal) ? 8 : binary ? reader.GetInt64(ordinal) : 8;
+                        totalBytes += Math.Max(8, bytes);
                         if (bytes > MaximumFieldBytes || totalBytes > MaximumBytes) throw new InvalidOperationException("超過單欄 1 MiB／總量 64 MiB 預覽上限。");
                         if (binary) ordinal++;
                         object? value = reader.IsDBNull(ordinal) ? null : binary ? ReadBoundedBytes(reader, ordinal, bytes, token) : reader.GetInt64(ordinal);

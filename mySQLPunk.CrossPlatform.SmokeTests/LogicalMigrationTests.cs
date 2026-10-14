@@ -130,6 +130,16 @@ internal static class LogicalMigrationTests
             Check(pgOrder.Rows.Select(row => Convert.ToString(row[0])).SequenceEqual(new[] { "A", "a", "é", "臺灣😀" }), "Real PostgreSQL C collation retains binary Unicode ordering");
             try { await admin.ExecuteAsync(postgres.Database, "INSERT INTO lines VALUES(1,'A');"); throw new Exception("PG composite PK must reject duplicate"); }
             catch (Npgsql.PostgresException error) { Check(error.SqlState == "23505", "Real PG primary key enforced"); }
+            var oversizedTarget = Profile(Path.Combine(root, "pg-oversized-target.db")); CreateEmpty(oversizedTarget.Database);
+            await admin.ExecuteAsync(postgres.Database, "CREATE TABLE bounded_payload(payload bytea); INSERT INTO bounded_payload VALUES(decode(repeat('FF',33554432),'hex')); ");
+            var allocatedBefore = GC.GetTotalAllocatedBytes(true);
+            try { await LogicalMigrationService.PreviewAsync(postgres, oversizedTarget, 3); throw new Exception("Oversize PG BLOB must be refused"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("1 MiB"), "PG length refusal precedes streaming materialization"); }
+            Check(GC.GetTotalAllocatedBytes(true) - allocatedBefore < 8 * 1024 * 1024 && await ObjectCountAsync(oversizedTarget) == 0, "Real PG 32 MiB BLOB is not transported as a full managed field and target stays empty");
+            await admin.ExecuteAsync(postgres.Database, "UPDATE bounded_payload SET payload=decode(repeat('FF',1048576),'hex');");
+            var boundary = await LogicalMigrationService.PreviewAsync(postgres, oversizedTarget, 3);
+            Check(boundary.CanStart && (await LogicalMigrationService.RunAsync(postgres, oversizedTarget, 3, boundary, oversizedTarget.Database)).Outcome == LogicalMigrationOutcome.Verified, "Real PG 1 MiB boundary streams and verifies into SQLite");
+            await admin.ExecuteAsync(postgres.Database, "DROP TABLE bounded_payload;");
             var reverse = Profile(Path.Combine(root, "target.db")); CreateEmpty(reverse.Database);
             var backward = await LogicalMigrationService.PreviewAsync(postgres, reverse, 3);
             Check(backward.CanStart && backward.Tables.Select(table => table.ContentHash).SequenceEqual(forward.Tables.Select(table => table.ContentHash)), "PostgreSQL -> SQLite real catalog and content");
@@ -138,7 +148,7 @@ internal static class LogicalMigrationTests
             using var pgOwner = DatabaseProviderFactory.Create(postgres);
             foreach (var mutation in new[]
             {
-                ("CREATE INDEX extra ON sample((number+1));", "DROP INDEX extra;"),
+                ("CREATE INDEX extra ON sample((number%2));", "DROP INDEX extra;"),
                 ("CREATE INDEX extra ON sample(number);", "DROP INDEX extra;"),
                 ("CREATE UNIQUE INDEX extra ON customers(label);", "DROP INDEX extra;"),
                 ("CREATE INDEX extra ON customers(label COLLATE \"POSIX\");", "DROP INDEX extra;"),

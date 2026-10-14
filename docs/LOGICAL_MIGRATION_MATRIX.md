@@ -18,9 +18,9 @@
 
 - SQLite 文字只接受 BINARY（隱含或明確），PostgreSQL 必須是內建 `pg_catalog."C"`；兩端 UTF-8，逐欄嚴格解碼，拒絕 NUL、無效 UTF-8，不偷偷替換字元。保留空字串、NULL、Unicode、大小寫與 byte-order 比較語意；不承諾兩引擎字串函式或 LIKE 行為相同。
 - SQLite PK 表要求完整可辨識 grammar、明確 NOT NULL 與 WITHOUT ROWID，避免 INTEGER PRIMARY KEY 的 rowid alias 自動給 ID 行為被偷偷改成 PostgreSQL 無 sequence 的 bigint。單欄整數／文字／二進位與複合 PK 均可；不保證引擎自動產生的 PK constraint／內部索引名稱或實體配置相同。
-- 普通非 unique btree 索引保留名稱、欄位與順序，只允許升冪、預設內建 opclass、無 expression／partial／INCLUDE／自訂 storage。SQLite 升冪 NULL 在前，目標 PostgreSQL 明確 `ASC NULLS FIRST`；反向 nullable 欄位索引若為 PostgreSQL 預設 NULLS LAST 則拒絕，NOT NULL 索引沒有這項差异。DESC、unique（PK 除外）、自訂定序／opclass、clustered／replica identity 索引都阻擋。
+- 普通非 unique btree 索引保留名稱、欄位與順序，只允許升冪、預設內建 opclass、無 expression／partial／INCLUDE／自訂 storage。SQLite 升冪 NULL 在前，目標 PostgreSQL 明確 `ASC NULLS FIRST`；反向 nullable 欄位索引若為 PostgreSQL 預設 NULLS LAST 則拒絕，NOT NULL 索引沒有這項差異。DESC、unique（PK 除外）、自訂定序／opclass、clustered／replica identity 索引都阻擋。
 - SQLite／PostgreSQL schema＋索引＋資料仍為單一交易，不引入逐表 partial success。每次重新預檢／最終驗證涵蓋 PK、索引、內容；已提交或 ack lost 不可盲重試。
-- 有界讀取先在 SQL 投影取 byte length、超限 CASE 回傳 NULL，再检查預算，才 materialize 欄位。BLOB 不會先 GetValue 完整大陣列；SQLite expression 用已限額的 byte[] 讀取（避開 provider GetBytes 的 metadata 路徑），PostgreSQL 分段讀取。這是應用端快照限額，不是對引擎自身 page cache／SQL 執行記憶體的硬上限。
+- 有界讀取先在 SQL 投影取 byte length、超限 CASE 回傳 NULL，再檢查預算，才 materialize 欄位。BLOB 不會先 GetValue 完整大陣列；SQLite expression 用已限額的 byte[] 讀取（避開 provider GetBytes 的 metadata 路徑），PostgreSQL 分段讀取。NULL 與空欄位至少計入 8 bytes 預算。這是應用端快照限額，不是對引擎自身 page cache／SQL 執行記憶體的硬上限。
 
 SQLite／PostgreSQL 工具入口在 Avalonia 工作台「邏輯搬移」。來源使用目前連線的記憶體設定；目標選已儲存的連線及另建空資料庫，明確選版本，必要密碼只由使用者輸入，不額外讀秘密庫。獨立 provider owner 保有 SSH tunnel，所有開啟／失敗／結束都有 scope 釋放；不從 redacted ConnectionString 重建。
 
@@ -45,7 +45,7 @@ SQLite／PostgreSQL 工具入口在 Avalonia 工作台「邏輯搬移」。來�
 | MySQL/MariaDB → SQLite/PG/SQLServer | 整數 unsigned 上界、zero date、ENUM/SET、charset、PAD SPACE 定序、AUTO_INCREMENT 與 storage engine 一致快照不能用現有 count-only transfer 當忠實轉換 | 來源 catalog／版本／InnoDB 快照 adapter，逐欄區間及 charset/定序證明；不可先沿用一般 type map 再補驗證 |
 | SQLite/PG/SQLServer → MySQL/MariaDB，以及 MySQL↔MariaDB／跨版本 | MySQL DDL implicit commit，DDL＋資料單一交易會是假保證；目標即使原本空白，取消仍可能已留下表 | 另建 staging 與 durable uncertain/checkpoint 協議、預檢引擎版本差異、人工核對恢復；不能自動刪 staging 或覆蓋目標假裝 rollback |
 | SQLServer → SQLite/PG/MySQL，以及反向 | UTF-16/UTF-8、linguistic/BIN2 定序的比較／尾空白規則、rowversion、decimal/time scale、identity/default/sequence 不能把現有型別名稱替換當成保留語意 | 可重用 SQLServer catalog 的阻擋規則，但需跨 provider canonical schema／資料 codec、來源一致快照與逐欄語意／版本證據；目前只 Windows SQLServer→SQLServer 專用子集可執行 |
-| Oracle/Snowflake 與其他引擎 | NUMBER／時間、空字串 NULL、identifier/collation 與交易 DDL 不等价 | 專用 catalog／codec／交易恢復設計；本輪不開連線 |
+| Oracle/Snowflake 與其他引擎 | NUMBER／時間、空字串 NULL、identifier/collation 與交易 DDL 不等價 | 專用 catalog／codec／交易恢復設計；本輪不開連線 |
 | MongoDB、Redis/Garnet 與表格引擎 | document/key-value model、TTL／原子操作／巢狀內容沒有通用無損表格映射 | 明確專用模型轉換契約，不當成同義 restore |
 
 上述方向服務在開連線前拒絕，沒有聲稱某個 MySQL/MariaDB 或 SQLServer 版本已跨引擎通過。雙向跨版本／換引擎的整體需求仍未全部完成；此批是實際擴充 SQLite/PG 的可驗證第二階段，而不是全引擎完成或發版的宣告。
@@ -56,7 +56,7 @@ SQLite／PostgreSQL 工具入口在 Avalonia 工作台「邏輯搬移」。來�
 
 實際隔離 SQLite：1,005 列、多批、Int64 極值、空／非空 bytes、NULL、重複列、反向內容一致、錯誤確認、缺目標不自動建立、來源同列數內容改變、unsupported features、部分寫入失敗、內容／結構驗證失敗、途中取消，以及真正 commit 後注入 ack lost（保留資料且禁止重試）。不是單靠手動設 mock Blockers。
 
-本輪新增正式 SQLite：32 MiB BLOB 在 materialize 前拒絕且 managed allocation 小於 8 MiB、1 MiB 邊界搬移、有效 Unicode／空字串／NULL／NUL／無效 UTF-8／文字超限、單欄與複合 PK 真的拒絕重複及缺 ID、索引缺失／順序變动與索引建立後取消整批回滾。PostgreSQL 16 CI fixture 用同一業務表雙向搬移與 C 定序／複合 PK 實際檢查，另對 expression/unique/null ordering/collation 真 catalog 加入與移除後預檢。
+本輪新增正式 SQLite：32 MiB BLOB 在 materialize 前拒絕且 managed allocation 小於 8 MiB、1 MiB 邊界搬移、有效 Unicode／空字串／NULL／NUL／無效 UTF-8／文字超限、單欄與複合 PK 真的拒絕重複及缺 ID、索引缺失／順序變動與索引建立後取消整批回滾。PostgreSQL 16 CI fixture 用同一業務表雙向搬移與 C 定序／複合 PK 實際檢查，另對 expression/unique/null ordering/collation 真 catalog 加入與移除後預檢，以及 32 MiB bytea 有界拒絕／1 MiB 邊界搬移。
 
 Avalonia/Xvfb：正式入口持有主視窗 gate、預覽、目標變更失效、錯誤確認不寫入、實際確認寫入且禁止重複 resume。既有跨平台 CI fixture 另測 SQLite ↔ PostgreSQL 16，包括正式 catalog 逐項加 feature／移除 feature 後恢復可預檢。
 
