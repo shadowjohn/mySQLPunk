@@ -5,20 +5,35 @@ using System.Data.Common;
 using System.Data.SqlClient;
 using System.Globalization;
 using System.Threading;
+using mySQLPunk.lib.MssqlExport;
 
 namespace mySQLPunk.lib
 {
     public sealed class SqlServerMigrationSession : ISqlServerMigrationSession
     {
         private readonly SqlConnection connection;
+        private readonly MssqlOwnedSession owner;
         private SqlTransaction transaction;
 
-        public SqlServerMigrationSession(SqlConnection existing, string database)
+        internal SqlServerMigrationSession(Dictionary<string, object> settings, string database,
+            Func<Dictionary<string, object>, MssqlOwnedSession> factory = null)
         {
-            var settings = new SqlConnectionStringBuilder(existing.ConnectionString) { InitialCatalog = database };
-            connection = new SqlConnection(settings.ConnectionString);
-            try { connection.Open(); }
-            catch { connection.Dispose(); throw; }
+            if (settings == null) throw new ArgumentNullException("settings");
+            var selected = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in settings)
+            {
+                if (string.Equals(pair.Key, "pdo", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, "connString", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, "isConnect", StringComparison.OrdinalIgnoreCase)) continue;
+                if (pair.Value == null || pair.Value is string || pair.Value.GetType().IsPrimitive || pair.Value is decimal)
+                    selected[pair.Key] = pair.Value;
+            }
+            selected["db_kind"] = "mssql";
+            selected["provider"] = "mssql";
+            selected["initial_database"] = database;
+            owner = (factory ?? ConnectionOpenService.OpenMssqlImportSession)(selected);
+            if (owner == null) throw new InvalidOperationException("連線工廠未回傳 SQL Server session。");
+            connection = owner.Connection;
         }
 
         private DataTable Query(string sql)
@@ -155,6 +170,10 @@ WHERE c.object_id=" + objectId.ToString(CultureInfo.InvariantCulture) + " ORDER 
         }
         public void Commit() { transaction.Commit(); transaction.Dispose(); transaction = null; }
         public void Rollback() { if (transaction != null) { transaction.Rollback(); transaction.Dispose(); transaction = null; } }
-        public void Dispose() { if (transaction != null) transaction.Dispose(); connection.Dispose(); }
+        public void Dispose()
+        {
+            try { if (transaction != null) transaction.Dispose(); }
+            finally { owner.Dispose(); }
+        }
     }
 }

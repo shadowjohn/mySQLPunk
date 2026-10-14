@@ -14967,7 +14967,8 @@ namespace mySQLPunk
                 ConnectionName = GetConnectionValue(target.ConnectionInfo, "conn_name"),
                 DatabaseName = target.DatabaseName,
                 ProviderName = target.ProviderName,
-                Database = target.Database
+                Database = target.Database,
+                ConnectionSettings = target.ConnectionInfo
             };
         }
 
@@ -14990,7 +14991,8 @@ namespace mySQLPunk
                         ConnectionName = GetConnectionValue(connectionInfo, "conn_name"),
                         DatabaseName = databaseNode.Text,
                         ProviderName = database.ProviderName,
-                        Database = database
+                        Database = database,
+                        ConnectionSettings = connectionInfo
                     });
                 }
             }

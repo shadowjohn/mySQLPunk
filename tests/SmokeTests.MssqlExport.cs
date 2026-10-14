@@ -186,6 +186,7 @@ public static partial class SmokeTests
 
     private static void Session_DisposesOwnerOnce()
     {
+        MigrationSession_FactoryOwnership();
         var owner = new MssqlSessionOwner();
         using (var connection = new SqlConnection())
         {
@@ -202,6 +203,46 @@ public static partial class SmokeTests
         AssertThrows<ArgumentNullException>(() => new MssqlOwnedSession(null, new SqlConnection()), "Null owner rejected");
         AssertThrows<ArgumentNullException>(() => new MssqlOwnedSession(owner, null), "Null connection rejected");
         AssertThrows<ArgumentException>(() => ConnectionOpenService.OpenMssqlSession(new Dictionary<string, object> { { "db_kind", "sqlite" } }), "Other provider rejected before connection");
+    }
+
+    private static void MigrationSession_FactoryOwnership()
+    {
+        var settings = new Dictionary<string, object> {
+            { "db_kind", "mssql" }, { "pwd", "synthetic-fixture-only" }, { "ssh_enabled", true },
+            { "initial_database", "original" }, { "connString", "must-not-be-used" }, { "pdo", new object() }
+        };
+        foreach (string selected in new[] { "source_fixture", "target_fixture" })
+        {
+            var provider = new MssqlSessionOwner();
+            using (var connection = new SqlConnection())
+            {
+                var owned = new MssqlOwnedSession(provider, connection);
+                using (var migration = new SqlServerMigrationSession(settings, selected, copied => {
+                    Assert((string)copied["pwd"] == "synthetic-fixture-only", "SQL auth uses runtime settings, not redacted ConnectionString");
+                    Assert((bool)copied["ssh_enabled"] && (string)copied["initial_database"] == selected, "Selected endpoint and SSH settings reach factory");
+                    Assert(!copied.ContainsKey("pdo") && !copied.ContainsKey("connString"), "Live provider and cached connection string excluded");
+                    return owned;
+                }))
+                {
+                    Assert(provider.DisposeCount == 0, "Provider/SSH owner retained while migration runs");
+                    migration.Dispose();
+                }
+                Assert(provider.DisposeCount == 1, "Migration disposes provider/SSH owner once");
+            }
+            AssertThrows<InvalidOperationException>(() => new SqlServerMigrationSession(settings, selected, copied => {
+                throw new InvalidOperationException("synthetic factory failure");
+            }), "Both endpoints propagate factory failures");
+        }
+        var sourceOwner = new MssqlSessionOwner();
+        using (var connection = new SqlConnection())
+        {
+            AssertThrows<InvalidOperationException>(() => {
+                using (var source = new SqlServerMigrationSession(settings, "source_fixture", copied => new MssqlOwnedSession(sourceOwner, connection)))
+                using (var target = new SqlServerMigrationSession(settings, "target_fixture", copied => { throw new InvalidOperationException(); })) { }
+            }, "Target open failure unwinds source ownership");
+        }
+        Assert(sourceOwner.DisposeCount == 1, "Source owner released when target factory fails");
+        Assert((string)settings["initial_database"] == "original", "Factory does not mutate stored endpoint settings");
     }
 
     private static void Request_CopiesSelectionAndRejectsInvalidMode()

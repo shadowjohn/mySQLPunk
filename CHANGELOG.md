@@ -53,6 +53,8 @@
 
 ### 🛠️ 問題修正與優化
 
+- SQL Server 相容搬移改用既有連線設定工廠，正常 SQL authentication 不再受已開啟連線隱藏密碼影響，SSH tunnel 與 provider owner 一起釋放。
+
 - SQL Server 批次新增依 2,100 參數與 1,000 VALUES 列上限切批，整次呼叫共用交易，中途失敗不留下前批資料。
 - 桌面連線測試、取得資料庫或取消失敗時釋放尚未移交的 session，避免 SSH tunnel 洩漏。
 - 桌面 SQL 快捷鍵與操作共用互斥 gate，取消後等待舊操作結束才接受新操作，取消結果不再覆蓋畫面。

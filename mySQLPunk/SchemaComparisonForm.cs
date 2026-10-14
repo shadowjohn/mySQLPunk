@@ -14,6 +14,7 @@ namespace mySQLPunk
         public string DatabaseName { get; set; }
         public string ProviderName { get; set; }
         public IDatabase Database { get; set; }
+        internal System.Collections.Generic.Dictionary<string, object> ConnectionSettings { get; set; }
 
         public string DisplayName
         {

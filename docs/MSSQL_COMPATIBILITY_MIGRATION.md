@@ -25,7 +25,7 @@ UI 不預選引擎，必須明確選取目標，並與 SERVERPROPERTY 實際版�
 7. 逐列以型別、NULL、值的 SHA-256 多重集合核對內容與列數，並重新檢查來源及目標結構。全部通過才提交。
 8. 每次最多 100,000 列，單一欄位編碼最多 1 MiB；不是大型資料庫 bulk migration。失敗／取消回滾，不自動重試。提交回覆遺失、回滾或清理失敗時，明確回報結果不確定，必須由 DBA 核對再決定下一步。
 
-獨立 SQL 連線沿用目前連線設定。若驅動程式已移除 SQL authentication 密碼，獨立連線可能無法建立；工具不讀取密碼檔或秘密庫來繞過，請以可建立獨立連線的正常認證方式重新連線。
+獨立 SQL 連線使用目前選取連線的記憶體設定，透過既有匯入連線工廠開啟，不從已開啟連線的 ConnectionString 重建。SQL authentication 與 SSH 沿用正常連線流程；provider owner 同時管理連線與 SSH tunnel，搬移結束或失敗後釋放。工具不另外讀取秘密庫、不開啟 PersistSecurityInfo，也不輸出密碼。
 
 ## 支援與 fail closed
 
