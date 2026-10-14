@@ -10,6 +10,35 @@ internal sealed partial class SqliteDatabaseSession : AdoDatabaseSession
     {
     }
 
+    public override Task<QueryResult> ExecuteAsync(string database, string sql, CancellationToken cancellationToken = default) =>
+        Task.Run(() => base.ExecuteAsync(database, sql, cancellationToken), cancellationToken);
+
+    public override Task<QueryPlanDocument> ExplainAsync(string database, string sql, CancellationToken cancellationToken = default) =>
+        Task.Run(() => base.ExplainAsync(database, sql, cancellationToken), cancellationToken);
+
+    protected override async Task<QueryResult> ReadResultAsync(
+        System.Data.Common.DbConnection connection, string sql, CancellationToken cancellationToken)
+    {
+        var handle = ((SqliteConnection)connection).Handle!;
+        SQLitePCL.raw.sqlite3_progress_handler(handle, 1000,
+            _ => cancellationToken.IsCancellationRequested ? 1 : 0, null);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await base.ReadResultAsync(connection, sql, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            return result;
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == 9 && cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException("SQLite 已中止目前語句；先前自動提交的語句不會因此回滾。", exception, cancellationToken);
+        }
+        finally
+        {
+            SQLitePCL.raw.sqlite3_progress_handler(handle, 0, null, null);
+        }
+    }
+
     protected override SqliteConnection CreateConnection(string? database)
     {
         var dataSource = string.IsNullOrWhiteSpace(database) ? Profile.Database : database;

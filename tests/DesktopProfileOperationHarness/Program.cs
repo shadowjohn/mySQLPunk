@@ -36,17 +36,29 @@ return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().AfterSetu
             var session = Field(window, "_session");
             var selected = (ConnectionProfile)profiles.SelectedItem!;
             var originalName = selected.Name;
-            var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            Func<CancellationToken, Task> pendingSql = async token => { await barrier.Task; token.ThrowIfCancellationRequested(); };
-            var pending = (Task)Invoke(window, "RunOperationAsync", "synthetic pending SQL", pendingSql)!;
+            const string calculation = "WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 50000000) SELECT sum(n) FROM numbers;";
+            window.FindControl<TextBox>("SqlEditor")!.Text = calculation;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var pending = (Task)Invoke(window, "ExecuteCurrentSqlAsync", false)!;
+            Check(stopwatch.Elapsed < TimeSpan.FromMilliseconds(250) && !pending.IsCompleted, "Actual SQL handler returns promptly during real SQLite calculation");
+            bool ticked = false;
+            Dispatcher.UIThread.Post(() => ticked = true);
+            await Task.Delay(50);
+            Check(ticked && !pending.IsCompleted, "Single UI thread keeps ticking while SQLite is executing");
+            var activeCancellation = Field(window, "_operationCancellation");
+            Invoke(window, "ExecuteSql_Click", null!, null!);
+            Check(ReferenceEquals(activeCancellation, Field(window, "_operationCancellation")), "Repeated actual SQL click retains original operation");
             foreach (var handler in new[] { "EditProfile_Click", "DeleteProfile_Click", "ConnectProfile_Click" })
                 Invoke(window, handler, null!, null!);
             Check(!window.OwnedWindows.Any() && ReferenceEquals(session, Field(window, "_session")), "Busy actual handlers reject edit/delete/connect without dialogs or disconnect");
-            ((CancellationTokenSource)Field(window, "_operationCancellation")!).Cancel();
+            Invoke(window, "CancelOperation_Click", null!, null!);
             Invoke(window, "EditProfile_Click", null!, null!);
             Check(Field(window, "_operationCancellation") != null && !window.OwnedWindows.Any(), "Cancel retains real lease until pending operation completes");
-            barrier.SetResult();
-            await pending;
+            await pending.WaitAsync(TimeSpan.FromSeconds(3));
+            Check(stopwatch.Elapsed < TimeSpan.FromSeconds(3) && Field(window, "_operationCancellation") == null, "Actual Cancel stops SQLite before releasing operation gate");
+            window.FindControl<TextBox>("SqlEditor")!.Text = "SELECT 42;";
+            await (Task)Invoke(window, "ExecuteCurrentSqlAsync", false)!;
+            Check(!window.OwnedWindows.Any() && ReferenceEquals(session, Field(window, "_session")), "Query after native interruption succeeds without disconnecting");
             foreach (var handler in new[] { "EditProfile_Click", "DeleteProfile_Click" })
             {
                 Invoke(window, handler, null!, null!);

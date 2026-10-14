@@ -52,6 +52,7 @@
 - **Linux／macOS SSH Tunnel**：跨平台連線設定可勾選「透過 SSH Tunnel 連線」，填入 SSH 主機、port、使用者、密碼或 OpenSSH／PEM 私鑰（含密語）與必填的主機金鑰 SHA256 指紋；連線時以 SSH.NET 建立只綁定 127.0.0.1 動態 port 的本機轉送，MySQL／MariaDB、PostgreSQL、SQL Server 的所有查詢與資料表操作都改走轉送端點，session 中斷或程式關閉時一併關閉；SSH 連線被跳板機中斷（閒置逾時、重啟、網路中斷）後，下一次資料庫操作會以同樣的指紋規則自動重建轉送，而不是把死掉的端點交給驅動程式。主機金鑰與指紋完全比對、不符即中止並回報伺服器實際指紋；MD5 或格式錯誤的指紋、缺主機／使用者／指紋、非絕對路徑私鑰、私鑰權限過寬與 MySQL／PostgreSQL 的 VerifyFull（127.0.0.1 主機名稱必定不符）一律 fail closed，SQL Server 則改以原始主機名稱驗證憑證。SSH 密碼與私鑰密語不寫入 `connections.json`（設定檔含這兩個欄位會拒絕載入），勾選系統密碼庫時與資料庫密碼一樣以獨立項目存入 Linux Secret Service／macOS Keychain，否則只保留到本次程式關閉；smoke test 會以本機臨時 sshd 實機驗證金鑰登入、加密私鑰、錯誤密語、指紋不符、權限過寬與 provider session 整合，實機矩陣另會經 tunnel 對 MySQL 8／MariaDB 11.4（Required）、PostgreSQL 16（VerifyCA＋CA）與 SQL Server 2022（Mandatory＋伺服器憑證，以原始主機名稱驗證）實際查詢與列出資料庫。
 
 ### 🛠️ 問題修正與優化
+- SQLite SQL 與執行計畫改在背景執行，長查詢透過原生 progress handler 中斷，不再凍結 UI；取消後等實際語句停止才釋放操作鎖。取消訊息明示先前已提交語句不會自動回滾，避免盲目重試。
 
 - SQL Server 相容搬移改用既有連線設定工廠，正常 SQL authentication 不再受已開啟連線隱藏密碼影響，SSH tunnel 與 provider owner 一起釋放。
 - 桌面編輯、刪除與準備連線全程持有操作 gate，等待密碼或確認對話框時也不允許 SQL 重入；取消後不再更新設定或斷開現有 session。
