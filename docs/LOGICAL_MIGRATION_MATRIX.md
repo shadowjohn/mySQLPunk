@@ -34,6 +34,10 @@
 
 可重跑：`python3 tests/Run-MySqlLogicalMigration.py [新證據目錄]`，先快取官方 mysql:8.4、mariadb:11.4、postgres:16-alpine。直接引用正式 Core；唯一 ownership label／loopback 隨機 ports／tmpfs，finally 僅清自有容器。`migration.log`／`evidence.json` 保存實際版本、image digest、來源 hash／清理狀態，不保存資料值／密碼。CI Linux 另跑此 fixture，四平台編譯；這與既有 provider 56/56 分開。
 
+封包與真正子程序終止另跑 `python3 tests/Run-MySqlLogicalMigration.py [新證據目錄] boundaries`，只在自有測試容器啟動參數配置 8 MiB／64 KiB，不變更任何使用者伺服器。8 MiB 目標寫入 100 列、每列各 128 KiB binary 與 UTF8 text（共 25 MiB），確認實際多批及 schema／SHA256 往返；64 KiB 目標可搬 1007 小列＋空表，128 KiB 單欄則在 DDL 前拒絕且目標 0 物件。
+
+同一正式 Core harness 在 staging／未提交 batch／published 三個邊界以耐久 marker 等待自己啟動的 child，真正 `Process.Kill` 後以新連線重跑 production preview：拒絕非空目標且不改物件；未提交 batch 的 staging 沒有資料；published 保留 1007 列＋空表並另作 schema／SHA256 反向搬移校驗。MySQL 8.4.11、MariaDB 11.4.13 三個邊界皆實測通過（Linux exit 137）。這僅證明 application process kill，不是 engine crash／power loss，也沒有自動清除／續寫能力。原獨立 audit-evidence 的兩份 real-crash 日誌與 snapshot 為唯讀歷史來源，本次 repo harness 可持續重跑，不以注入例外充當真 crash。
+
 官方語意依據：MySQL 8.4 [implicit commit](https://dev.mysql.com/doc/refman/8.4/en/implicit-commit.html)／[RENAME TABLE](https://dev.mysql.com/doc/refman/8.4/en/rename-table.html)，MariaDB [implicit commit](https://mariadb.com/docs/server/reference/sql-statements/transactions/sql-statements-that-cause-an-implicit-commit)／[RENAME TABLE](https://mariadb.com/docs/server/reference/sql-statements/data-definition/rename-table)。限於受控版本與物件子集，不宣稱所有 DDL 可回滾。
 
 ## 可重跑的 PostgreSQL 跨版本證據

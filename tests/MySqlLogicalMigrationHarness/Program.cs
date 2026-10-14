@@ -6,6 +6,11 @@ using MySqlPunk.Core.Services;
 var password = Environment.GetEnvironmentVariable("MYSQLPUNK_TEST_PASSWORD") ?? throw new Exception("Missing fixture password.");
 var pgPort = int.Parse(args[0]);
 var myPorts = new[] { int.Parse(args[1]), int.Parse(args[2]) };
+if (args.Length > 3 && args[3] == "crash-child")
+{
+    await MySqlMigrationRegressions.CrashChildAsync(pgPort, myPorts[0], args[4], args[5], args[6], args[7]);
+    return;
+}
 string PgConnection(string database) => new NpgsqlConnectionStringBuilder
 {
     Host = "127.0.0.1", Port = pgPort, Username = "postgres", Password = password,
@@ -25,7 +30,14 @@ foreach (var port in myPorts)
     await using var connection = new MySqlConnection(MyConnection(port)); await connection.OpenAsync();
     Console.WriteLine("Actual MySQL family=" + connection.ServerVersion);
 }
-if (args.Length > 3) return;
+if (args.Contains("probe")) return;
+if (args.Length > 3 && args[3] == "boundaries")
+{
+    foreach (var port in myPorts) await new MySqlMigrationRegressions(pgPort, port).RunBoundariesAsync(8388608, true);
+    foreach (var port in new[] { int.Parse(args[4]), int.Parse(args[5]) })
+        await new MySqlMigrationRegressions(pgPort, port).RunBoundariesAsync(65536, false);
+    return;
+}
 async Task PgSql(string database, string sql)
 {
     await using var connection = new NpgsqlConnection(PgConnection(database)); await connection.OpenAsync();

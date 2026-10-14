@@ -11,6 +11,9 @@ import uuid
 root = Path(__file__).resolve().parents[1]
 output = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/tmp') / ('mysqlpunk-my-pg-' + uuid.uuid4().hex)
 output.mkdir(parents=True, exist_ok=False)
+mode = sys.argv[2] if len(sys.argv) > 2 else 'regular'
+if mode not in ('regular', 'boundaries'):
+    raise ValueError('Unknown fixture mode')
 project = root / 'tests/MySqlLogicalMigrationHarness/Review.csproj'
 subprocess.run(['dotnet', 'build', str(project), '-c', 'Release'], check=True)
 environment = os.environ.copy()
@@ -31,19 +34,25 @@ def docker(*arguments):
 
 try:
     ports = []
-    for index, (tag, port, directory, variable) in enumerate([
+    engines = [
         ('postgres:16-alpine', 5432, '/var/lib/postgresql/data', 'POSTGRES_PASSWORD'),
         ('mysql:8.4', 3306, '/var/lib/mysql', 'MYSQL_ROOT_PASSWORD'),
         ('mariadb:11.4', 3306, '/var/lib/mysql', 'MARIADB_ROOT_PASSWORD')
-    ]):
+    ]
+    if mode == 'boundaries':
+        engines += [('mysql:8.4', 3306, '/var/lib/mysql', 'MYSQL_ROOT_PASSWORD'),
+                    ('mariadb:11.4', 3306, '/var/lib/mysql', 'MARIADB_ROOT_PASSWORD')]
+    for index, (tag, port, directory, variable) in enumerate(engines):
         image = json.loads(docker('image', 'inspect', tag, '--format', '{{json .}}'))
+        options = [] if port == 5432 else ['--max-allowed-packet=' + ('65536' if index > 2 else '8388608')]
         container = docker('run', '-d', '--name', key + '-' + str(index), '--label', 'mysqlpunk.test.owner=' + key,
                            '--cpus=1', '--memory=1g', '--pids-limit=512', '--mount', 'type=tmpfs,destination=' + directory + ',tmpfs-size=536870912',
-                           '-e', variable, '-p', '127.0.0.1::' + str(port), image['Id'])
+                           '-e', variable, '-p', '127.0.0.1::' + str(port), image['Id'], *options)
         containers.append(container)
         ports.append(docker('port', container, str(port) + '/tcp').split(':')[-1])
         metadata['images'].append({'tag': tag, 'id': image['Id'], 'digests': image.get('RepoDigests', [])})
-    command = ['dotnet', str(project.parent / 'bin/Release/net8.0/MySqlPunk.MySqlLogicalMigrationHarness.dll'), *ports]
+    arguments = ports[:3] + (['boundaries', *ports[3:]] if mode == 'boundaries' else [])
+    command = ['dotnet', str(project.parent / 'bin/Release/net8.0/MySqlPunk.MySqlLogicalMigrationHarness.dll'), *arguments]
     for attempt in range(60):
         probe = subprocess.run(command + ['probe'], env=environment, text=True, capture_output=True, timeout=20)
         if probe.returncode == 0:
@@ -52,7 +61,7 @@ try:
         time.sleep(2)
     else:
         raise RuntimeError('Isolated engines not ready')
-    result = subprocess.run(command, env=environment, text=True, capture_output=True, timeout=240)
+    result = subprocess.run(command, env=environment, text=True, capture_output=True, timeout=480)
     text = (result.stdout + '\n' + result.stderr).replace(password, '[redacted]')
     (output / 'migration.log').write_text(text)
     print(text, flush=True)
