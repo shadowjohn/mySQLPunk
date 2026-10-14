@@ -55,6 +55,7 @@
 
 - SQL Server 相容搬移改用既有連線設定工廠，正常 SQL authentication 不再受已開啟連線隱藏密碼影響，SSH tunnel 與 provider owner 一起釋放。
 - 桌面編輯、刪除與準備連線全程持有操作 gate，等待密碼或確認對話框時也不允許 SQL 重入；取消後不再更新設定或斷開現有 session。
+- 桌面操作回歸直接啟動 Avalonia handlers，使用隔離 HOME／設定與 SQLite 檢查忙碌、等待對話框與取消，也驗證閒置時仍可正常儲存及刪除連線設定；Linux x64 CI 同步執行。
 - 資料傳輸的續傳提示、執行清單與完成判斷共用驗證 predicate，舊版 Done 但未驗證的檢查點不再被 UI 漏掉；已驗證失敗或禁止重試的項目仍保留安全阻擋，不重複寫入。
 - SQL Server 相容搬移的來源與目標都查詢資料庫層級 DDL trigger，包含停用項目；發現 trigger 或無法讀取 metadata 就停止，不讓 CREATE TABLE／INSERT 帶出未預期行為。
 
