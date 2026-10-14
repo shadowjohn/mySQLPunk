@@ -35,7 +35,7 @@ public sealed class LogicalMigrationWindow : Window
         _target.ItemsSource = profiles.Select(profile => profile.Name + " · " + profile.ProviderDisplayName).ToArray();
         var fields = new StackPanel { Spacing = 8, Margin = new Avalonia.Thickness(16) };
         fields.Children.Add(new TextBlock { Text = "來源：" + source.ProviderDisplayName + " / " + source.Database, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-        fields.Children.Add(new TextBlock { Text = "不是原生備份 restore。此階段僅 SQLite STRICT ↔ PostgreSQL 14–17：INTEGER/bigint、BLOB/bytea、NULL/NOT NULL；其他型別、PK/FK、索引、default、identity/sequence、trigger/procedure、schema 相依一律預檢阻擋。目標須事先另建且為空。最多 100,000 列／64 MiB，單一交易＋內容校驗，不提供逐表續寫。", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+        fields.Children.Add(new TextBlock { Text = "不是原生備份 restore。SQLite STRICT ↔ PostgreSQL 14–17：INTEGER/bigint、BLOB/bytea、有效 UTF-8 TEXT（BINARY ↔ C）、NULL/NOT NULL、非自增單欄／複合主鍵、普通升冪非 unique 索引。SQLite 主鍵表須 WITHOUT ROWID 且欄位明確 NOT NULL；nullable 索引採 NULLS FIRST。FK、其他定序、default、identity/sequence、expression/partial/unique 索引、trigger/procedure 仍預檢阻擋。目標須事先另建且為空。最多 100,000 列／64 MiB、單欄 1 MiB，單一交易＋結構與內容校驗，不逐表續寫。", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
         foreach (var control in new Control[] { _target, _database, _version, _password, _sshPassword, _passphrase, _confirmation }) fields.Children.Add(control);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         buttons.Children.Add(_inspect); buttons.Children.Add(_apply); buttons.Children.Add(_cancel); fields.Children.Add(buttons);
@@ -58,7 +58,7 @@ public sealed class LogicalMigrationWindow : Window
             token.ThrowIfCancellationRequested();
             _preview = preview; _approvedTarget = target; _approvedMajor = major;
             var text = new StringBuilder("來源 " + preview.SourceVersion + " → 目標 " + preview.TargetVersion + "\n目標：" + preview.TargetDatabase + "\n");
-            foreach (var table in preview.Tables) text.AppendLine(table.Name + "：" + table.Rows + " 列；整數／二進位逐欄校驗（預覽不顯示資料值）");
+            foreach (var table in preview.Tables) text.AppendLine(table.Name + "：" + table.Rows + " 列；整數／文字／二進位、主鍵與 " + table.Indexes.Count + " 個索引校驗（預覽不顯示資料值）");
             foreach (var sql in preview.Statements) text.AppendLine(sql);
             foreach (var blocker in preview.Blockers) text.AppendLine("阻擋：" + blocker);
             _report.Text = text.ToString();

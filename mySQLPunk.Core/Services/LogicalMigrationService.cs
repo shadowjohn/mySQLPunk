@@ -11,7 +11,7 @@ using MySqlPunk.Core.Providers;
 
 namespace MySqlPunk.Core.Services;
 
-public static class LogicalMigrationService
+public static partial class LogicalMigrationService
 {
     public const int MaximumRows = 100_000;
     internal const int MaximumFieldBytes = 1024 * 1024;
@@ -44,7 +44,7 @@ public static class LogicalMigrationService
         int selectedTargetMajor, CancellationToken token)
     {
         if (!Supported(source) || !Supported(target))
-            return Refused(target, "此階段只實作 SQLite STRICT 與 PostgreSQL 的整數／二進位邏輯搬移。其他引擎請使用專用搬移器；不可當成原生 restore。");
+            return Refused(target, "可驗證跨引擎路徑為 SQLite STRICT ↔ PostgreSQL；MySQL 目標 DDL 隱含提交，SQL Server 定序／型別與 identity 需另行轉換預檢，不能沿用此交易保證或當成原生 restore。請見方向矩陣。");
         using var sourceOwner = (AdoDatabaseSession)DatabaseProviderFactory.Create(source);
         using var targetOwner = (AdoDatabaseSession)DatabaseProviderFactory.Create(target);
         await using var origin = await sourceOwner.OpenMigrationConnectionAsync(source.Database, token, readOnly: true).ConfigureAwait(false);
@@ -72,11 +72,16 @@ public static class LogicalMigrationService
         if (target.Provider == DatabaseProviderKind.Sqlite && (origin.Tables.GroupBy(table => table.Name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1) ||
             origin.Tables.Any(table => table.Columns.GroupBy(column => column.Name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))))
             blockers.Add("來源名稱只差大小寫；SQLite 無法忠實保存這些不同的表／欄位名稱。");
+        if (target.Provider == DatabaseProviderKind.Sqlite && origin.Tables.Select(table => table.Name)
+            .Concat(origin.Tables.SelectMany(table => table.Indexes.Select(index => index.Name)))
+            .GroupBy(name => name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+            blockers.Add("表／索引名稱在 SQLite 全域名稱空間衝突。");
         if (Major(destination.Version) != selectedTargetMajor) blockers.Add("明確選取的目標版本與實際引擎不符。");
         if (source.Provider == target.Provider && source.Database == target.Database &&
             (source.Provider == DatabaseProviderKind.Sqlite || source.Host == target.Host && source.Port == target.Port))
             blockers.Add("來源與目標不得為同一資料庫。");
-        var statements = origin.Tables.Select(table => CreateTableSql(target.Provider, table)).ToArray();
+        var statements = origin.Tables.Select(table => CreateTableSql(target.Provider, table))
+            .Concat(origin.Tables.SelectMany(table => table.Indexes.Select(index => CreateIndexSql(target.Provider, table, index)))).ToArray();
         var fingerprint = Hash(JsonSerializer.Serialize(new
         {
             Source = new { source.Provider, source.Host, source.Port, source.Database },
@@ -136,7 +141,7 @@ public static class LogicalMigrationService
                             var name = "@value" + command.Parameters.Count;
                             var parameter = command.CreateParameter();
                             parameter.ParameterName = name;
-                            parameter.DbType = table.Columns[columnIndex].Kind == "integer" ? DbType.Int64 : DbType.Binary;
+                            parameter.DbType = table.Columns[columnIndex].Kind == "integer" ? DbType.Int64 : table.Columns[columnIndex].Kind == "text" ? DbType.String : DbType.Binary;
                             parameter.Value = row[columnIndex] ?? DBNull.Value;
                             command.Parameters.Add(parameter);
                             parameters.Add(name);
@@ -149,6 +154,12 @@ public static class LogicalMigrationService
                     rows += batch.Length;
                     observer?.Invoke("batch", destination, targetTransaction);
                 }
+            }
+            foreach (var statement in current.Statements.Skip(sourceSnapshot.Tables.Count))
+            {
+                token.ThrowIfCancellationRequested();
+                await ExecuteAsync(destination, targetTransaction, statement, token).ConfigureAwait(false);
+                observer?.Invoke("index", destination, targetTransaction);
             }
             stage = "逐欄型別、NULL、內容與結構驗證";
             observer?.Invoke("verify", destination, targetTransaction);
@@ -216,6 +227,7 @@ public static class LogicalMigrationService
             while (await reader.ReadAsync(token).ConfigureAwait(false))
             {
                 var name = reader.GetString(0);
+                if (provider == DatabaseProviderKind.Sqlite && reader.GetString(1) == "index") continue;
                 if (reader.GetString(1) != "table" || name.StartsWith("sqlite_", StringComparison.Ordinal))
                     blockers.Add("不支援物件：" + name + "（" + reader.GetString(1) + "）");
                 else definitions.Add((name, reader.GetString(2)));
@@ -233,8 +245,9 @@ public static class LogicalMigrationService
             if (!Identifier.IsMatch(definition.Name)) { blockers.Add("表名不在 ASCII 63 字元安全子集：" + definition.Name); continue; }
             var columns = await ReadColumnsAsync(connection, transaction, provider, definition.Name, blockers, token).ConfigureAwait(false);
             if (columns.Count == 0 || columns.Count > 100) { blockers.Add("欄位數必須為 1–100：" + definition.Name); continue; }
-            if (provider == DatabaseProviderKind.Sqlite && !SafeSqliteDefinition(definition.Name, columns, definition.Definition))
-                blockers.Add("僅接受無鍵／索引／default／collation／生成欄位的 INTEGER、BLOB STRICT 表：" + definition.Name);
+            var keys = await ReadKeysAsync(connection, transaction, provider, definition.Name, columns, blockers, token).ConfigureAwait(false);
+            if (provider == DatabaseProviderKind.Sqlite && !SafeSqliteDefinition(definition.Name, columns, definition.Definition, keys.PrimaryKey))
+                blockers.Add("表定義超出 INTEGER/BLOB/TEXT BINARY STRICT、明確 NOT NULL 與 WITHOUT ROWID 主鍵子集：" + definition.Name);
             var rows = new List<object?[]>();
             if (readData && blockers.Count == 0)
             {
@@ -243,8 +256,9 @@ public static class LogicalMigrationService
                 {
                     var name = Quote(column.Name);
                     if (column.Kind == "integer") return name;
-                    var length = (provider == DatabaseProviderKind.Sqlite ? "length(" : "octet_length(") + name + ")";
-                    return length + ",CASE WHEN " + length + " <= " + MaximumFieldBytes + " THEN " + name + " ELSE NULL END";
+                    var bytes = column.Kind == "text" ? provider == DatabaseProviderKind.Sqlite ? "CAST(" + name + " AS BLOB)" : "convert_to(" + name + ",'UTF8')" : name;
+                    var length = (provider == DatabaseProviderKind.Sqlite ? "length(" : "octet_length(") + bytes + ")" + (provider == DatabaseProviderKind.PostgreSql ? "::bigint" : "");
+                    return length + ",CASE WHEN " + length + " <= " + MaximumFieldBytes + " THEN " + bytes + " ELSE NULL END";
                 })) + " FROM " + Qualified(provider, definition.Name);
                 await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, token).ConfigureAwait(false);
                 while (await reader.ReadAsync(token).ConfigureAwait(false))
@@ -254,19 +268,27 @@ public static class LogicalMigrationService
                     var ordinal = 0;
                     for (var columnIndex = 0; columnIndex < columns.Count; columnIndex++)
                     {
-                        var binary = columns[columnIndex].Kind == "binary";
+                        var binary = columns[columnIndex].Kind != "integer";
                         var bytes = reader.IsDBNull(ordinal) ? 0 : binary ? reader.GetInt64(ordinal) : 8;
                         totalBytes += bytes;
                         if (bytes > MaximumFieldBytes || totalBytes > MaximumBytes) throw new InvalidOperationException("超過單欄 1 MiB／總量 64 MiB 預覽上限。");
                         if (binary) ordinal++;
                         object? value = reader.IsDBNull(ordinal) ? null : binary ? ReadBoundedBytes(reader, ordinal, bytes, token) : reader.GetInt64(ordinal);
+                        if (value is byte[] encoded && columns[columnIndex].Kind == "text")
+                        {
+                            string text;
+                            try { text = new UTF8Encoding(false, true).GetString(encoded); }
+                            catch (DecoderFallbackException) { throw new InvalidOperationException("文字不是有效 UTF-8，不能忠實轉換。"); }
+                            if (text.Contains('\0')) throw new InvalidOperationException("文字含 NUL，PostgreSQL 無法忠實儲存。");
+                            value = text;
+                        }
                         ordinal++;
                         row[columnIndex] = value;
                     }
                     rows.Add(row);
                 }
             }
-            tables.Add(new(definition.Name, columns.AsReadOnly(), rows.Count, ContentHash(rows)));
+            tables.Add(new(definition.Name, columns.AsReadOnly(), rows.Count, ContentHash(rows)) { PrimaryKey = keys.PrimaryKey, Indexes = keys.Indexes });
             data.Add(definition.Name, rows);
         }
         return new(version, identity, tables, data, blockers);
@@ -313,12 +335,14 @@ public static class LogicalMigrationService
         (SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public') +
         (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public') +
         (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype NOT IN ('c') AND NOT (t.typcategory='A' AND EXISTS (SELECT 1 FROM pg_type base JOIN pg_class c ON c.oid=base.typrelid WHERE base.oid=t.typelem AND c.relkind='r'))) +
-        (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND (c.relkind<>'r' OR c.relpersistence<>'p' OR c.relispartition OR c.relrowsecurity OR c.relforcerowsecurity OR c.reloptions IS NOT NULL OR c.reltablespace<>0)) +
-        (SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname='public') +
+        (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND (c.relkind NOT IN ('r','i') OR c.relpersistence<>'p' OR c.relispartition OR c.relrowsecurity OR c.relforcerowsecurity OR c.reloptions IS NOT NULL OR c.reltablespace<>0)) +
+        (SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname='public' AND (c.contype<>'p' OR c.condeferrable OR c.condeferred OR NOT c.convalidated)) +
+        (SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_class ic ON ic.oid=i.indexrelid JOIN pg_am am ON am.oid=ic.relam WHERE n.nspname='public' AND (am.amname<>'btree' OR (i.indisunique AND NOT i.indisprimary) OR NOT i.indisvalid OR NOT i.indisready OR NOT i.indislive OR i.indisclustered OR i.indisreplident OR i.indnkeyatts<>i.indnatts OR i.indexprs IS NOT NULL OR i.indpred IS NOT NULL)) +
+        (SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum,position) LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum=k.attnum LEFT JOIN pg_opclass op ON op.oid=i.indclass[k.position::int-1] LEFT JOIN pg_namespace ons ON ons.oid=op.opcnamespace WHERE n.nspname='public' AND (a.attnum IS NULL OR ons.nspname<>'pg_catalog' OR NOT op.opcdefault OR op.opcname NOT IN ('int8_ops','text_ops','bytea_ops') OR (i.indoption[k.position::int-1] & 1)<>0 OR (NOT i.indisprimary AND NOT a.attnotnull AND (i.indoption[k.position::int-1] & 2)=0) OR i.indcollation[k.position::int-1]<>a.attcollation)) +
         (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public') +
         (SELECT count(*) FROM pg_attrdef a JOIN pg_class c ON c.oid=a.adrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public') +
         (SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid=i.inhrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public') +
-        (SELECT count(*) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND a.attnum>0 AND (a.attisdropped OR a.attidentity<>'' OR a.attgenerated<>'' OR a.attcollation<>0 OR a.atttypid NOT IN (20,17)));
+        (SELECT count(*) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND a.attnum>0 AND (a.attisdropped OR a.attidentity<>'' OR a.attgenerated<>'' OR a.atttypid NOT IN (20,17,25) OR (a.atttypid=25 AND a.attcollation<>'pg_catalog."C"'::regcollation) OR (a.atttypid<>25 AND a.attcollation<>0)));
         """;
 
     private static async Task<List<LogicalMigrationColumn>> ReadColumnsAsync(DbConnection connection, DbTransaction? transaction,
@@ -334,7 +358,7 @@ public static class LogicalMigrationService
         {
             var name = reader.GetString(provider == DatabaseProviderKind.Sqlite ? 1 : 0);
             var type = reader.GetString(provider == DatabaseProviderKind.Sqlite ? 2 : 1).ToLowerInvariant();
-            var kind = type is "integer" or "bigint" ? "integer" : type is "blob" or "bytea" ? "binary" : "unsupported";
+            var kind = type is "integer" or "bigint" ? "integer" : type is "blob" or "bytea" ? "binary" : type == "text" ? "text" : "unsupported";
             if (!Identifier.IsMatch(name) || kind == "unsupported") blockers.Add("不支援欄位名稱／型別：" + table + "." + name + " " + type);
             var notNull = provider == DatabaseProviderKind.Sqlite ? reader.GetInt64(3) != 0 : reader.GetBoolean(2);
             columns.Add(new(name, kind, !notNull));
@@ -342,26 +366,35 @@ public static class LogicalMigrationService
         return columns;
     }
 
-    private static bool SafeSqliteDefinition(string name, List<LogicalMigrationColumn> columns, string sql)
+    private static bool SafeSqliteDefinition(string name, List<LogicalMigrationColumn> columns, string sql, IReadOnlyList<string> primaryKey)
     {
         static string NamePattern(string identifier) => "(?:" + Regex.Escape(identifier) + "|\"" + Regex.Escape(identifier) + "\")";
         var definitions = columns.Select(column => NamePattern(column.Name) + "\\s+" +
-            (column.Kind == "integer" ? "INTEGER" : "BLOB") + (column.Nullable ? "" : "\\s+NOT\\s+NULL"));
+            (column.Kind == "integer" ? "INTEGER" : column.Kind == "text" ? "TEXT(?:\\s+COLLATE\\s+BINARY)?" : "BLOB") + (column.Nullable ? "" : "\\s+NOT\\s+NULL"));
+        var key = primaryKey.Count == 0 ? "" : "\\s*,\\s*PRIMARY\\s+KEY\\s*\\(\\s*" + string.Join("\\s*,\\s*", primaryKey.Select(NamePattern)) + "\\s*\\)";
         return Regex.IsMatch(sql, "\\ACREATE\\s+TABLE\\s+" + NamePattern(name) + "\\s*\\(\\s*" +
-            string.Join("\\s*,\\s*", definitions) + "\\s*\\)\\s+STRICT\\s*;?\\s*\\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            string.Join("\\s*,\\s*", definitions) + key + "\\s*\\)\\s+" +
+            (primaryKey.Count == 0 ? "STRICT" : "(?:STRICT\\s*,\\s*WITHOUT\\s+ROWID|WITHOUT\\s+ROWID\\s*,\\s*STRICT)") + "\\s*;?\\s*\\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     private static string CreateTableSql(DatabaseProviderKind provider, LogicalMigrationTable table) =>
         "CREATE TABLE " + Qualified(provider, table.Name) + " (" + string.Join(",", table.Columns.Select(column =>
             Quote(column.Name) + " " + (column.Kind == "integer" ? provider == DatabaseProviderKind.Sqlite ? "INTEGER" : "bigint"
+                : column.Kind == "text" ? provider == DatabaseProviderKind.Sqlite ? "TEXT COLLATE BINARY" : "text COLLATE \"C\""
                 : provider == DatabaseProviderKind.Sqlite ? "BLOB" : "bytea") + (column.Nullable ? "" : " NOT NULL"))) +
-        ")" + (provider == DatabaseProviderKind.Sqlite ? " STRICT;" : ";");
+        (table.PrimaryKey.Count == 0 ? "" : ",PRIMARY KEY (" + string.Join(",", table.PrimaryKey.Select(Quote)) + ")") +
+        ")" + (provider == DatabaseProviderKind.Sqlite ? " STRICT" + (table.PrimaryKey.Count == 0 ? ";" : ", WITHOUT ROWID;") : ";");
+
+    private static string CreateIndexSql(DatabaseProviderKind provider, LogicalMigrationTable table, LogicalMigrationIndex index) =>
+        "CREATE INDEX " + Quote(index.Name) + " ON " + Qualified(provider, table.Name) + " (" +
+        string.Join(",", index.Columns.Select(name => Quote(name) + (provider == DatabaseProviderKind.PostgreSql ? " ASC NULLS FIRST" : ""))) + ");";
     private static int Major(string version) => int.TryParse(version.Split('.')[0], out var major) ? major : -1;
     private static string Quote(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
     private static string Qualified(DatabaseProviderKind provider, string table) => (provider == DatabaseProviderKind.PostgreSql ? "\"public\"." : "") + Quote(table);
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     private static string ContentHash(List<object?[]> rows) => Hash(string.Join("\n", rows.Select(row =>
         Hash(string.Join("|", row.Select(value => value == null ? "null" : value is byte[] binary ? "binary:" + Convert.ToBase64String(binary)
+            : value is string text ? "text:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(text))
             : "integer:" + ((long)value).ToString(CultureInfo.InvariantCulture))))).OrderBy(value => value, StringComparer.Ordinal)));
     private static async Task<object?> ScalarAsync(DbConnection connection, DbTransaction? transaction, string sql, CancellationToken token)
     {
