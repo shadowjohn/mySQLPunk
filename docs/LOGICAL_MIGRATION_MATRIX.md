@@ -9,8 +9,26 @@
 | SQL Server → SQL Server | 2016/2017/2019/2022/2025 任意雙向及同版本，共 25 組 | Windows 既有專用工具；dbo heap、既有型別白名單、同定序、無 advanced features | 25 組預檢及交易 mock；另有正式來源 2019 ↔ 2022 隔離回歸，1007 列／7 欄＋空表，不是 25 組真引擎驗證 |
 | SQLite → SQLite | 3.37–3.53 | STRICT、INTEGER/BLOB/TEXT、NULL/NOT NULL、非自增 PK、普通索引；詳細子集見下文 | 本機實際 SQLite 3.53.3；歷史 minor 版本未逐一跑 |
 | SQLite → PostgreSQL | SQLite 3.37–3.53 → PostgreSQL 14–17 | INTEGER → bigint、BLOB → bytea、TEXT BINARY → text C；非自增 PK、普通索引 | 隔離 CI PostgreSQL 16 fixture 加入文字／鍵／索引雙向 round-trip；只以這次新 head 結果為證據 |
-| PostgreSQL → SQLite | PostgreSQL 14–17 → SQLite 3.37–3.53 | 上述型別反向映射；PK → WITHOUT ROWID、普通索引 | 同上；14/15/17 未實機跑 |
-| PostgreSQL → PostgreSQL | 14–17 雙向及同版本 | 同一 bigint/bytea/text C、PK／索引子集與全部預檢 | 邏輯共用路徑；沒有完整跨版本真機矩陣 |
+| PostgreSQL → SQLite | PostgreSQL 14–17 → SQLite 3.37–3.53 | 上述型別反向映射；PK → WITHOUT ROWID、普通索引 | PG17 實際 roundtrip 與既有 PG16 fixture；PG15 未實機跑 |
+| PostgreSQL → PostgreSQL | 14–17 雙向及同版本 | 同一 bigint/bytea/text C、PK／索引子集與全部預檢 | 真實 17.10 ↔ 14.24、17.10 ↔ 16.15；不是全部版本配對驗證 |
+
+## 可重跑的 PostgreSQL 跨版本證據
+
+`python3 tests/Run-PostgreSqlVersionMigration.py 14 [新證據目錄]` 與 `python3 tests/Run-PostgreSqlVersionMigration.py 16 [新證據目錄]` 直接 ProjectReference 正式 Core，不使用凍結副本。需先快取官方 `postgres:14-alpine`／`postgres:16-alpine` 與 `postgres:17-alpine`；腳本只 image inspect，不拉取映像或調整網路／權限。每次建立唯一 ownership label、loopback 隨機 port 與 tmpfs 容器，最後核對 label 才清理自己的 fixture；密碼隨機產生且不輸出。
+
+每輪為 SQLite seed → PG17 → 舊版 PG → 空 PG17 → SQLite，records 1007 列＋empty_table 空表，複合 PK、具名普通索引、UTF8／emoji、NULL／空 binary／空 text、Int64 極值。每段使用 production 預檢、交易、schema 與 SHA256 多重集合驗證，最後另測重複 PK 被拒絕及索引存在。這不是 procedures、FK、identity、任意型別、SSH 或桌面 UI 的跨版本證明；1005 列 transaction fault 仍只屬既有 SQLite 回歸，provider 全套 56/56 仍是另一組測試。
+
+2026-10-14 獨立證據先以 fa734e7 跑 17 ↔ 14／16，再以 06 工作樹跑 17 ↔ 14。06 最終 95c0be2（合入 4368883）三個 production 檔案 SHA256 均與獨立工作樹一致：Models/LogicalMigration.cs `a912ddcd778bac06c4980f3f3403d9b0d4563b81414c170894b79619bf79912e`、Services/LogicalMigrationService.cs `721ec60b1be6c2ada40114e59c323513c44aa1124e52ffa9411cb6cd23095fd4`、Services/LogicalMigrationKeys.cs `69fc1e7ea82ab7f27c2ce22d4d14613294f981f73bdb0b4f99e04893ef793cef`。新 harness 再以相同正式來源跑兩組成功；並非重跑舊 SHA CI。
+
+當次實際官方映像 RepoDigest（後續 tag 可能改變，重跑以 evidence.json 的實際版本及 digest 為準）：
+
+| 實際版本 | 官方 RepoDigest |
+| --- | --- |
+| 14.24 | postgres@sha256:4ea9e5ed06591da7ea23eb65465e8d3187fe79f4d5ec3ae976d29a33b013e77a |
+| 16.15 | postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea |
+| 17.10 | postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 |
+
+`migration.log`、`evidence.json` 保留實際版本、映像 ID／digest、正式來源 hash 與清理结果；不存密碼或資料值。原獨立日誌仍在 audit-evidence/postgresql-14-17-real-versions.log、postgresql-16-17-real-versions.log、postgresql-14-17-primary-name-fix.log，沒有覆寫。
 
 ## 第二階段：實用文字與鍵索引子集
 
