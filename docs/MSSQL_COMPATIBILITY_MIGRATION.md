@@ -32,6 +32,7 @@ UI 不預選引擎，必須明確選取目標，並與 SERVERPROPERTY 實際版�
 只搬移 dbo、PRIMARY filegroup、未壓縮的一般 heap 的欄位與資料。保留名稱、型別長度／精度／scale、NULL。明確阻擋：
 
 - identity、computed、default／check／PK／FK／unique constraints、所有索引（包含停用索引）、triggers、procedures、functions、views、sequences。
+- 來源與目標另查詢 `sys.triggers` 的 `parent_class=0`，拒絕所有資料庫層級 DDL trigger（包含停用的 trigger），不依賴 `sys.objects` 推測資料庫為空；查詢失敗也停止。catalog 回歸直接餵入查詢 seam，驗證來源／目標、啟用／停用與讀取失敗，而非手動加入 blocker。
 - 自訂 schema／型別、CLR、分割、非 PRIMARY 儲存、extended properties、change tracking、CDC、replication、RLS、temporal、memory optimized、FileTable、graph、ledger。
 - sparse、column set、rowguid、FILESTREAM、hidden、masked、generated、encrypted、ANSI_PADDING OFF 欄位，以及不同於資料庫定序的欄位。
 - max 長度、xml、float／real、datetimeoffset、rowversion、sql_variant、spatial、vector 等不在白名單的型別；不能確認的 catalog 欄位或查詢錯誤也停止。

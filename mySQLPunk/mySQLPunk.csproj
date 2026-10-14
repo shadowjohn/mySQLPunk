@@ -452,6 +452,7 @@
     <Compile Include="lib\SqlServerRestoreCompatibility.cs" />
     <Compile Include="lib\SqlServerCompatibilityMigration.cs" />
     <Compile Include="lib\SqlServerMigrationSession.cs" />
+    <Compile Include="lib\SqlServerMigrationCatalogReader.cs" />
     <Compile Include="SqlServerMigrationForm.cs"><SubType>Form</SubType></Compile>
     <Compile Include="lib\DataSyncService.cs" />
     <Compile Include="lib\DataGeneratorCore.cs" />

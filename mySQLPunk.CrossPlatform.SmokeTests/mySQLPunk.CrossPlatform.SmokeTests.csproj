@@ -16,6 +16,8 @@
     <Compile Include="../mySQLPunk/lib/SqlServerRestoreCompatibility.cs" Link="SqlServerRestoreCompatibility.cs" />
     <Compile Include="../tests/SqlServerRestoreCompatibilityTests.cs" Link="SqlServerRestoreCompatibilityTests.cs" />
     <Compile Include="../tests/SqlServerMigrationTests.cs" Link="SqlServerMigrationTests.cs" />
+    <Compile Include="../mySQLPunk/lib/SqlServerMigrationCatalogReader.cs" Link="SqlServerMigrationCatalogReader.cs" />
+    <Compile Include="../tests/SqlServerMigrationCatalogTests.cs" Link="SqlServerMigrationCatalogTests.cs" />
     <ProjectReference Include="../mySQLPunk.Core/mySQLPunk.Core.csproj" />
   </ItemGroup>
 

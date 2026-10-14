@@ -13221,6 +13221,7 @@ public static partial class SmokeTests
         }
         SqlServerRestoreCompatibilityTests.Run();
         SqlServerMigrationTests.Run();
+        SqlServerMigrationCatalogTests.Run();
         string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-transfer-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try
