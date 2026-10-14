@@ -5,6 +5,7 @@ public sealed record LogicalMigrationIndex(string Name, IReadOnlyList<string> Co
 public sealed record LogicalMigrationTable(string Name, IReadOnlyList<LogicalMigrationColumn> Columns, long Rows, string ContentHash)
 {
     public IReadOnlyList<string> PrimaryKey { get; init; } = Array.Empty<string>();
+    public string? PrimaryKeyName { get; init; }
     public IReadOnlyList<LogicalMigrationIndex> Indexes { get; init; } = Array.Empty<LogicalMigrationIndex>();
 }
 public sealed record LogicalMigrationPreview(

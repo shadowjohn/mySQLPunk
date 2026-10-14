@@ -127,6 +127,7 @@ internal static class LogicalMigrationTests
         {
             await admin.ExecuteAsync("postgres", "CREATE DATABASE \"" + postgres.Database + "\";"); created = true;
             await PostgreSqlKeyBudgetAsync(root, postgres, admin);
+            await PostgreSqlPrimaryKeyNamesAsync(root, postgres, admin);
             var sqlite = Profile(Path.Combine(root, "source.db"));
             using var origin = DatabaseProviderFactory.Create(sqlite);
             await origin.ExecuteAsync(sqlite.Database, "CREATE TABLE sample (number INTEGER, payload BLOB NOT NULL) STRICT; INSERT INTO sample VALUES (-9223372036854775808,X'00FF'),(9223372036854775807,X''),(NULL,X'01'),(NULL,X'01');" + BusinessSql);
@@ -182,6 +183,69 @@ internal static class LogicalMigrationTests
             Npgsql.NpgsqlConnection.ClearAllPools();
             if (created) await admin.ExecuteAsync("postgres", "DROP DATABASE \"" + postgres.Database + "\";");
             Directory.Delete(root, true);
+        }
+    }
+
+    private static async Task PostgreSqlPrimaryKeyNamesAsync(string root, ConnectionProfile postgres, IDatabaseSession admin)
+    {
+        foreach (var scenario in new[] { "table", "index", "truncation" })
+        {
+            var source = Profile(Path.Combine(root, "pk-collision-" + scenario + ".db"));
+            using var owner = DatabaseProviderFactory.Create(source);
+            var longPrefix = new string('a', 58);
+            var sql = scenario == "truncation"
+                ? "CREATE TABLE " + longPrefix + "a(id INTEGER NOT NULL,PRIMARY KEY(id)) STRICT, WITHOUT ROWID; CREATE TABLE " + longPrefix + "b(id INTEGER NOT NULL,PRIMARY KEY(id)) STRICT, WITHOUT ROWID;"
+                : "CREATE TABLE records(id INTEGER NOT NULL,label TEXT NOT NULL,PRIMARY KEY(id)) STRICT, WITHOUT ROWID;" +
+                    (scenario == "table" ? "CREATE TABLE records_pkey(id INTEGER) STRICT;" : "CREATE INDEX records_pkey ON records(label);");
+            await owner.ExecuteAsync(source.Database, sql);
+            var denied = await LogicalMigrationService.PreviewAsync(source, postgres, 16);
+            Check(!denied.CanStart && denied.Blockers.Any(reason => reason.Contains("名稱空間衝突")), "Real catalog detects PostgreSQL PK name collision: " + scenario);
+            Check((await LogicalMigrationService.RunAsync(source, postgres, 16, denied, postgres.Database)).Outcome == LogicalMigrationOutcome.Refused, "Collision refused before DDL");
+            var count = await admin.ExecuteAsync(postgres.Database, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public';");
+            Check(Convert.ToInt64(count.Rows.Single()[0]) == 0, "Collision leaves PostgreSQL target empty");
+            Console.WriteLine("PASS real PG primary key namespace collision: " + scenario);
+        }
+        var target = postgres.Clone(); target.Database = "mysqlpunk_pk_names_" + Guid.NewGuid().ToString("N");
+        await admin.ExecuteAsync("postgres", "CREATE DATABASE \"" + target.Database + "\";");
+        using var targetOwner = DatabaseProviderFactory.Create(target);
+        try
+        {
+            await admin.ExecuteAsync(postgres.Database, "CREATE TABLE records(id bigint NOT NULL,label text COLLATE \"C\" NOT NULL,PRIMARY KEY(id,label)); INSERT INTO records VALUES(1,'臺灣😀'); CREATE INDEX records_label ON records(label ASC NULLS FIRST);");
+            var beforeRename = await LogicalMigrationService.PreviewAsync(postgres, target, 16);
+            Check(beforeRename.CanStart, "Default PG PK preview allowed");
+            await admin.ExecuteAsync(postgres.Database, "ALTER TABLE records RENAME CONSTRAINT records_pkey TO explicit_records_pk;");
+            var renamed = await LogicalMigrationService.PreviewAsync(postgres, target, 16);
+            Check(renamed.CanStart && renamed.Tables.Single().PrimaryKeyName == "explicit_records_pk" && renamed.Statements.Any(sql => sql.Contains("CONSTRAINT \"explicit_records_pk\"")), "Actual PG constraint catalog reaches preview and DDL");
+            Check(beforeRename.Fingerprint != renamed.Fingerprint, "PK rename changes fingerprint");
+            Check((await LogicalMigrationService.RunAsync(postgres, target, 16, beforeRename, target.Database)).Outcome == LogicalMigrationOutcome.RolledBack, "Stale constraint name confirmation refused");
+            var sqlite = Profile(Path.Combine(root, "explicit-pk-target.db")); CreateEmpty(sqlite.Database);
+            var denied = await LogicalMigrationService.PreviewAsync(postgres, sqlite, 3);
+            Check(!denied.CanStart && denied.Blockers.Any(reason => reason.Contains("explicit_records_pk")), "Explicit PG PK name cannot silently become SQLite internal PK");
+            Check((await LogicalMigrationService.RunAsync(postgres, sqlite, 3, denied, sqlite.Database)).Outcome == LogicalMigrationOutcome.Refused && await ObjectCountAsync(sqlite) == 0, "Explicit PK SQLite rejection leaves target empty");
+            Check((await LogicalMigrationService.RunAsync(postgres, target, 16, renamed, target.Database)).Outcome == LogicalMigrationOutcome.Verified, "PG -> PG preserves explicit PK name");
+            var catalog = await targetOwner.ExecuteAsync(target.Database, "SELECT conname,ic.relname FROM pg_constraint pc JOIN pg_class ic ON ic.oid=pc.conindid WHERE pc.conrelid='records'::regclass AND pc.contype='p';");
+            Check(catalog.Rows.Single().All(value => Equals(value, "explicit_records_pk")), "Target actual constraint and backing index names match");
+            await targetOwner.ExecuteAsync(target.Database, "INSERT INTO records VALUES(1,'臺灣😀') ON CONFLICT ON CONSTRAINT explicit_records_pk DO NOTHING;");
+            var rows = await targetOwner.ExecuteAsync(target.Database, "SELECT count(*) FROM records;");
+            Check(Convert.ToInt64(rows.Rows.Single()[0]) == 1, "ON CONFLICT ON CONSTRAINT dependency remains functional");
+            await targetOwner.ExecuteAsync(target.Database, "DROP TABLE records;");
+            var corrupted = await LogicalMigrationService.RunWithObserverAsync(postgres, target, 16, renamed, target.Database, CancellationToken.None,
+                (stage, connection, transaction) =>
+                {
+                    if (stage != "verify") return;
+                    using var command = connection.CreateCommand(); command.Transaction = transaction;
+                    command.CommandText = "ALTER TABLE records RENAME CONSTRAINT explicit_records_pk TO wrong_records_pk;"; command.ExecuteNonQuery();
+                });
+            Check(corrupted.Outcome == LogicalMigrationOutcome.RolledBack, "Actual target PK rename fails schema verification");
+            var empty = await targetOwner.ExecuteAsync(target.Database, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public';");
+            Check(Convert.ToInt64(empty.Rows.Single()[0]) == 0, "PK verification failure rolls back target objects");
+            Console.WriteLine("PASS real PG explicit PK catalog/DDL/fingerprint/ON CONFLICT/schema-fault and SQLite refusal");
+        }
+        finally
+        {
+            await admin.ExecuteAsync(postgres.Database, "DROP TABLE IF EXISTS records;");
+            Npgsql.NpgsqlConnection.ClearAllPools();
+            await admin.ExecuteAsync("postgres", "DROP DATABASE \"" + target.Database + "\";");
         }
     }
 

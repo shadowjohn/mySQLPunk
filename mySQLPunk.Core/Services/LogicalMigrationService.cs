@@ -68,6 +68,12 @@ public static partial class LogicalMigrationService
             .Concat(destination.Blockers.Select(reason => "目標：" + reason)).ToList();
         if (target.Provider == DatabaseProviderKind.PostgreSql)
         {
+            var relationNames = origin.Tables.Select(table => table.Name)
+                .Concat(origin.Tables.SelectMany(table => table.Indexes.Select(index => index.Name)))
+                .Concat(origin.Tables.Where(table => table.PrimaryKey.Count > 0)
+                    .Select(table => TargetTable(target.Provider, table).PrimaryKeyName!));
+            if (relationNames.GroupBy(name => name, StringComparer.Ordinal).Any(group => group.Count() > 1))
+                blockers.Add("表／普通索引／主鍵索引名稱在 PostgreSQL public 名稱空間衝突；不允許引擎自動更名。");
             if (destination.BlockSize != 8192) blockers.Add("PostgreSQL 索引預算只驗證過 8192-byte block_size；未知／其他 page 大小不能放行。");
             foreach (var table in origin.Tables)
             {
@@ -88,6 +94,9 @@ public static partial class LogicalMigrationService
         if (target.Provider == DatabaseProviderKind.Sqlite && (origin.Tables.GroupBy(table => table.Name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1) ||
             origin.Tables.Any(table => table.Columns.GroupBy(column => column.Name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))))
             blockers.Add("來源名稱只差大小寫；SQLite 無法忠實保存這些不同的表／欄位名稱。");
+        if (target.Provider == DatabaseProviderKind.Sqlite)
+            foreach (var table in origin.Tables.Where(table => table.PrimaryKeyName != null && table.PrimaryKeyName != DefaultPrimaryKeyName(table.Name)))
+                blockers.Add(table.Name + "：SQLite 無法保留 PostgreSQL 明確主鍵 constraint／索引名稱 " + table.PrimaryKeyName + "；請使用 PostgreSQL 目標。");
         if (target.Provider == DatabaseProviderKind.Sqlite && origin.Tables.Select(table => table.Name)
             .Concat(origin.Tables.SelectMany(table => table.Indexes.Select(index => index.Name)))
             .GroupBy(name => name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
@@ -180,7 +189,7 @@ public static partial class LogicalMigrationService
             stage = "逐欄型別、NULL、內容與結構驗證";
             observer?.Invoke("verify", destination, targetTransaction);
             var written = await ReadSnapshotAsync(destination, targetTransaction, target.Provider, true, token).ConfigureAwait(false);
-            if (written.Blockers.Count != 0 || JsonSerializer.Serialize(written.Tables) != JsonSerializer.Serialize(sourceSnapshot.Tables))
+            if (written.Blockers.Count != 0 || JsonSerializer.Serialize(written.Tables) != JsonSerializer.Serialize(sourceSnapshot.Tables.Select(table => TargetTable(target.Provider, table))))
                 throw new InvalidOperationException("目標結構或內容 SHA-256 多重集合驗證不符。");
             var sourceFinal = await ReadSnapshotAsync(origin, sourceTransaction, source.Provider, true, token).ConfigureAwait(false);
             if (sourceFinal.Blockers.Count != 0 || JsonSerializer.Serialize(sourceFinal.Tables) != JsonSerializer.Serialize(sourceSnapshot.Tables))
@@ -306,7 +315,7 @@ public static partial class LogicalMigrationService
                     rows.Add(row);
                 }
             }
-            tables.Add(new(definition.Name, columns.AsReadOnly(), rows.Count, ContentHash(rows)) { PrimaryKey = keys.PrimaryKey, Indexes = keys.Indexes });
+            tables.Add(new(definition.Name, columns.AsReadOnly(), rows.Count, ContentHash(rows)) { PrimaryKey = keys.PrimaryKey, PrimaryKeyName = keys.PrimaryKeyName, Indexes = keys.Indexes });
             data.Add(definition.Name, rows);
         }
         return new(version, identity, tables, data, blockers, blockSize);
@@ -400,7 +409,7 @@ public static partial class LogicalMigrationService
             Quote(column.Name) + " " + (column.Kind == "integer" ? provider == DatabaseProviderKind.Sqlite ? "INTEGER" : "bigint"
                 : column.Kind == "text" ? provider == DatabaseProviderKind.Sqlite ? "TEXT COLLATE BINARY" : "text COLLATE \"C\""
                 : provider == DatabaseProviderKind.Sqlite ? "BLOB" : "bytea") + (column.Nullable ? "" : " NOT NULL"))) +
-        (table.PrimaryKey.Count == 0 ? "" : ",PRIMARY KEY (" + string.Join(",", table.PrimaryKey.Select(Quote)) + ")") +
+        (table.PrimaryKey.Count == 0 ? "" : "," + (provider == DatabaseProviderKind.PostgreSql ? "CONSTRAINT " + Quote(TargetTable(provider, table).PrimaryKeyName!) + " " : "") + "PRIMARY KEY (" + string.Join(",", table.PrimaryKey.Select(Quote)) + ")") +
         ")" + (provider == DatabaseProviderKind.Sqlite ? " STRICT" + (table.PrimaryKey.Count == 0 ? ";" : ", WITHOUT ROWID;") : ";");
 
     private static string CreateIndexSql(DatabaseProviderKind provider, LogicalMigrationTable table, LogicalMigrationIndex index) =>
