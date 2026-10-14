@@ -8,7 +8,7 @@
   - MySQL Community 8.0.x／8.4.x、MariaDB 官方 binary 10.11.x／11.4.x 同家族搬移沿用來源鎖定、完整 catalog／DDL 檢查、byte-aware batching、專屬 staging、schema／SHA256 校驗與單次 RENAME；沒有把 DDL 隱含提交改稱完整交易回滾。
   - 實際 8.0.46 ↔ 8.4.11、10.11.19 ↔ 11.4.13 各 1007 列＋空表，含整數複合 PRIMARY、nullable bigint 普通索引、UTF8／emoji／NULL／空 text／binary 及 Int64 極值；正式 harness 另測 stale source 在 DDL 前拒絕、殘留阻止重試、跨家族拒絕與表內重複索引名稱。不是所有 patch／型別／schema 的證明。
   - UI MySQL 8.x 明列僅 8.0／8.4，預覽完整實際版本；MariaDB 10.11／11.4 分別選取。API 另核對 VERSION 與 version_comment，拒絕未知 fork，不只相信 protocol handshake 的版本前綴。
-  - `Run-MySqlLogicalMigration.py` 的 versions／boundaries 模式連結正式 Core，保存映像 digest、來源 hash、版本與自有容器清理證據。boundaries 以真 Process.Kill 測 staging／未提交 batch／published，並驗證 8 MiB 多批、64 KiB 前置拒絕；不是 engine crash／power loss。Windows LocalDB 匯出 integration 本輪未在 Linux 執行，歷史 crash 記錄不當本輪重跑。完整方向／限制見 `docs/LOGICAL_MIGRATION_MATRIX.md`；release hold 不變。
+  - `Run-MySqlLogicalMigration.py` 的 versions／boundaries 模式連結正式 Core，保存映像 digest、來源 hash、版本與自有容器清理證據。boundaries 以真 Process.Kill 測 staging／未提交 batch／published，並驗證 8 MiB 多批、64 KiB 前置拒絕；不是 engine crash／power loss。Windows LocalDB 匯出 integration 本輪未在 Linux 執行，歷史 crash 記錄不當本輪重跑。完整方向／限制見 `docs/LOGICAL_MIGRATION_MATRIX.md`。
 
 - **Windows 更新流程**
   - 下載只接受 Windows x64 可攜包或安裝檔；SHA-256 可來自 GitHub asset digest 或舊版 manifest，缺少有效校驗碼就停止。檔案先下載到獨立暫存檔，驗證通過才取代既有下載；取消、網路錯誤與校驗失敗都會清理暫存檔。
