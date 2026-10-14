@@ -9,9 +9,23 @@ namespace mySQLPunk.lib
     {
         public static int RowsPerCommand(int columnCount)
         {
-            if (columnCount < 1 || columnCount > 2100)
+            if (columnCount < 1 || columnCount > 2098)
                 throw new ArgumentOutOfRangeException("columnCount");
-            return Math.Min(1000, 2100 / columnCount);
+            return Math.Min(1000, 2098 / columnCount);
+        }
+
+        internal static void SetParameterValue(DbParameter parameter, Type columnType, object value)
+        {
+            parameter.Value = value;
+            if (columnType == typeof(DateTime)) parameter.DbType = DbType.DateTime2;
+            if (columnType == typeof(byte[])) parameter.DbType = DbType.Binary;
+            if (columnType != typeof(TimeSpan)) return;
+            var sqlType = parameter.GetType().GetProperty("SqlDbType");
+            if (sqlType != null && sqlType.CanWrite && sqlType.PropertyType == typeof(SqlDbType))
+            {
+                if (value == DBNull.Value) sqlType.SetValue(parameter, SqlDbType.Time, null);
+            }
+            else parameter.DbType = DbType.Time;
         }
 
         public static void Execute(DbConnection connection, string qualifiedTable, DataTable rows)
@@ -50,9 +64,7 @@ namespace mySQLPunk.lib
                             values.Add(name);
                             DbParameter parameter = command.CreateParameter();
                             parameter.ParameterName = name;
-                            if (rows.Columns[columnIndex].DataType == typeof(DateTime)) parameter.DbType = DbType.DateTime2;
-                            if (rows.Columns[columnIndex].DataType == typeof(TimeSpan)) parameter.DbType = DbType.Time;
-                            parameter.Value = rows.Rows[offset + rowIndex][columnIndex];
+                            SetParameterValue(parameter, rows.Columns[columnIndex].DataType, rows.Rows[offset + rowIndex][columnIndex]);
                             command.Parameters.Add(parameter);
                         }
                         groups.Add("(" + string.Join(",", values) + ")");

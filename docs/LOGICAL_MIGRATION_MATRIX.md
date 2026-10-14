@@ -6,7 +6,7 @@
 
 | 來源 → 目標 | 程式允許的版本 | 可執行範圍 | 驗證區分 |
 | --- | --- | --- | --- |
-| SQL Server → SQL Server | 2016/2017/2019/2022/2025 任意雙向及同版本，共 25 組 | Windows 既有專用工具；dbo heap、既有型別白名單、同定序、無 advanced features | 25 組預檢及交易 mock；不是 25 組真引擎驗證 |
+| SQL Server → SQL Server | 2016/2017/2019/2022/2025 任意雙向及同版本，共 25 組 | Windows 既有專用工具；dbo heap、既有型別白名單、同定序、無 advanced features | 25 組預檢及交易 mock；另有正式來源 2019 ↔ 2022 隔離回歸，1007 列／7 欄＋空表，不是 25 組真引擎驗證 |
 | SQLite → SQLite | 3.37–3.53 | STRICT、INTEGER/BLOB/TEXT、NULL/NOT NULL、非自增 PK、普通索引；詳細子集見下文 | 本機實際 SQLite 3.53.3；歷史 minor 版本未逐一跑 |
 | SQLite → PostgreSQL | SQLite 3.37–3.53 → PostgreSQL 14–17 | INTEGER → bigint、BLOB → bytea、TEXT BINARY → text C；非自增 PK、普通索引 | 隔離 CI PostgreSQL 16 fixture 加入文字／鍵／索引雙向 round-trip；只以這次新 head 結果為證據 |
 | PostgreSQL → SQLite | PostgreSQL 14–17 → SQLite 3.37–3.53 | 上述型別反向映射；PK → WITHOUT ROWID、普通索引 | 同上；14/15/17 未實機跑 |
@@ -32,6 +32,7 @@ SQLite／PostgreSQL 工具入口在 Avalonia 工作台「邏輯搬移」。來�
 - 預覽顯示實際版本、方向、目標、表、列數、轉換 SQL 與阻擋原因，不顯示資料值。來源內容也納入確認 fingerprint；輸入完整目標名稱才可執行，確認後來源內容（包括相同列數下的變更）／結構／實際引擎識別／目標變動會拒絕。
 - SQLite／PostgreSQL 全部 DDL＋資料在單一目標交易。SQLite 用 immediate 交易；PostgreSQL 持有工具專用 advisory lock，來源全部表 SHARE lock 後讀取並在提交前再檢查。這不是在線無鎖搬移；請用隔離副本／維護時段，外部工具不會自動遵守 advisory lock，也不能宣稱能禁止其他管理者在最後檢查之後建立額外物件。
 - 每批至多 100 列／200 參數，最多 100,000 列；每欄至多 1 MiB，每輪快照資料至多 64 MiB。驗證 schema、PK／索引、列數、Int64／text／binary／NULL 的 SHA-256 多重集合（保留重複列）。不保證隱含 rowid、實體排序或儲存配置跨引擎相同。
+- PostgreSQL 目標先讀 `SHOW block_size` 並納入確認 fingerprint；只接受標準 8192-byte page。PK 與每個普通索引各自逐列限制保守 tuple 預算 2048 bytes，32 欄以內：保留 40 bytes 給 tuple header／TID／NULL bitmap／對齊，每欄 bigint 8 bytes，text／bytea 加 4-byte varlena header 後向上對齊到 8 bytes，文字使用 UTF-8 byte 數，複合鍵加總。這是刻意低於標準 btree 頁面上限的應用白名單，不是宣稱精確最大可用大小；不依賴壓縮。超限在預覽阻擋且列出表／鍵名稱；未索引文字仍可達原本 1 MiB 欄位限額。非標準 page／未知能力 fail closed。
 - 取消等實際工作停止，SQLite 用原生 progress handler，PostgreSQL 使用 provider cancellation；工作台 gate 持續到對話框關閉，不能同時 SQL／edit/delete/connect。變更目標／版本／認證即失效原預覽。
 
 ## 重試與恢復

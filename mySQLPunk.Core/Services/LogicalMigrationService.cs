@@ -18,7 +18,7 @@ public static partial class LogicalMigrationService
     private const long MaximumBytes = 64 * 1024 * 1024;
     private static readonly Regex Identifier = new("\\A[A-Za-z_][A-Za-z0-9_]{0,62}\\z", RegexOptions.CultureInvariant);
     private sealed record Snapshot(string Version, string Identity, List<LogicalMigrationTable> Tables,
-        Dictionary<string, List<object?[]>> Data, List<string> Blockers);
+        Dictionary<string, List<object?[]>> Data, List<string> Blockers, int BlockSize);
 
     public static Task<LogicalMigrationPreview> PreviewAsync(ConnectionProfile source, ConnectionProfile target,
         int selectedTargetMajor, CancellationToken cancellationToken = default) =>
@@ -66,6 +66,22 @@ public static partial class LogicalMigrationService
     {
         var blockers = origin.Blockers.Select(reason => "來源：" + reason)
             .Concat(destination.Blockers.Select(reason => "目標：" + reason)).ToList();
+        if (target.Provider == DatabaseProviderKind.PostgreSql)
+        {
+            if (destination.BlockSize != 8192) blockers.Add("PostgreSQL 索引預算只驗證過 8192-byte block_size；未知／其他 page 大小不能放行。");
+            foreach (var table in origin.Tables)
+            {
+                var keys = table.Indexes.Select(index => (index.Name, index.Columns))
+                    .Concat(table.PrimaryKey.Count == 0 ? Array.Empty<(string, IReadOnlyList<string>)>() : new[] { ("PRIMARY KEY", table.PrimaryKey) });
+                foreach (var key in keys)
+                {
+                    var ordinals = key.Item2.Select(name => table.Columns.ToList().FindIndex(column => column.Name == name)).ToArray();
+                    if (ordinals.Length is < 1 or > 32 || ordinals.Any(ordinal => ordinal < 0) ||
+                        origin.Data[table.Name].Any(row => !PostgreSqlIndexKeyFits(destination.BlockSize, ordinals.Select(ordinal => row[ordinal]).ToArray())))
+                        blockers.Add(table.Name + "/" + key.Item1 + "：索引鍵超出保守 2048-byte tuple 預算（含 UTF-8／複合鍵／NULL 與對齊成本），不能依賴壓縮或執行時才失敗。");
+                }
+            }
+        }
         if (destination.Tables.Count != 0) blockers.Add("目標必須是另建的空資料庫，不能覆蓋或續寫既有表。");
         if (origin.Tables.Count == 0) blockers.Add("來源沒有可搬移資料表。");
         if (source.Provider == target.Provider && origin.Identity == destination.Identity) blockers.Add("實際引擎識別為同一資料庫，不允許搬移至自身。");
@@ -86,7 +102,7 @@ public static partial class LogicalMigrationService
         {
             Source = new { source.Provider, source.Host, source.Port, source.Database },
             Target = new { target.Provider, target.Host, target.Port, target.Database },
-            origin.Version, origin.Identity, TargetIdentity = destination.Identity, TargetVersion = destination.Version, origin.Tables, Statements = statements, Blockers = blockers
+            origin.Version, origin.Identity, TargetIdentity = destination.Identity, TargetVersion = destination.Version, destination.BlockSize, origin.Tables, Statements = statements, Blockers = blockers
         }));
         return new(origin.Version, destination.Version, target.Database, origin.Tables.AsReadOnly(), statements,
             blockers.AsReadOnly(), fingerprint);
@@ -196,6 +212,8 @@ public static partial class LogicalMigrationService
         DatabaseProviderKind provider, bool readData, CancellationToken token)
     {
         var blockers = new List<string>();
+        var blockSize = provider == DatabaseProviderKind.PostgreSql
+            ? Convert.ToInt32(await ScalarAsync(connection, transaction, "SHOW block_size;", token), CultureInfo.InvariantCulture) : 0;
         var version = Convert.ToString(await ScalarAsync(connection, transaction,
             provider == DatabaseProviderKind.Sqlite ? "SELECT sqlite_version();" : "SHOW server_version;", token), CultureInfo.InvariantCulture) ?? "";
         var identity = connection is SqliteConnection sqlite ? Path.GetFullPath(sqlite.DataSource) :
@@ -291,7 +309,7 @@ public static partial class LogicalMigrationService
             tables.Add(new(definition.Name, columns.AsReadOnly(), rows.Count, ContentHash(rows)) { PrimaryKey = keys.PrimaryKey, Indexes = keys.Indexes });
             data.Add(definition.Name, rows);
         }
-        return new(version, identity, tables, data, blockers);
+        return new(version, identity, tables, data, blockers, blockSize);
     }
 
     internal static byte[] ReadBoundedBytes(DbDataReader reader, int ordinal, long length, CancellationToken token)

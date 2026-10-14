@@ -5,12 +5,35 @@ using mySQLPunk.lib;
 
 public static class SqlServerBatchInsertTests
 {
+    public static void RunParameterTypes(Func<DbParameter> factory)
+    {
+        foreach (object value in new object[] { TimeSpan.FromTicks(1234567), DBNull.Value })
+        {
+            DbParameter parameter = factory();
+            SqlServerBatchInsert.SetParameterValue(parameter, typeof(TimeSpan), value);
+            var sqlType = parameter.GetType().GetProperty("SqlDbType");
+            if (sqlType != null)
+            {
+                if (!Equals(sqlType.GetValue(parameter, null), SqlDbType.Time)) throw new Exception("SQL time parameter type");
+            }
+            else if (parameter.DbType != DbType.Time) throw new Exception("Generic time parameter type");
+            if (!Equals(parameter.Value, value)) throw new Exception("Time value changed");
+        }
+        foreach (object value in new object[] { new byte[] { 0, 255 }, new byte[0], DBNull.Value })
+        {
+            DbParameter parameter = factory();
+            SqlServerBatchInsert.SetParameterValue(parameter, typeof(byte[]), value);
+            if (parameter.DbType != DbType.Binary || !Equals(parameter.Value, value)) throw new Exception("Binary parameter type/value");
+        }
+    }
+
     public static void Run(DbConnection connection)
     {
+        using (DbCommand command = connection.CreateCommand()) RunParameterTypes(command.CreateParameter);
         if (SqlServerBatchInsert.RowsPerCommand(1) != 1000 || SqlServerBatchInsert.RowsPerCommand(2) != 1000 ||
-            SqlServerBatchInsert.RowsPerCommand(3) != 700 || SqlServerBatchInsert.RowsPerCommand(2100) != 1)
+            SqlServerBatchInsert.RowsPerCommand(3) != 699 || SqlServerBatchInsert.RowsPerCommand(7) != 299 || SqlServerBatchInsert.RowsPerCommand(2098) != 1)
             throw new Exception("SQL Server batch boundary");
-        foreach (int columns in new[] { 0, 2101 })
+        foreach (int columns in new[] { 0, 2099, 2100, 2101 })
         {
             try { SqlServerBatchInsert.RowsPerCommand(columns); throw new Exception("Invalid column count accepted"); }
             catch (ArgumentOutOfRangeException) { }
