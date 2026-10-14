@@ -1504,7 +1504,7 @@ public sealed partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            SetStatus("操作已取消。");
+            SetStatus("操作已取消；已提交的 SQL 不會自動回滾，請先確認資料再重試。");
         }
         catch (Exception exception)
         {

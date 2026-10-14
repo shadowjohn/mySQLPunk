@@ -135,7 +135,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         string database,
         CancellationToken cancellationToken = default);
 
-    public async Task<QueryResult> ExecuteAsync(
+    public virtual async Task<QueryResult> ExecuteAsync(
         string database,
         string sql,
         CancellationToken cancellationToken = default)
@@ -437,7 +437,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         return new StatementBatchResult(useTransaction, results);
     }
 
-    public async Task<QueryPlanDocument> ExplainAsync(
+    public virtual async Task<QueryPlanDocument> ExplainAsync(
         string database,
         string sql,
         CancellationToken cancellationToken = default)
@@ -458,7 +458,7 @@ internal abstract class AdoDatabaseSession : IDatabaseSession
         CancellationToken cancellationToken) =>
         ReadResultAsync(connection, explainSql, cancellationToken);
 
-    protected async Task<QueryResult> ReadResultAsync(
+    protected virtual async Task<QueryResult> ReadResultAsync(
         DbConnection connection,
         string sql,
         CancellationToken cancellationToken)

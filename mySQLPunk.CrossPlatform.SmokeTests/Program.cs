@@ -32,6 +32,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("Linux Secret Service 安全 round-trip", LinuxSecretServiceRoundTripAsync),
     ("macOS Keychain 安全 round-trip", MacOsKeychainRoundTripAsync),
     ("SQLite 查詢與 DDL/DML", SqliteExecutesQueriesAsync),
+    ("SQLite 背景查詢與原生取消", SqliteResponsiveCancellationAsync),
     ("執行計畫解析與安全規則", QueryPlanParsingAsync),
     ("資料字典結構與 HTML 匯出", DataDictionaryAsync),
     ("結構比較差異與報告", SchemaComparisonAsync),
@@ -2195,6 +2196,64 @@ static async Task MacOsKeychainRoundTripAsync()
     {
         Directory.Delete(directory, true);
     }
+}
+
+static async Task SqliteResponsiveCancellationAsync()
+{
+    var directory = CreateTemporaryDirectory();
+    try
+    {
+        var profile = CreateSqliteProfile(Path.Combine(directory, "responsive.db"));
+        using var session = DatabaseProviderFactory.Create(profile);
+        await session.ExecuteAsync(profile.Database, "CREATE TABLE committed (id INTEGER); INSERT INTO committed VALUES (1);");
+        const string calculation = "WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 50000000) SELECT sum(n) FROM numbers;";
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            using var cancellation = new CancellationTokenSource();
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var pending = session.ExecuteAsync(profile.Database, calculation, cancellation.Token);
+            Assert(stopwatch.Elapsed < TimeSpan.FromMilliseconds(250) && !pending.IsCompleted,
+                "呼叫不能同步執行整個 SQLite 計算");
+            await Task.Delay(50);
+            cancellation.Cancel();
+            try
+            {
+                await pending.WaitAsync(TimeSpan.FromSeconds(3));
+                throw new InvalidOperationException("長計算應中斷");
+            }
+            catch (OperationCanceledException)
+            {
+                Assert(pending.IsCompleted && stopwatch.Elapsed < TimeSpan.FromSeconds(3), "原生計算必須已停止，不只是放棄等待");
+            }
+            var next = await session.ExecuteAsync(profile.Database, "SELECT 42;");
+            Assert(Convert.ToInt64(next.Rows.Single().Single()) == 42, "取消後下一查詢仍成功");
+        }
+        using var writeCancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        try
+        {
+            await session.ExecuteAsync(profile.Database, "INSERT INTO committed VALUES (2); " + calculation, writeCancellation.Token)
+                .WaitAsync(TimeSpan.FromSeconds(3));
+            throw new InvalidOperationException("複合語句應取消");
+        }
+        catch (OperationCanceledException) { }
+        var committed = await session.ExecuteAsync(profile.Database, "SELECT count(*) FROM committed;");
+        Assert(Convert.ToInt64(committed.Rows.Single().Single()) == 2, "取消不能宣稱先前 autocommit INSERT 已回滾");
+        using var alreadyCancelled = new CancellationTokenSource();
+        alreadyCancelled.Cancel();
+        try
+        {
+            await session.ExecuteAsync(profile.Database, "INSERT INTO committed VALUES (3);", alreadyCancelled.Token);
+            throw new InvalidOperationException("預先取消不應寫入");
+        }
+        catch (OperationCanceledException) { }
+        try
+        {
+            await session.ExecuteAsync(profile.Database, "SELECT * FROM missing_table;");
+            throw new InvalidOperationException("一般 SQL 錯誤不應被吞掉");
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException) { }
+    }
+    finally { Directory.Delete(directory, true); }
 }
 
 static async Task SqliteExecutesQueriesAsync()

@@ -618,3 +618,9 @@
 ## SQL Server 搬移安全性
 
 新增受限的 SQL Server 邏輯降版預檢與 Windows 確認介面；來源／目標版本、空目標、定序、feature 白名單、全交易及內容驗證的詳細範圍與未驗證矩陣，見 [MSSQL_COMPATIBILITY_MIGRATION.md](MSSQL_COMPATIBILITY_MIGRATION.md)。原生 RESTORE 的版本 guard 不等於完整邏輯降版；一般資料傳輸的列數驗證也不等於內容驗證。
+# SQLite SQL 背景執行與取消
+
+`ExecuteAsync` 與 `ExplainAsync` 在背景工作執行，因 Microsoft.Data.Sqlite 的 async ADO 方法實際同步運作。每個查詢使用獨立連線；在讀取結果期間安裝 SQLitePCL 原生 progress handler，每 1,000 VM 指令檢查 token，取消時回傳非零使 SQLite 停止。callback 只在工作執行緒讀取 token，不從取消執行緒碰 native handle；reader 關閉後先解除 callback，才釋放連線，沒有跨連線中斷或 registration/dispose 競態。
+
+桌面 gate 等完整 task 停止才釋放，取消結果不寫回 grid。隔離 smoke 實際執行 50,000,000 次 recursive 計算，驗證快速返回、三次取消與後續查詢、一般 SQL 錯誤及已提交 DML 不回滾。Xvfb harness 使用正式 SQL/Cancel handlers 驗證 UI tick、重複點擊、busy edit/delete/connect、取消後查詢。這不是資料同步或所有 metadata 路徑的背景化保證；鎖等待仍受 provider timeout 限制。
+
