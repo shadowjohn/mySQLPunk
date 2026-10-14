@@ -603,23 +603,7 @@ namespace mySQLPunk.lib
         public void InsertTableBatch(string databaseName, string tableName, DataTable rows)
         {
             if (rows == null || rows.Rows.Count == 0) return;
-            List<string> cols = new List<string>();
-            foreach (DataColumn col in rows.Columns) cols.Add("[" + EscapeSqlServerName(col.ColumnName) + "]");
-            List<string> valueGroups = new List<string>();
-            Dictionary<string, object> p = new Dictionary<string, object>();
-            for (int r = 0; r < rows.Rows.Count; r++)
-            {
-                List<string> vals = new List<string>();
-                for (int c = 0; c < rows.Columns.Count; c++)
-                {
-                    string key = "p" + r + "_" + c;
-                    vals.Add("@" + key);
-                    p[key] = rows.Rows[r][c] == DBNull.Value ? DBNull.Value : rows.Rows[r][c];
-                }
-                valueGroups.Add("(" + string.Join(",", vals.ToArray()) + ")");
-            }
-            string sql = "INSERT INTO " + BuildSqlServerQualifiedName(databaseName, tableName) + " (" + string.Join(",", cols.ToArray()) + ") VALUES " + string.Join(",", valueGroups.ToArray()) + ";";
-            ExecOrThrow(sql, p);
+            SqlServerBatchInsert.Execute(MCT, BuildSqlServerQualifiedName(databaseName, tableName), rows);
         }
 
         public string GetViewCreateStatement(string databaseName, string viewName)

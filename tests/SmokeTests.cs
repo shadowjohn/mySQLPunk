@@ -13214,6 +13214,11 @@ public static partial class SmokeTests
 
     private static void TestDataTransfer()
     {
+        using (var batchConnection = new System.Data.SQLite.SQLiteConnection("Data Source=:memory:"))
+        {
+            batchConnection.Open();
+            SqlServerBatchInsertTests.Run(batchConnection);
+        }
         string dir = Path.Combine(Path.GetTempPath(), "mysqlpunk-transfer-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try

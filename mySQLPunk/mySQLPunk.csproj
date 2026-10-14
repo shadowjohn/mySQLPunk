@@ -448,6 +448,7 @@
     <Compile Include="lib\SchemaSyncScriptService.cs" />
     <Compile Include="lib\SchemaSyncExecutionService.cs" />
     <Compile Include="lib\DataSyncCore.cs" />
+    <Compile Include="lib\SqlServerBatchInsert.cs" />
     <Compile Include="lib\DataSyncService.cs" />
     <Compile Include="lib\DataGeneratorCore.cs" />
     <Compile Include="lib\DataGeneratorService.cs" />

@@ -10,6 +10,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../mySQLPunk/lib/SqlServerBatchInsert.cs" Link="SqlServerBatchInsert.cs" />
+    <Compile Include="../tests/SqlServerBatchInsertTests.cs" Link="SqlServerBatchInsertTests.cs" />
     <ProjectReference Include="../mySQLPunk.Core/mySQLPunk.Core.csproj" />
   </ItemGroup>
 

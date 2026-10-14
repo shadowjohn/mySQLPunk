@@ -11,6 +11,7 @@ using Npgsql;
 
 var tests = new List<(string Name, Func<Task> Run)>
 {
+    ("SQL Server 分批交易與重試", BatchInsertAsync),
     ("連線設定不保存密碼", ProfileStoreDoesNotPersistPasswordsAsync),
     ("連線 URI 安全匯入", ConnectionUriImportAsync),
     ("TLS 憑證檔案安全套用", TlsCertificateFilesAsync),
@@ -36,6 +37,14 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("跨平台安全更新與下載", CrossPlatformUpdateAssetsAsync),
     ("Provider 驗證與工廠", ProviderFactoryValidatesProfilesAsync)
 };
+
+static Task BatchInsertAsync()
+{
+    using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+    connection.Open();
+    SqlServerBatchInsertTests.Run(connection);
+    return Task.CompletedTask;
+}
 
 static Task ConnectionUriImportAsync()
 {
