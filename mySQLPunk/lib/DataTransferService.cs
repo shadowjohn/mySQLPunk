@@ -30,7 +30,8 @@ namespace mySQLPunk.lib
         Pending,
         Running,
         Done,
-        Failed
+        Failed,
+        VerificationFailed
     }
 
     public sealed class TransferColumnMapping
@@ -58,6 +59,7 @@ namespace mySQLPunk.lib
         [JsonConverter(typeof(StringEnumConverter))]
         public TransferItemStatus Status { get; set; }
         public long CopiedRows { get; set; }
+        public bool RetryBlocked { get; set; }
         public long SourceRows { get; set; }
         public long TargetRowsBefore { get; set; }
         public long TargetRowsAfter { get; set; }
@@ -93,7 +95,7 @@ namespace mySQLPunk.lib
         [JsonIgnore]
         public bool IsFinished
         {
-            get { return Items.Where(item => item.Include).All(item => item.Status == TransferItemStatus.Done); }
+            get { return Items.Where(item => item.Include).All(item => item.Status == TransferItemStatus.Done && item.Verified == true); }
         }
 
         public string RouteKey()
@@ -175,7 +177,7 @@ namespace mySQLPunk.lib
             Action<TransferPlan> checkpoint,
             CancellationToken cancellationToken)
         {
-            List<TransferItem> items = plan.Items.Where(item => item.Include && item.Status != TransferItemStatus.Done).ToList();
+            List<TransferItem> items = plan.Items.Where(item => item.Include && (item.Status != TransferItemStatus.Done || item.Verified != true)).ToList();
             int index = 0;
             foreach (TransferItem item in items)
             {
@@ -195,7 +197,7 @@ namespace mySQLPunk.lib
                 }
                 catch (Exception exception)
                 {
-                    item.Status = TransferItemStatus.Failed;
+                    if (item.Status != TransferItemStatus.VerificationFailed) item.Status = TransferItemStatus.Failed;
                     item.Error = ExceptionMessageService.GetReason(exception);
                     item.Seconds = previousSeconds + watch.Elapsed.TotalSeconds;
                     Save(plan, checkpoint);
@@ -220,21 +222,16 @@ namespace mySQLPunk.lib
             CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(item.TargetTable)) throw new InvalidOperationException(Localization.Format("Transfer.Error.TargetName", item.SourceTable));
+            if (item.RetryBlocked || item.Verified == false || item.Status == TransferItemStatus.VerificationFailed)
+                throw new InvalidOperationException("傳輸結果尚未確認，禁止自動重試。請核對來源與目標內容，另選新的空目標重新建立計畫。");
             item.Error = null;
             item.Warning = null;
             item.Verified = null;
             bool resuming = item.CopiedRows > 0;
             if (resuming && !resumable)
             {
-                // 沒有主鍵時分頁順序不穩定，無法確定哪些列已寫入：新表或取代模式從頭重來，附加模式拒絕以免重複。
-                if (item.Mode == TransferMode.Append) throw new InvalidOperationException(Localization.Format("Transfer.Error.CannotResumeAppend", item.SourceTable));
-                if (item.Mode == TransferMode.CreateNew && SafeTableExists(target, plan.TargetDatabase, item.TargetTable))
-                {
-                    target.DropTableForCopy(plan.TargetDatabase, item.TargetTable);
-                }
-                item.CopiedRows = 0;
-                resuming = false;
-                item.Warning = Localization.T("Transfer.Warn.Restarted");
+                item.RetryBlocked = true;
+                throw new InvalidOperationException("沒有主鍵的傳輸無法安全續傳。保留現有目標，請另選新的空目標重新建立計畫。");
             }
 
             item.Status = TransferItemStatus.Running;
@@ -292,8 +289,11 @@ namespace mySQLPunk.lib
                 DataTable page = source.SelectTablePage(plan.SourceDatabase, item.SourceTable, item.CopiedRows, batch);
                 DataSyncService.ThrowIfQueryFailed(page);
                 if (page.Rows.Count == 0) break;
+                item.RetryBlocked = true;
+                Save(plan, checkpoint);
                 target.InsertTableBatch(plan.TargetDatabase, item.TargetTable, mapping == null ? page : Remap(page, mapping));
                 item.CopiedRows += page.Rows.Count;
+                item.RetryBlocked = false;
                 Save(plan, checkpoint);
                 if (progress != null)
                 {
@@ -321,6 +321,9 @@ namespace mySQLPunk.lib
             {
                 item.Warning = (item.Warning == null ? string.Empty : item.Warning + " ") +
                                Localization.Format("Transfer.Warn.CountMismatch", item.SourceRows, item.CopiedRows, item.TargetRowsAfter, expected);
+                item.RetryBlocked = true;
+                item.Status = TransferItemStatus.VerificationFailed;
+                throw new InvalidOperationException(item.Warning);
             }
             item.Status = TransferItemStatus.Done;
         }
@@ -495,6 +498,7 @@ namespace mySQLPunk.lib
                 case TransferItemStatus.Done:
                     return item.Verified == true ? Localization.T("Transfer.Result.Verified") : Localization.T("Transfer.Result.Mismatch");
                 case TransferItemStatus.Failed:
+                case TransferItemStatus.VerificationFailed:
                     return Localization.T("Transfer.Result.Failed");
                 case TransferItemStatus.Running:
                     return Localization.Format("Transfer.Result.Partial", item.CopiedRows);

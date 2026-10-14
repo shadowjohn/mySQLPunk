@@ -546,6 +546,22 @@ public static partial class SmokeTests
         AssertEquals("7", target.CountRows("main", "logs").ToString(), "Create new should copy every row.");
         AssertEquals("5", target.CountRows("main", "items").ToString(), "Replace data should leave exactly the source rows.");
         Assert(DataTransferService.LoadUnfinished(checkpointDirectory, plan) == null, "A finished transfer is no longer offered for resume.");
+        TransferPlan mismatch = DataTransferService.BuildPlan(source, "main", "Source", target, "main", "Mismatch", new[] { "customers" });
+        mismatch.Items[0].TargetTable = "mismatch_copy";
+        bool changed = false;
+        DataTransferService.Run(mismatch, source, target, keyed, progress =>
+        {
+            if (!changed) { changed = true; exec(target, "INSERT INTO mismatch_copy VALUES (999, 'extra', 'city')"); }
+        }, save, System.Threading.CancellationToken.None);
+        Assert(mismatch.Items[0].Status == TransferItemStatus.VerificationFailed && !mismatch.IsFinished, "Count mismatch must be an unfinished verification failure.");
+        long mismatchRows = target.CountRows("main", "mismatch_copy");
+        DataTransferService.Run(mismatch, source, target, keyed, null, save, System.Threading.CancellationToken.None);
+        AssertEquals(mismatchRows.ToString(), target.CountRows("main", "mismatch_copy").ToString(), "Verification failure must not retry writes.");
+        TransferPlan uncertain = DataTransferService.BuildPlan(source, "main", "Source", target, "main", "Uncertain", new[] { "customers" });
+        uncertain.Items[0].RetryBlocked = true;
+        uncertain.Items[0].TargetTable = "never_created";
+        DataTransferService.Run(uncertain, source, target, keyed, null, save, System.Threading.CancellationToken.None);
+        Assert(uncertain.Items[0].Status == TransferItemStatus.Failed && !uncertain.IsFinished, "Uncertain batch checkpoint must block before creating a target.");
         string json = File.ReadAllText(Path.Combine(checkpointDirectory, plan.Id + ".json"));
         Assert(json.Contains("customers_archive") && json.IndexOf("pwd", StringComparison.OrdinalIgnoreCase) < 0, "Checkpoints only keep names, never secrets.");
 
