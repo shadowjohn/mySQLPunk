@@ -9,6 +9,8 @@ on:
       - "mySQLPunk.Desktop/**"
       - "mySQLPunk.CrossPlatform.SmokeTests/**"
       - "tests/Run-CrossPlatformLiveTests.sh"
+      - "tests/Run-PostgreSqlVersionMigration.py"
+      - "tests/PostgreSqlVersionMigrationHarness/**"
       - "tests/Run-DesktopProfileOperationTests.sh"
       - "tests/DesktopProfileOperationHarness/**"
       - "tests/Test-LinuxCrossPlatformPackage.sh"
@@ -24,6 +26,8 @@ on:
       - "mySQLPunk.Desktop/**"
       - "mySQLPunk.CrossPlatform.SmokeTests/**"
       - "tests/Run-CrossPlatformLiveTests.sh"
+      - "tests/Run-PostgreSqlVersionMigration.py"
+      - "tests/PostgreSqlVersionMigrationHarness/**"
       - "tests/Run-DesktopProfileOperationTests.sh"
       - "tests/DesktopProfileOperationHarness/**"
       - "tests/Test-LinuxCrossPlatformPackage.sh"
@@ -81,6 +85,9 @@ jobs:
 
       - name: Run cross-platform smoke tests
         run: dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.SmokeTests.csproj -c Release --no-build
+
+      - name: Build formal PostgreSQL version fixture
+        run: dotnet build tests/PostgreSqlVersionMigrationHarness/Review.csproj -c Release
 
       - name: Run isolated Avalonia profile operation handlers
         if: matrix.name == 'Linux x64'
