@@ -78,7 +78,7 @@ public static partial class LogicalMigrationService
             var relationNames = origin.Tables.Select(table => table.Name)
                 .Concat(origin.Tables.SelectMany(table => table.Indexes.Select(index => index.Name)))
                 .Concat(origin.Tables.Where(table => table.PrimaryKey.Count > 0)
-                    .Select(table => TargetTable(target.Provider, table).PrimaryKeyName!));
+                    .Select(table => TargetTable(target.Provider, table, source.Provider).PrimaryKeyName!));
             if (relationNames.GroupBy(name => name, StringComparer.Ordinal).Any(group => group.Count() > 1))
                 blockers.Add("表／普通索引／主鍵索引名稱在 PostgreSQL public 名稱空間衝突；不允許引擎自動更名。");
             if (destination.BlockSize != 8192) blockers.Add("PostgreSQL 索引預算只驗證過 8192-byte block_size；未知／其他 page 大小不能放行。");
@@ -114,7 +114,7 @@ public static partial class LogicalMigrationService
             blockers.Add("來源與目標不得為同一資料庫。");
         var statements = target.Provider == DatabaseProviderKind.MySql
             ? origin.Tables.Select(table => CreateMySqlTableSql(table, MySqlCollation(destination.Version))).ToArray()
-            : origin.Tables.Select(table => CreateTableSql(target.Provider, table))
+            : origin.Tables.Select(table => CreateTableSql(target.Provider, TargetTable(target.Provider, table, source.Provider)))
                 .Concat(origin.Tables.SelectMany(table => table.Indexes.Select(index => CreateIndexSql(target.Provider, table, index)))).ToArray();
         var fingerprint = Hash(JsonSerializer.Serialize(new
         {
@@ -200,7 +200,7 @@ public static partial class LogicalMigrationService
             stage = "逐欄型別、NULL、內容與結構驗證";
             observer?.Invoke("verify", destination, targetTransaction);
             var written = await ReadSnapshotAsync(destination, targetTransaction, target.Provider, true, token).ConfigureAwait(false);
-            if (written.Blockers.Count != 0 || JsonSerializer.Serialize(written.Tables) != JsonSerializer.Serialize(sourceSnapshot.Tables.Select(table => TargetTable(target.Provider, table))))
+            if (written.Blockers.Count != 0 || JsonSerializer.Serialize(written.Tables) != JsonSerializer.Serialize(sourceSnapshot.Tables.Select(table => TargetTable(target.Provider, table, source.Provider))))
                 throw new InvalidOperationException("目標結構或內容 SHA-256 多重集合驗證不符。");
             var sourceFinal = await ReadSnapshotAsync(origin, sourceTransaction, source.Provider, true, token).ConfigureAwait(false);
             if (sourceFinal.Blockers.Count != 0 || JsonSerializer.Serialize(sourceFinal.Tables) != JsonSerializer.Serialize(sourceSnapshot.Tables))

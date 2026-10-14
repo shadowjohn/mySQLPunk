@@ -226,7 +226,15 @@ for (var index = 0; index < myPorts.Length; index++)
         throw new Exception("Pre-cancel wrote objects.");
     Console.WriteLine("PASS actual " + major + " source snapshot invalidation, PG partial write rollback with public objects=0, 16 MiB bounded BLOB refusal, pre-cancel empty target");
 }
-await PgSql("postgres", "CREATE DATABASE custom_pk;CREATE DATABASE text_pk;");
+await PgSql("postgres", "CREATE DATABASE custom_pk;CREATE DATABASE text_pk;CREATE DATABASE primary_named_source;CREATE DATABASE primary_named_target;");
+await PgSql("primary_named_source", "CREATE TABLE records(id bigint NOT NULL, CONSTRAINT \"PRIMARY\" PRIMARY KEY(id));INSERT INTO records VALUES(1);");
+var namedPreview = await LogicalMigrationService.PreviewAsync(Pg("primary_named_source"), Pg("primary_named_target"), 16);
+if (!namedPreview.CanStart || !namedPreview.Statements.Any(sql => sql.Contains("CONSTRAINT \"PRIMARY\"", StringComparison.Ordinal)))
+    throw new Exception("PostgreSQL user-defined PRIMARY name misidentified as MySQL intrinsic name.");
+var namedResult = await LogicalMigrationService.RunAsync(Pg("primary_named_source"), Pg("primary_named_target"), 16, namedPreview, "primary_named_target");
+if (namedResult.Outcome != LogicalMigrationOutcome.Verified) throw new Exception(namedResult.Report);
+await PgSql("primary_named_target", "INSERT INTO records VALUES(1) ON CONFLICT ON CONSTRAINT \"PRIMARY\" DO NOTHING;");
+Console.WriteLine("PASS actual PG catalog preserves user-defined PRIMARY constraint, DDL/schema/SHA256 and ON CONFLICT; only MySQL intrinsic PRIMARY maps to PG default");
 await PgSql("custom_pk", "CREATE TABLE records(id bigint NOT NULL, CONSTRAINT explicit_records_pk PRIMARY KEY(id));");
 await PgSql("text_pk", "CREATE TABLE records(label text COLLATE \"C\" NOT NULL, CONSTRAINT records_pkey PRIMARY KEY(label));");
 foreach (var source in new[] { "custom_pk", "text_pk" })

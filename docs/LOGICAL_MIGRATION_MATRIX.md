@@ -26,7 +26,7 @@
 
 沒有逐表 checkpoint、自動 cleanup 或 durable 客戶端 resume journal。程序／引擎 crash 不在本輪實際驗證範圍；重啟後任何 staging 或發布物件都讓「必須空目標」預檢拒絕，需 DBA 核對實際 catalog 與本輪報告，不把名稱前綴當成自動刪除授權。不得把正常 RENAME 碰撞探測／注入 ack lost 擴大為實測斷電 crash recovery。
 
-精確子集：有／無整數單欄或複合 PK（手動給值、最多 16 欄）、具名普通升冪 bigint 索引；BIGINT signed ↔ bigint、LONGTEXT ↔ text C、LONGBLOB ↔ bytea、NULL／NOT NULL。表／欄／索引名只接受小寫 ASCII 63 字元，索引在來源與目標名稱空間不得碰撞。MySQL `PRIMARY` 映射 PG 預設 `表名前58字元_pkey`；PG 自訂 PK 名稱無法保留為 MySQL PRIMARY，預檢拒絕。恰巧符合預設慣例的手動 PG 名稱無法由 catalog 區分；如依賴該 constraint 名稱，應用 PG 目標，不承諾跨引擎 ON CONFLICT 或字串函式行為相同。
+精確子集：有／無整數單欄或複合 PK（手動給值、最多 16 欄）、具名普通升冪 bigint 索引；BIGINT signed ↔ bigint、LONGTEXT ↔ text C、LONGBLOB ↔ bytea、NULL／NOT NULL。表／欄／索引名只接受小寫 ASCII 63 字元，索引在來源與目標名稱空間不得碰撞。MySQL `PRIMARY` 映射 PG 預設 `表名前58字元_pkey`；PG 自訂 PK 名稱無法保留為 MySQL PRIMARY，預檢拒絕。映射依來源引擎判斷：PG 自訂名稱恰為 `PRIMARY` 仍是明確名稱，PG→PG 保留並實測 `ON CONFLICT ON CONSTRAINT "PRIMARY"`，不誤當 MySQL 內建名稱。恰巧符合預設慣例的手動 PG 名稱無法由 catalog 區分；如依賴該 constraint 名稱，應用 PG 目標，不承諾跨引擎 ON CONFLICT 或字串函式行為相同。
 
 文字／二進位**可以作一般欄位，但不能作此 MySQL 配對的索引鍵**：MySQL LONGTEXT／LONGBLOB 鍵需要 prefix，縮成 VARCHAR／VARBINARY 會新增長度約束；本輪不偷偷截鍵或改型別。unsigned／其他整數寬度、DECIMAL／時間／浮點、CHAR／VARCHAR／TEXT／BLOB 的其他長度、ENUM／SET、zero date、AUTO_INCREMENT、default、generated、FK／CHECK／UNIQUE、前綴／expression／descending／invisible／特殊索引、partition、view、sequence、trigger／routine／event、自訂表屬性或 comments 均以 catalog＋SHOW CREATE TABLE 完整 grammar 預檢拒絕，沒有靜默跳過。需要這些語意仍須後續專用轉換契約。
 
