@@ -28,9 +28,12 @@ public static partial class LogicalMigrationService
 
     private static string DefaultPrimaryKeyName(string table) => table[..Math.Min(table.Length, 58)] + "_pkey";
 
-    private static LogicalMigrationTable TargetTable(DatabaseProviderKind provider, LogicalMigrationTable table) =>
+    private static LogicalMigrationTable TargetTable(DatabaseProviderKind provider, LogicalMigrationTable table,
+        DatabaseProviderKind? sourceProvider = null) =>
         table with { PrimaryKeyName = table.PrimaryKey.Count == 0 || provider == DatabaseProviderKind.Sqlite
-            ? null : table.PrimaryKeyName ?? DefaultPrimaryKeyName(table.Name) };
+            ? null : provider == DatabaseProviderKind.MySql ? "PRIMARY" : table.PrimaryKeyName == null ||
+                sourceProvider == DatabaseProviderKind.MySql && table.PrimaryKeyName == "PRIMARY"
+                ? DefaultPrimaryKeyName(table.Name) : table.PrimaryKeyName };
 
     private sealed record Keys(IReadOnlyList<string> PrimaryKey, IReadOnlyList<LogicalMigrationIndex> Indexes, string? PrimaryKeyName);
 

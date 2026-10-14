@@ -90,6 +90,12 @@ return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().AfterSetu
             Check(window.OwnedWindows.Count() == 1 && ReferenceEquals(migrationCancellation, Field(window, "_operationCancellation")), "Actual migration dialog holds parent SQL/profile gate");
             ((ComboBox)Field(migration, "_target")!).SelectedIndex = 0;
             ((ComboBox)Field(migration, "_version")!).SelectedIndex = 0;
+            var versions = (ComboBox)Field(migration, "_version")!;
+            versions.SelectedIndex = 5;
+            Check((int)Invoke(migration, "SelectedMajor")! == 8, "Actual migration UI selects MySQL 8.4 explicitly");
+            versions.SelectedIndex = 6;
+            Check((int)Invoke(migration, "SelectedMajor")! == 11, "Actual migration UI selects MariaDB 11.4 explicitly");
+            versions.SelectedIndex = 0;
             ((TextBox)Field(migration, "_database")!).Text = migrationTarget;
             var inspectMigration = (Button)Field(migration, "_inspect")!;
             var applyMigration = (Button)Field(migration, "_apply")!;

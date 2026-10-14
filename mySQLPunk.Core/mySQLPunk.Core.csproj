@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="mySQLPunk.CrossPlatform.SmokeTests" />
+    <InternalsVisibleTo Include="MySqlPunk.MySqlLogicalMigrationHarness" />
   </ItemGroup>
 
   <ItemGroup>

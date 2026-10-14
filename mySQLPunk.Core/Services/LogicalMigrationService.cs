@@ -18,7 +18,7 @@ public static partial class LogicalMigrationService
     private const long MaximumBytes = 64 * 1024 * 1024;
     private static readonly Regex Identifier = new("\\A[A-Za-z_][A-Za-z0-9_]{0,62}\\z", RegexOptions.CultureInvariant);
     private sealed record Snapshot(string Version, string Identity, List<LogicalMigrationTable> Tables,
-        Dictionary<string, List<object?[]>> Data, List<string> Blockers, int BlockSize);
+        Dictionary<string, List<object?[]>> Data, List<string> Blockers, int BlockSize, long PacketBytes = 0);
 
     public static Task<LogicalMigrationPreview> PreviewAsync(ConnectionProfile source, ConnectionProfile target,
         int selectedTargetMajor, CancellationToken cancellationToken = default) =>
@@ -35,7 +35,12 @@ public static partial class LogicalMigrationService
         Task.Run(() => RunCoreAsync(source.Clone(), target.Clone(), selectedTargetMajor, approved, confirmation, token, observer), token);
 
     private static bool Supported(ConnectionProfile profile) =>
-        profile.Provider is DatabaseProviderKind.Sqlite or DatabaseProviderKind.PostgreSql;
+        profile.Provider is DatabaseProviderKind.Sqlite or DatabaseProviderKind.PostgreSql or DatabaseProviderKind.MySql;
+
+    private static bool SupportedPair(ConnectionProfile source, ConnectionProfile target) => Supported(source) && Supported(target) &&
+        (source.Provider != DatabaseProviderKind.MySql && target.Provider != DatabaseProviderKind.MySql ||
+         source.Provider == DatabaseProviderKind.MySql && target.Provider == DatabaseProviderKind.PostgreSql ||
+         source.Provider == DatabaseProviderKind.PostgreSql && target.Provider == DatabaseProviderKind.MySql);
 
     private static LogicalMigrationPreview Refused(ConnectionProfile target, string reason) =>
         new("未識別", "未識別", target.Database, Array.Empty<LogicalMigrationTable>(), Array.Empty<string>(), new[] { reason }, "");
@@ -43,15 +48,15 @@ public static partial class LogicalMigrationService
     private static async Task<LogicalMigrationPreview> PreviewCoreAsync(ConnectionProfile source, ConnectionProfile target,
         int selectedTargetMajor, CancellationToken token)
     {
-        if (!Supported(source) || !Supported(target))
-            return Refused(target, "可驗證跨引擎路徑為 SQLite STRICT ↔ PostgreSQL；MySQL 目標 DDL 隱含提交，SQL Server 定序／型別與 identity 需另行轉換預檢，不能沿用此交易保證或當成原生 restore。請見方向矩陣。");
+        if (!SupportedPair(source, target))
+            return Refused(target, "可驗證路徑為 SQLite STRICT ↔ PostgreSQL，以及 MySQL 8.4／MariaDB 11.4 ↔ PostgreSQL 受控子集；其他配對在開連線前拒絕，不當成原生 restore。請見方向矩陣。");
         using var sourceOwner = (AdoDatabaseSession)DatabaseProviderFactory.Create(source);
         using var targetOwner = (AdoDatabaseSession)DatabaseProviderFactory.Create(target);
         await using var origin = await sourceOwner.OpenMigrationConnectionAsync(source.Database, token, readOnly: true).ConfigureAwait(false);
         await using var destination = await targetOwner.OpenMigrationConnectionAsync(target.Database, token).ConfigureAwait(false);
         using var sourceProgress = new SqliteProgress(origin, token);
         using var targetProgress = new SqliteProgress(destination, token);
-        await using var sourceTransaction = await origin.BeginTransactionAsync(source.Provider == DatabaseProviderKind.Sqlite ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted, token).ConfigureAwait(false);
+        await using var sourceTransaction = await origin.BeginTransactionAsync(SourceIsolation(source.Provider), token).ConfigureAwait(false);
         try
         {
             var sourceSnapshot = await ReadSnapshotAsync(origin, sourceTransaction, source.Provider, true, token).ConfigureAwait(false);
@@ -66,12 +71,14 @@ public static partial class LogicalMigrationService
     {
         var blockers = origin.Blockers.Select(reason => "來源：" + reason)
             .Concat(destination.Blockers.Select(reason => "目標：" + reason)).ToList();
+        if (source.Provider == DatabaseProviderKind.MySql || target.Provider == DatabaseProviderKind.MySql)
+            ValidateMySqlDirection(source, target, origin, destination, blockers);
         if (target.Provider == DatabaseProviderKind.PostgreSql)
         {
             var relationNames = origin.Tables.Select(table => table.Name)
                 .Concat(origin.Tables.SelectMany(table => table.Indexes.Select(index => index.Name)))
                 .Concat(origin.Tables.Where(table => table.PrimaryKey.Count > 0)
-                    .Select(table => TargetTable(target.Provider, table).PrimaryKeyName!));
+                    .Select(table => TargetTable(target.Provider, table, source.Provider).PrimaryKeyName!));
             if (relationNames.GroupBy(name => name, StringComparer.Ordinal).Any(group => group.Count() > 1))
                 blockers.Add("表／普通索引／主鍵索引名稱在 PostgreSQL public 名稱空間衝突；不允許引擎自動更名。");
             if (destination.BlockSize != 8192) blockers.Add("PostgreSQL 索引預算只驗證過 8192-byte block_size；未知／其他 page 大小不能放行。");
@@ -105,13 +112,15 @@ public static partial class LogicalMigrationService
         if (source.Provider == target.Provider && source.Database == target.Database &&
             (source.Provider == DatabaseProviderKind.Sqlite || source.Host == target.Host && source.Port == target.Port))
             blockers.Add("來源與目標不得為同一資料庫。");
-        var statements = origin.Tables.Select(table => CreateTableSql(target.Provider, table))
-            .Concat(origin.Tables.SelectMany(table => table.Indexes.Select(index => CreateIndexSql(target.Provider, table, index)))).ToArray();
+        var statements = target.Provider == DatabaseProviderKind.MySql
+            ? origin.Tables.Select(table => CreateMySqlTableSql(table, MySqlCollation(destination.Version))).ToArray()
+            : origin.Tables.Select(table => CreateTableSql(target.Provider, TargetTable(target.Provider, table, source.Provider)))
+                .Concat(origin.Tables.SelectMany(table => table.Indexes.Select(index => CreateIndexSql(target.Provider, table, index)))).ToArray();
         var fingerprint = Hash(JsonSerializer.Serialize(new
         {
             Source = new { source.Provider, source.Host, source.Port, source.Database },
             Target = new { target.Provider, target.Host, target.Port, target.Database },
-            origin.Version, origin.Identity, TargetIdentity = destination.Identity, TargetVersion = destination.Version, destination.BlockSize, origin.Tables, Statements = statements, Blockers = blockers
+            origin.Version, origin.Identity, TargetIdentity = destination.Identity, TargetVersion = destination.Version, destination.BlockSize, destination.PacketBytes, origin.Tables, Statements = statements, Blockers = blockers
         }));
         return new(origin.Version, destination.Version, target.Database, origin.Tables.AsReadOnly(), statements,
             blockers.AsReadOnly(), fingerprint);
@@ -119,17 +128,19 @@ public static partial class LogicalMigrationService
 
     private static async Task<LogicalMigrationResult> RunCoreAsync(ConnectionProfile source, ConnectionProfile target,
         int selectedTargetMajor, LogicalMigrationPreview approved, string confirmation, CancellationToken token,
-        Action<string, DbConnection, DbTransaction>? observer)
+        Action<string, DbConnection, DbTransaction>? observer, Action<string, DbConnection, DbTransaction?>? mySqlObserver = null)
     {
-        if (!approved.CanStart || confirmation != target.Database || !Supported(source) || !Supported(target))
+        if (!approved.CanStart || confirmation != target.Database || !SupportedPair(source, target))
             return new(LogicalMigrationOutcome.Refused, 0, "未確認完整目標名稱或預檢未通過；沒有寫入。");
+        if (target.Provider == DatabaseProviderKind.MySql)
+            return await RunMySqlTargetAsync(source, target, selectedTargetMajor, approved, token, mySqlObserver).ConfigureAwait(false);
         using var sourceOwner = (AdoDatabaseSession)DatabaseProviderFactory.Create(source);
         using var targetOwner = (AdoDatabaseSession)DatabaseProviderFactory.Create(target);
         await using var origin = await sourceOwner.OpenMigrationConnectionAsync(source.Database, token, readOnly: true).ConfigureAwait(false);
         await using var destination = await targetOwner.OpenMigrationConnectionAsync(target.Database, token).ConfigureAwait(false);
         using var sourceProgress = new SqliteProgress(origin, token);
         using var targetProgress = new SqliteProgress(destination, token);
-        await using var sourceTransaction = await origin.BeginTransactionAsync(source.Provider == DatabaseProviderKind.Sqlite ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted, token).ConfigureAwait(false);
+        await using var sourceTransaction = await origin.BeginTransactionAsync(SourceIsolation(source.Provider), token).ConfigureAwait(false);
         await using var targetTransaction = destination is SqliteConnection sqlite
             ? sqlite.BeginTransaction(IsolationLevel.Serializable, deferred: false)
             : await destination.BeginTransactionAsync(IsolationLevel.ReadCommitted, token).ConfigureAwait(false);
@@ -189,7 +200,7 @@ public static partial class LogicalMigrationService
             stage = "逐欄型別、NULL、內容與結構驗證";
             observer?.Invoke("verify", destination, targetTransaction);
             var written = await ReadSnapshotAsync(destination, targetTransaction, target.Provider, true, token).ConfigureAwait(false);
-            if (written.Blockers.Count != 0 || JsonSerializer.Serialize(written.Tables) != JsonSerializer.Serialize(sourceSnapshot.Tables.Select(table => TargetTable(target.Provider, table))))
+            if (written.Blockers.Count != 0 || JsonSerializer.Serialize(written.Tables) != JsonSerializer.Serialize(sourceSnapshot.Tables.Select(table => TargetTable(target.Provider, table, source.Provider))))
                 throw new InvalidOperationException("目標結構或內容 SHA-256 多重集合驗證不符。");
             var sourceFinal = await ReadSnapshotAsync(origin, sourceTransaction, source.Provider, true, token).ConfigureAwait(false);
             if (sourceFinal.Blockers.Count != 0 || JsonSerializer.Serialize(sourceFinal.Tables) != JsonSerializer.Serialize(sourceSnapshot.Tables))
@@ -220,6 +231,8 @@ public static partial class LogicalMigrationService
     private static async Task<Snapshot> ReadSnapshotAsync(DbConnection connection, DbTransaction? transaction,
         DatabaseProviderKind provider, bool readData, CancellationToken token)
     {
+        if (provider == DatabaseProviderKind.MySql)
+            return await ReadMySqlSnapshotAsync(connection, transaction, readData, token).ConfigureAwait(false);
         var blockers = new List<string>();
         var blockSize = provider == DatabaseProviderKind.PostgreSql
             ? Convert.ToInt32(await ScalarAsync(connection, transaction, "SHOW block_size;", token), CultureInfo.InvariantCulture) : 0;
@@ -404,7 +417,8 @@ public static partial class LogicalMigrationService
             (primaryKey.Count == 0 ? "STRICT" : "(?:STRICT\\s*,\\s*WITHOUT\\s+ROWID|WITHOUT\\s+ROWID\\s*,\\s*STRICT)") + "\\s*;?\\s*\\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
-    private static string CreateTableSql(DatabaseProviderKind provider, LogicalMigrationTable table) =>
+    private static string CreateTableSql(DatabaseProviderKind provider, LogicalMigrationTable table) => provider == DatabaseProviderKind.MySql
+        ? CreateMySqlTableSql(table, "utf8mb4_0900_bin") :
         "CREATE TABLE " + Qualified(provider, table.Name) + " (" + string.Join(",", table.Columns.Select(column =>
             Quote(column.Name) + " " + (column.Kind == "integer" ? provider == DatabaseProviderKind.Sqlite ? "INTEGER" : "bigint"
                 : column.Kind == "text" ? provider == DatabaseProviderKind.Sqlite ? "TEXT COLLATE BINARY" : "text COLLATE \"C\""

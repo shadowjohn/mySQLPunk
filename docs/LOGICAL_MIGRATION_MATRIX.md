@@ -11,6 +11,30 @@
 | SQLite → PostgreSQL | SQLite 3.37–3.53 → PostgreSQL 14–17 | INTEGER → bigint、BLOB → bytea、TEXT BINARY → text C；非自增 PK、普通索引 | 隔離 CI PostgreSQL 16 fixture 加入文字／鍵／索引雙向 round-trip；只以這次新 head 結果為證據 |
 | PostgreSQL → SQLite | PostgreSQL 14–17 → SQLite 3.37–3.53 | 上述型別反向映射；PK → WITHOUT ROWID、普通索引 | PG17 實際 roundtrip 與既有 PG16 fixture；PG15 未實機跑 |
 | PostgreSQL → PostgreSQL | 14–17 雙向及同版本 | 同一 bigint/bytea/text C、PK／索引子集與全部預檢 | 真實 17.10 ↔ 14.24、17.10 ↔ 16.15；不是全部版本配對驗證 |
+| MySQL／MariaDB → PostgreSQL | MySQL 8.4.x／MariaDB 11.4.x → PG14–17 | signed BIGINT／LONGTEXT NO PAD binary／LONGBLOB，整數 PK／普通索引；PG 目標單交易 | 正式路徑實際 8.4.11 → PG16.15、11.4.13 → PG16.15，各 1007 列＋空表；其他 PG 版本配對未跑 |
+| PostgreSQL → MySQL／MariaDB | PG14–17 → MySQL 8.4.x／MariaDB 11.4.x | 上述反向映射，專屬 staging＋校驗＋單一 multi-table RENAME＋發布後校驗 | 正式路徑實際 PG16.15 → 8.4.11／11.4.13；不是全版本、全型別或一般 DDL atomic 保證 |
+
+## 第三階段：MySQL／MariaDB ↔ PostgreSQL
+
+這是正式 Core 與 Avalonia 可選取的邏輯搬移，不是只加入引擎白名單。MySQL 的 DDL 隱含提交，不沿用 SQLite／PG 的「schema＋rows 單一交易」說法：
+
+1. 重新預檢來源 fingerprint 與空目標，確認版本、既有 catalog 可見性、InnoDB Dynamic、`lower_case_table_names=0` 與 utf8mb4 資料庫定序。只接受 MySQL `utf8mb4_0900_bin`／MariaDB `utf8mb4_nopad_bin`，拒絕 PAD SPACE 或其他定序。不修改帳號權限、伺服器設定或既有物件。
+2. MySQL 來源使用 RepeatableRead＋完整有界 `LOCK IN SHARE MODE` 讀取，鎖讀過的資料及 metadata 到搬移結束，最終重讀來源 schema／內容。PG 來源維持既有 SHARE locks＋最後重驗。確認後同列數變動也使 fingerprint 失效。最多 100 表／100,000 列／64 MiB，單欄 1 MiB；先 OCTET_LENGTH／CASE 限額，才讀取完整欄位。
+3. MySQL 目標本輪生成 `_mp_<隨機 GUID>_<序號>` 專屬 staging 表，CREATE DDL 確實已隱含提交。DML 在另一交易中分批寫入，最多 100 列，並依目標 `max_allowed_packet` 與 UTF8／binary escaping 保守 byte 預算縮批；單列不合預算先拒絕。每次 CREATE／INSERT 檢查 warnings，不能把截斷／轉型視為成功。
+4. staging catalog／結構／逐欄內容 SHA256 全部吻合、DML 提交後再檢查 staging 與來源，才送出**一個** multi-table RENAME。只限上述版本的 InnoDB 普通表、無 FK／trigger 等相依物件，且不覆蓋名稱。碰撞會失敗，不先刪除目標；發布後再次校驗才 `Verified`。
+5. staging 之前拒絕為 `Refused`。CREATE 曾送出後失敗／取消為 `StagingRemains`，列出本輪 staging→原名與階段；DML 可回滾，但表不會消失，列數只是處理進度。RENAME 曾送出後任何失敗／ack lost 為 `Uncertain`，不推測已發布或已撤銷。兩者禁止 UI 續寫／盲重試，不自動 DROP；Task 與 parent gate 保持到實際操作停止。RENAME 送出後取消不撤銷已提交操作，需等發布／驗證結果。
+
+沒有逐表 checkpoint、自動 cleanup 或 durable 客戶端 resume journal。程序／引擎 crash 不在本輪實際驗證範圍；重啟後任何 staging 或發布物件都讓「必須空目標」預檢拒絕，需 DBA 核對實際 catalog 與本輪報告，不把名稱前綴當成自動刪除授權。不得把正常 RENAME 碰撞探測／注入 ack lost 擴大為實測斷電 crash recovery。
+
+精確子集：有／無整數單欄或複合 PK（手動給值、最多 16 欄）、具名普通升冪 bigint 索引；BIGINT signed ↔ bigint、LONGTEXT ↔ text C、LONGBLOB ↔ bytea、NULL／NOT NULL。表／欄／索引名只接受小寫 ASCII 63 字元，索引在來源與目標名稱空間不得碰撞。MySQL `PRIMARY` 映射 PG 預設 `表名前58字元_pkey`；PG 自訂 PK 名稱無法保留為 MySQL PRIMARY，預檢拒絕。映射依來源引擎判斷：PG 自訂名稱恰為 `PRIMARY` 仍是明確名稱，PG→PG 保留並實測 `ON CONFLICT ON CONSTRAINT "PRIMARY"`，不誤當 MySQL 內建名稱。恰巧符合預設慣例的手動 PG 名稱無法由 catalog 區分；如依賴該 constraint 名稱，應用 PG 目標，不承諾跨引擎 ON CONFLICT 或字串函式行為相同。
+
+文字／二進位**可以作一般欄位，但不能作此 MySQL 配對的索引鍵**：MySQL LONGTEXT／LONGBLOB 鍵需要 prefix，縮成 VARCHAR／VARBINARY 會新增長度約束；本輪不偷偷截鍵或改型別。unsigned／其他整數寬度、DECIMAL／時間／浮點、CHAR／VARCHAR／TEXT／BLOB 的其他長度、ENUM／SET、zero date、AUTO_INCREMENT、default、generated、FK／CHECK／UNIQUE、前綴／expression／descending／invisible／特殊索引、partition、view、sequence、trigger／routine／event、自訂表屬性或 comments 均以 catalog＋SHOW CREATE TABLE 完整 grammar 預檢拒絕，沒有靜默跳過。需要這些語意仍須後續專用轉換契約。
+
+目前僅能證明直接 global／schema-level 權限的完整 catalog 可見性：SELECT、SHOW VIEW、TRIGGER、EVENT、CREATE ROUTINE、ALTER ROUTINE；角色／表級授權或缺權限會阻擋。不執行 SHOW GRANTS（MariaDB 可能含認證資訊）、不讀秘密或要求新增權限。
+
+可重跑：`python3 tests/Run-MySqlLogicalMigration.py [新證據目錄]`，先快取官方 mysql:8.4、mariadb:11.4、postgres:16-alpine。直接引用正式 Core；唯一 ownership label／loopback 隨機 ports／tmpfs，finally 僅清自有容器。`migration.log`／`evidence.json` 保存實際版本、image digest、來源 hash／清理狀態，不保存資料值／密碼。CI Linux 另跑此 fixture，四平台編譯；這與既有 provider 56/56 分開。
+
+官方語意依據：MySQL 8.4 [implicit commit](https://dev.mysql.com/doc/refman/8.4/en/implicit-commit.html)／[RENAME TABLE](https://dev.mysql.com/doc/refman/8.4/en/rename-table.html)，MariaDB [implicit commit](https://mariadb.com/docs/server/reference/sql-statements/transactions/sql-statements-that-cause-an-implicit-commit)／[RENAME TABLE](https://mariadb.com/docs/server/reference/sql-statements/data-definition/rename-table)。限於受控版本與物件子集，不宣稱所有 DDL 可回滾。
 
 ## 可重跑的 PostgreSQL 跨版本證據
 
@@ -61,13 +85,13 @@ SQLite／PostgreSQL 工具入口在 Avalonia 工作台「邏輯搬移」。來�
 
 | 方向 | 現況／執行前拒絕的技術理由 | 下一階段必要能力（不是本輪已通過） |
 | --- | --- | --- |
-| MySQL/MariaDB → SQLite/PG/SQLServer | 整數 unsigned 上界、zero date、ENUM/SET、charset、PAD SPACE 定序、AUTO_INCREMENT 與 storage engine 一致快照不能用現有 count-only transfer 當忠實轉換 | 來源 catalog／版本／InnoDB 快照 adapter，逐欄區間及 charset/定序證明；不可先沿用一般 type map 再補驗證 |
-| SQLite/PG/SQLServer → MySQL/MariaDB，以及 MySQL↔MariaDB／跨版本 | MySQL DDL implicit commit，DDL＋資料單一交易會是假保證；目標即使原本空白，取消仍可能已留下表 | 另建 staging 與 durable uncertain/checkpoint 協議、預檢引擎版本差異、人工核對恢復；不能自動刪 staging 或覆蓋目標假裝 rollback |
+| MySQL/MariaDB → SQLite/SQLServer | unsigned、zero date、ENUM/SET、charset、PAD SPACE、AUTO_INCREMENT 等仍無等價映射；與 PG 的受控子集已落地 | 另訂目的端 schema／資料 codec 與語意驗證，不把 count-only transfer 當忠實轉換 |
+| SQLite/SQLServer → MySQL/MariaDB，以及 MySQL↔MariaDB／跨版本 | 不開放這些配對；與 PG 的 staging 路徑不等於其他來源語意已可保留 | 依目的端型別／定序契約與引擎版本驗證擴充；不直接沿用既有對映或自動刪 staging |
 | SQLServer → SQLite/PG/MySQL，以及反向 | UTF-16/UTF-8、linguistic/BIN2 定序的比較／尾空白規則、rowversion、decimal/time scale、identity/default/sequence 不能把現有型別名稱替換當成保留語意 | 可重用 SQLServer catalog 的阻擋規則，但需跨 provider canonical schema／資料 codec、來源一致快照與逐欄語意／版本證據；目前只 Windows SQLServer→SQLServer 專用子集可執行 |
 | Oracle/Snowflake 與其他引擎 | NUMBER／時間、空字串 NULL、identifier/collation 與交易 DDL 不等價 | 專用 catalog／codec／交易恢復設計；本輪不開連線 |
 | MongoDB、Redis/Garnet 與表格引擎 | document/key-value model、TTL／原子操作／巢狀內容沒有通用無損表格映射 | 明確專用模型轉換契約，不當成同義 restore |
 
-上述方向服務在開連線前拒絕，沒有聲稱某個 MySQL/MariaDB 或 SQLServer 版本已跨引擎通過。雙向跨版本／換引擎的整體需求仍未全部完成；此批是實際擴充 SQLite/PG 的可驗證第二階段，而不是全引擎完成或發版的宣告。
+上述其他方向服務在開連線前拒絕。雙向跨版本／換引擎的整體需求仍未全部完成；目前已擴充 SQLite/PG 與 MySQL/MariaDB↔PG 的可驗證子集，不是全引擎完成或發版宣告。release 仍 hold。
 
 有 FK、其他字串定序、時間、decimal、identity、procedure/trigger 的一般資料庫仍須使用引擎官方 schema/data migration 工具與人工轉換／驗證，不是宣稱 bacpac 可無限制降版。新版 SQL Server .bak 仍不能直接還原到舊引擎，compatibility level 不改備份格式；既有原生 restore 預檢繼續保留。
 
@@ -79,4 +103,4 @@ SQLite／PostgreSQL 工具入口在 Avalonia 工作台「邏輯搬移」。來�
 
 Avalonia/Xvfb：正式入口持有主視窗 gate、預覽、目標變更失效、錯誤確認不寫入、實際確認寫入且禁止重複 resume。既有跨平台 CI fixture 另測 SQLite ↔ PostgreSQL 16，包括正式 catalog 逐項加 feature／移除 feature 後恢復可預檢。
 
-真 SQL Server 跨版本、SQL auth+SSH 真機、PostgreSQL 14/15/17、SQLite 歷史版本及非關聯式轉換皆沒有完整矩陣證據；不得把 mock／同版本一般 provider round-trip 當全部資料庫版本已通過。
+真 SQL Server 2019↔2022 與 PG14↔17／16↔17 的限定 fixture 已有證據；SQL auth+SSH 真機、PG15、MySQL/MariaDB 的其他版本配對、SQLite 歷史版本及非關聯式轉換皆沒有完整矩陣證據。不得把 mock／同版本一般 provider round-trip 當全部資料庫版本已通過。

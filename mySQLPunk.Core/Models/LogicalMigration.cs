@@ -16,8 +16,8 @@ public sealed record LogicalMigrationPreview(
     public bool CanStart => Blockers.Count == 0 && Tables.Count > 0;
 }
 
-public enum LogicalMigrationOutcome { Verified, RolledBack, Uncertain, Refused }
+public enum LogicalMigrationOutcome { Verified, RolledBack, Uncertain, Refused, StagingRemains }
 public sealed record LogicalMigrationResult(LogicalMigrationOutcome Outcome, long Rows, string Report)
 {
-    public bool RetryBlocked => Outcome is LogicalMigrationOutcome.Uncertain or LogicalMigrationOutcome.Verified;
+    public bool RetryBlocked => Outcome is LogicalMigrationOutcome.Uncertain or LogicalMigrationOutcome.Verified or LogicalMigrationOutcome.StagingRemains;
 }
