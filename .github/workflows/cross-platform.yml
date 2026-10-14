@@ -9,6 +9,8 @@ on:
       - "mySQLPunk.Desktop/**"
       - "mySQLPunk.CrossPlatform.SmokeTests/**"
       - "tests/Run-CrossPlatformLiveTests.sh"
+      - "tests/Run-DesktopProfileOperationTests.sh"
+      - "tests/DesktopProfileOperationHarness/**"
       - "tests/Test-LinuxCrossPlatformPackage.sh"
       - "tests/Test-LinuxUpdateApply.sh"
       - "tests/Test-MacCrossPlatformPackage.sh"
@@ -22,6 +24,8 @@ on:
       - "mySQLPunk.Desktop/**"
       - "mySQLPunk.CrossPlatform.SmokeTests/**"
       - "tests/Run-CrossPlatformLiveTests.sh"
+      - "tests/Run-DesktopProfileOperationTests.sh"
+      - "tests/DesktopProfileOperationHarness/**"
       - "tests/Test-LinuxCrossPlatformPackage.sh"
       - "tests/Test-LinuxUpdateApply.sh"
       - "tests/Test-MacCrossPlatformPackage.sh"
@@ -77,6 +81,10 @@ jobs:
 
       - name: Run cross-platform smoke tests
         run: dotnet run --project mySQLPunk.CrossPlatform.SmokeTests/mySQLPunk.CrossPlatform.SmokeTests.csproj -c Release --no-build
+
+      - name: Run isolated Avalonia profile operation handlers
+        if: matrix.name == 'Linux x64'
+        run: ./tests/Run-DesktopProfileOperationTests.sh
 
       - name: Run MySQL, MariaDB, PostgreSQL and SQL Server live round-trip
         if: matrix.live_tests == true

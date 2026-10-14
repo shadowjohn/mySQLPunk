@@ -34,6 +34,7 @@ git push origin master
 - 動到跨平台打包、安裝或 release workflow 時，至少用 `./scripts/package-cross-platform.sh --version <版本> --runtime linux-x64` 產生實際 self-contained 資產，再執行 `MYSQLPUNK_PACKAGE_RUN_UI=1 ./tests/Test-LinuxCrossPlatformPackage.sh <tar.gz>`，確認隔離安裝、Xvfb 啟動、解除安裝與路徑安全檢查皆通過；Linux x64／ARM64 另由 `ubuntu-24.04`／`ubuntu-24.04-arm` 原生 CI runner 執行安裝、UI 啟動、安全更新與 rollback。macOS app bundle、plist、CPU 架構、codesign、zip metadata、安全套用與啟動健康檢查，則分別由 `macos-15-intel` 與 `macos-15` 原生 runner 驗證。
 - 動到 provider 實際行為（匯出匯入、使用者管理、rename）時，視影響跑對應的 Docker 整合測試：`Run-MySqlUserIntegrationTests.ps1`、`Run-MySqlExportRenameIntegrationTests.ps1`、`Run-DatabaseRenameProviderIntegrationTests.ps1`。
 - UI 有變的話，除了測試，最好實際開起來看一眼。
+- 桌面連線操作有變時，Linux 執行 `./tests/Run-DesktopProfileOperationTests.sh`：以隔離設定與 SQLite 直接操作 Avalonia handlers，驗證忙碌入口、對話框 lease、取消後保留 session，以及正常編輯／刪除；不讀取使用者的連線或秘密。
 
 ## Commit message
 

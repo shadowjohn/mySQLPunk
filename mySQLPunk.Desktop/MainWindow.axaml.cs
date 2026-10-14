@@ -489,75 +489,92 @@ public sealed partial class MainWindow : Window
 
     private async void EditProfile_Click(object? sender, RoutedEventArgs e)
     {
+        if (_operationCancellation is not null) return;
         if (_profilesList.SelectedItem is not ConnectionProfile selected)
         {
             return;
         }
 
-        var editable = selected.Clone();
-        var passwordResolution = await ResolvePasswordAsync(selected);
-        if (passwordResolution.Found)
+        await RunOperationAsync("正在編輯連線設定…", async cancellationToken =>
         {
-            editable.Password = passwordResolution.Password;
-        }
+            var editable = selected.Clone();
+            var passwordResolution = await ResolvePasswordAsync(selected);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (passwordResolution.Found)
+            {
+                editable.Password = passwordResolution.Password;
+            }
 
-        if (await ResolveSshSecretsAsync(selected))
-        {
-            ApplySshSecrets(editable);
-        }
+            var sshResolved = await ResolveSshSecretsAsync(selected);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (sshResolved)
+            {
+                ApplySshSecrets(editable);
+            }
 
-        var editor = new ConnectionEditorWindow(editable, passwordResolution.Warning, _secretStore);
-        var result = await editor.ShowDialog<ConnectionProfile?>(this);
-        if (result is null)
-        {
-            return;
-        }
+            var editor = new ConnectionEditorWindow(editable, passwordResolution.Warning, _secretStore);
+            var result = await editor.ShowDialog<ConnectionProfile?>(this);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result is null)
+            {
+                return;
+            }
 
-        var index = _profiles.IndexOf(selected);
-        var passwordStatus = await ApplyPasswordPreferenceAsync(selected, result);
-        passwordStatus += await ApplySshSecretPreferenceAsync(selected, result);
-        RememberSshSecrets(result);
-        result.Password = string.Empty;
-        _profiles[index] = result;
-        _profilesList.SelectedIndex = index;
-        await SaveProfilesAsync();
-        Disconnect($"已更新「{result.Name}」；{passwordStatus} 請重新連線。");
+            var index = _profiles.IndexOf(selected);
+            var passwordStatus = await ApplyPasswordPreferenceAsync(selected, result);
+            cancellationToken.ThrowIfCancellationRequested();
+            passwordStatus += await ApplySshSecretPreferenceAsync(selected, result);
+            cancellationToken.ThrowIfCancellationRequested();
+            RememberSshSecrets(result);
+            result.Password = string.Empty;
+            _profiles[index] = result;
+            _profilesList.SelectedIndex = index;
+            await SaveProfilesAsync();
+            Disconnect($"已更新「{result.Name}」；{passwordStatus} 請重新連線。");
+        });
     }
 
     private async void DeleteProfile_Click(object? sender, RoutedEventArgs e)
     {
+        if (_operationCancellation is not null) return;
         if (_profilesList.SelectedItem is not ConnectionProfile selected)
         {
             return;
         }
 
-        var confirmed = await MessageDialog.ShowAsync(
-            this,
-            "刪除連線設定",
-            $"確定要刪除「{selected.Name}」嗎？資料庫本身不會被刪除。",
-            showCancel: true);
-        if (!confirmed)
+        await RunOperationAsync("正在刪除連線設定…", async cancellationToken =>
         {
-            return;
-        }
+            var confirmed = await MessageDialog.ShowAsync(
+                this,
+                "刪除連線設定",
+                $"確定要刪除「{selected.Name}」嗎？資料庫本身不會被刪除。",
+                showCancel: true);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!confirmed)
+            {
+                return;
+            }
 
-        var wasConnected = _session?.Profile.Id == selected.Id;
-        _runtimePasswords.Remove(selected.Id);
-        _runtimeSshSecrets.Remove(selected.Id);
-        var secretWarning = selected.UseSecretStore
-            ? await DeleteStoredPasswordAsync(selected.Id)
-            : string.Empty;
-        var preferenceWarning = await DeleteTableColumnPreferencesAsync(selected.Id);
-        _profiles.Remove(selected);
-        await SaveProfilesAsync();
-        if (wasConnected)
-        {
-            Disconnect($"連線設定已刪除。{secretWarning}{preferenceWarning}");
-        }
-        else
-        {
-            SetStatus($"連線設定已刪除。{secretWarning}{preferenceWarning}");
-        }
+            var wasConnected = _session?.Profile.Id == selected.Id;
+            var secretWarning = selected.UseSecretStore
+                ? await DeleteStoredPasswordAsync(selected.Id)
+                : string.Empty;
+            cancellationToken.ThrowIfCancellationRequested();
+            var preferenceWarning = await DeleteTableColumnPreferencesAsync(selected.Id);
+            cancellationToken.ThrowIfCancellationRequested();
+            _runtimePasswords.Remove(selected.Id);
+            _runtimeSshSecrets.Remove(selected.Id);
+            _profiles.Remove(selected);
+            await SaveProfilesAsync();
+            if (wasConnected)
+            {
+                Disconnect($"連線設定已刪除。{secretWarning}{preferenceWarning}");
+            }
+            else
+            {
+                SetStatus($"連線設定已刪除。{secretWarning}{preferenceWarning}");
+            }
+        });
 
         UpdateActionState();
     }
@@ -612,15 +629,15 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var connectionProfile = await PrepareConnectionProfileAsync(selected, this);
-        if (connectionProfile is null)
+        await RunOperationAsync($"正在準備連線至 {selected.Name}…", async cancellationToken =>
         {
-            return;
-        }
+            var connectionProfile = await PrepareConnectionProfileAsync(selected, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (connectionProfile is null)
+            {
+                return;
+            }
 
-        if (_operationCancellation is not null) return;
-        await RunOperationAsync($"正在連線至 {connectionProfile.Name}…", async cancellationToken =>
-        {
             Disconnect($"準備連線至 {connectionProfile.Name}…");
             using var lease = new SessionLease<IDatabaseSession>(DatabaseProviderFactory.Create(connectionProfile));
             var session = lease.Session;

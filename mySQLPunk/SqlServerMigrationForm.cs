@@ -49,7 +49,7 @@ namespace mySQLPunk
         {
             var database = endpoint.Database as my_mssql;
             if (database == null) throw new InvalidOperationException("僅支援 SQL Server 來源與目標。");
-            return new SqlServerMigrationSession(database.MCT, endpoint.DatabaseName);
+            return new SqlServerMigrationSession(endpoint.ConnectionSettings, endpoint.DatabaseName);
         }
 
         private async void Inspect(object sender, EventArgs args)
