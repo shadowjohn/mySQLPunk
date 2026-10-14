@@ -6,6 +6,11 @@ using MySqlPunk.Core.Services;
 var password = Environment.GetEnvironmentVariable("MYSQLPUNK_TEST_PASSWORD") ?? throw new Exception("Missing fixture password.");
 var pgPort = int.Parse(args[0]);
 var myPorts = new[] { int.Parse(args[1]), int.Parse(args[2]) };
+if (args.Length > 3 && args[3] == "crash-child")
+{
+    await MySqlMigrationRegressions.CrashChildAsync(pgPort, myPorts[0], args[4], args[5], args[6], args[7]);
+    return;
+}
 string PgConnection(string database) => new NpgsqlConnectionStringBuilder
 {
     Host = "127.0.0.1", Port = pgPort, Username = "postgres", Password = password,
@@ -20,12 +25,28 @@ await using (var connection = new NpgsqlConnection(PgConnection("postgres")))
 {
     await connection.OpenAsync(); Console.WriteLine("Actual PostgreSQL=" + connection.PostgreSqlVersion);
 }
-foreach (var port in myPorts)
+var probePorts = args.Length > 5 && args[3] is "boundaries" or "versions"
+    ? myPorts.Concat(new[] { int.Parse(args[4]), int.Parse(args[5]) }) : myPorts;
+foreach (var port in probePorts)
 {
     await using var connection = new MySqlConnection(MyConnection(port)); await connection.OpenAsync();
-    Console.WriteLine("Actual MySQL family=" + connection.ServerVersion);
+    await using var command = connection.CreateCommand(); command.CommandText = "SELECT CONCAT(VERSION(),' / ',@@version_comment)";
+    Console.WriteLine("Actual MySQL family=" + await command.ExecuteScalarAsync());
 }
-if (args.Length > 3) return;
+if (args.Contains("probe")) return;
+if (args.Length > 3 && args[3] == "versions")
+{
+    await new MySqlMigrationRegressions(pgPort, int.Parse(args[4])).RunVersionsAsync(myPorts[0], myPorts[1]);
+    await new MySqlMigrationRegressions(pgPort, int.Parse(args[5])).RunVersionsAsync(myPorts[1], myPorts[0]);
+    return;
+}
+if (args.Length > 3 && args[3] == "boundaries")
+{
+    foreach (var port in myPorts) await new MySqlMigrationRegressions(pgPort, port).RunBoundariesAsync(8388608, true);
+    foreach (var port in new[] { int.Parse(args[4]), int.Parse(args[5]) })
+        await new MySqlMigrationRegressions(pgPort, port).RunBoundariesAsync(65536, false);
+    return;
+}
 async Task PgSql(string database, string sql)
 {
     await using var connection = new NpgsqlConnection(PgConnection(database)); await connection.OpenAsync();

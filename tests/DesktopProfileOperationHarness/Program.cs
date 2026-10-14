@@ -92,9 +92,11 @@ return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().AfterSetu
             ((ComboBox)Field(migration, "_version")!).SelectedIndex = 0;
             var versions = (ComboBox)Field(migration, "_version")!;
             versions.SelectedIndex = 5;
-            Check((int)Invoke(migration, "SelectedMajor")! == 8, "Actual migration UI selects MySQL 8.4 explicitly");
+            Check((int)Invoke(migration, "SelectedMajor")! == 8 && versions.ItemsSource!.Cast<string>().ElementAt(5).Contains("8.0／8.4"), "Actual migration UI labels supported MySQL 8.x minors without claiming a fixed minor");
             versions.SelectedIndex = 6;
             Check((int)Invoke(migration, "SelectedMajor")! == 11, "Actual migration UI selects MariaDB 11.4 explicitly");
+            versions.SelectedIndex = 7;
+            Check((int)Invoke(migration, "SelectedMajor")! == 10, "Actual migration UI selects MariaDB 10.11 explicitly");
             versions.SelectedIndex = 0;
             ((TextBox)Field(migration, "_database")!).Text = migrationTarget;
             var inspectMigration = (Button)Field(migration, "_inspect")!;

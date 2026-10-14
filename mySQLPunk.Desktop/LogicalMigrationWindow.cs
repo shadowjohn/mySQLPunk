@@ -10,7 +10,7 @@ public sealed class LogicalMigrationWindow : Window
 {
     private readonly ConnectionProfile _source;
     private readonly ComboBox _target = new() { Name = "MigrationTarget", HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly ComboBox _version = new() { ItemsSource = new[] { "SQLite 3（3.37–3.53）", "PostgreSQL 14", "PostgreSQL 15", "PostgreSQL 16", "PostgreSQL 17", "MySQL 8.4", "MariaDB 11.4" } };
+    private readonly ComboBox _version = new() { ItemsSource = new[] { "SQLite 3（3.37–3.53）", "PostgreSQL 14", "PostgreSQL 15", "PostgreSQL 16", "PostgreSQL 17", "MySQL 8.x（僅 8.0／8.4，依實際預覽）", "MariaDB 11.4", "MariaDB 10.11" } };
     private readonly TextBox _database = new() { Name = "MigrationDatabase", PlaceholderText = "另建空目標資料庫名稱／SQLite 完整檔案路徑" };
     private readonly TextBox _password = new() { PasswordChar = '●', PlaceholderText = "目標密碼（只留記憶體，不讀秘密庫）" };
     private readonly TextBox _sshPassword = new() { PasswordChar = '●', PlaceholderText = "目標 SSH 密碼（如需要）" };
@@ -40,7 +40,7 @@ public sealed class LogicalMigrationWindow : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         buttons.Children.Add(_inspect); buttons.Children.Add(_apply); buttons.Children.Add(_cancel); fields.Children.Add(buttons);
         fields.Children.Add(_report); Content = new ScrollViewer { Content = fields };
-        fields.Children.Insert(2, new TextBlock { Text = "MySQL 8.4／MariaDB 11.4 ↔ PostgreSQL：signed BIGINT、LONGTEXT utf8mb4 NO PAD binary ↔ text C、LONGBLOB ↔ bytea，主鍵／普通索引只允許整數欄。MySQL 目標 DDL 隱含提交：先建立本輪專屬 staging、交易分批寫入／校驗，再單次 RENAME 發布／再次校驗；取消或失敗可能殘留 staging，列明物件並禁止盲重試，不自動刪除。發布送出後取消須等實際結果，不保證撤銷。MySQL 只驗證 InnoDB Dynamic、lower_case_table_names=0，要求目前帳號有可證明的完整 catalog 可見權限，不新增權限。此路徑不是下述 SQLite／PG 的單一 DDL 交易。", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+        fields.Children.Insert(2, new TextBlock { Text = "MySQL 8.0／8.4、MariaDB 10.11／11.4 ↔ PostgreSQL，以及 MySQL 8.0 ↔ 8.4、MariaDB 10.11 ↔ 11.4：signed BIGINT、LONGTEXT utf8mb4 NO PAD binary ↔ text C、LONGBLOB ↔ bytea，主鍵／普通索引只允許整數欄。MySQL 8.x 選項不指定 minor；必須核對預覽實際完整版本，變更會使確認失效。MySQL 與 MariaDB 互換仍拒絕。MySQL 目標 DDL 隱含提交：先建立本輪專屬 staging、交易分批寫入／校驗，再單次 RENAME 發布／再次校驗；取消或失敗可能殘留 staging，列明物件並禁止盲重試，不自動刪除。發布送出後取消須等實際結果，不保證撤銷。MySQL 只驗證 InnoDB Dynamic、lower_case_table_names=0，要求目前帳號有可證明的完整 catalog 可見權限，不新增權限。此路徑不是下述 SQLite／PG 的單一 DDL 交易。", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
         _target.SelectionChanged += (_, _) =>
         {
             _preview = null; _apply.IsEnabled = false;
@@ -108,5 +108,5 @@ public sealed class LogicalMigrationWindow : Window
         _preview = null; _approvedTarget = null; _apply.IsEnabled = false;
     }
 
-    private int SelectedMajor() => _version.SelectedIndex switch { 0 => 3, 5 => 8, 6 => 11, _ => 13 + _version.SelectedIndex };
+    private int SelectedMajor() => _version.SelectedIndex switch { 0 => 3, 5 => 8, 6 => 11, 7 => 10, _ => 13 + _version.SelectedIndex };
 }

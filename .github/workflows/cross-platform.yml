@@ -112,12 +112,23 @@ jobs:
           docker pull postgres:16-alpine
           python3 tests/Run-MySqlLogicalMigration.py "$RUNNER_TEMP/mysqlpunk-logical-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
+      - name: Verify packet limits and actual owned process termination
+        if: matrix.live_tests == true
+        run: python3 tests/Run-MySqlLogicalMigration.py "$RUNNER_TEMP/mysqlpunk-logical-boundaries-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" boundaries
+
+      - name: Verify MySQL 8.0 to 8.4 and MariaDB 10.11 to 11.4 both directions
+        if: matrix.live_tests == true
+        run: |
+          docker pull mysql:8.0
+          docker pull mariadb:10.11
+          python3 tests/Run-MySqlLogicalMigration.py "$RUNNER_TEMP/mysqlpunk-logical-versions-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" versions
+
       - name: Preserve synthetic logical migration evidence
         if: always() && matrix.live_tests == true
         uses: actions/upload-artifact@v4
         with:
           name: mysql-logical-migration-evidence
-          path: ${{ runner.temp }}/mysqlpunk-logical-${{ github.run_id }}-${{ github.run_attempt }}/
+          path: ${{ runner.temp }}/mysqlpunk-logical*-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: ignore
 
       - name: Build self-contained installable archives

@@ -11,8 +11,16 @@
 | SQLite → PostgreSQL | SQLite 3.37–3.53 → PostgreSQL 14–17 | INTEGER → bigint、BLOB → bytea、TEXT BINARY → text C；非自增 PK、普通索引 | 隔離 CI PostgreSQL 16 fixture 加入文字／鍵／索引雙向 round-trip；只以這次新 head 結果為證據 |
 | PostgreSQL → SQLite | PostgreSQL 14–17 → SQLite 3.37–3.53 | 上述型別反向映射；PK → WITHOUT ROWID、普通索引 | PG17 實際 roundtrip 與既有 PG16 fixture；PG15 未實機跑 |
 | PostgreSQL → PostgreSQL | 14–17 雙向及同版本 | 同一 bigint/bytea/text C、PK／索引子集與全部預檢 | 真實 17.10 ↔ 14.24、17.10 ↔ 16.15；不是全部版本配對驗證 |
-| MySQL／MariaDB → PostgreSQL | MySQL 8.4.x／MariaDB 11.4.x → PG14–17 | signed BIGINT／LONGTEXT NO PAD binary／LONGBLOB，整數 PK／普通索引；PG 目標單交易 | 正式路徑實際 8.4.11 → PG16.15、11.4.13 → PG16.15，各 1007 列＋空表；其他 PG 版本配對未跑 |
-| PostgreSQL → MySQL／MariaDB | PG14–17 → MySQL 8.4.x／MariaDB 11.4.x | 上述反向映射，專屬 staging＋校驗＋單一 multi-table RENAME＋發布後校驗 | 正式路徑實際 PG16.15 → 8.4.11／11.4.13；不是全版本、全型別或一般 DDL atomic 保證 |
+| MySQL／MariaDB → PostgreSQL | MySQL Community 8.0.x／8.4.x、MariaDB 官方 binary 10.11.x／11.4.x → PG14–17 | signed BIGINT／LONGTEXT NO PAD binary／LONGBLOB，整數 PK／普通索引；PG 目標單交易 | 正式路徑實際 8.4.11／11.4.13 → PG16.15，各 1007 列＋空表；8.0.46／10.11.19 另經同引擎往返後回 PG16.15，不是舊版直接 PG 全配對證據 |
+| PostgreSQL → MySQL／MariaDB | PG14–17 → 上述四個 MySQL／MariaDB 系列 | 上述反向映射，專屬 staging＋校驗＋單一 multi-table RENAME＋發布後校驗 | PG16.15 → 8.0.46／8.4.11／10.11.19／11.4.13；不是全版本、全型別或一般 DDL atomic 保證 |
+| MySQL → MySQL | Community 8.0.x／8.4.x 雙向及同系列 | 同一受控子集，保留固定 PRIMARY 與表內普通索引名稱；專屬 staging 發布 | 正式 8.0.46 → 8.4.11 → 8.0.46，1007 列＋空表；不是每個 patch 或 engine crash 保證 |
+| MariaDB → MariaDB | 官方 binary 10.11.x／11.4.x 雙向及同系列 | 同上，不與 MySQL 互換 | 正式 10.11.19 → 11.4.13 → 10.11.19，1007 列＋空表；不是每個 patch 或 engine crash 保證 |
+
+## 第四階段：最後兩組同引擎新舊版
+
+同引擎路徑沿用下述受控來源快照與 staging 策略，不直接 restore。來源與目標均核對 `SELECT VERSION()` 與 `@@version_comment`：只接受 MySQL Community 的 `MySQL Community Server - GPL` 或 MariaDB 的 `mariadb.org binary distribution`，未知 fork／未驗證發行包／其他版本拒絕。MySQL UI 明列 8.x 僅 8.0／8.4，預览保留完整版本而不把同 major 當 minor 相同；MariaDB 10.11／11.4 分別對應 major 10／11。MariaDB 的 protocol handshake 前綴不作版本證據。
+
+可重跑：`python3 tests/Run-MySqlLogicalMigration.py [新證據目錄] versions`；需先快取上述四個官方映像及 PG16。每組 PG seed → 舊版 → 新版 → 空舊版 → PG，1007 列＋空表、整數複合 PRIMARY、nullable bigint 普通索引、UTF8／emoji／NULL／空文字與 bytes／Int64 極值，逐段 production schema／SHA256 驗證，另實際確認 duplicate PK 被拒絕、具名索引存在。正式路徑也測 batch fault 殘留／禁止重試、同列數來源變更在 DDL 前拒絕、選錯 major／自身／MySQL↔MariaDB 拒絕，以及表內同名 index 保留、往 PG 全域名稱碰撞拒絕。`evidence.json` 留實際版本、映像 digest、來源 hash 與清理結果；不擴張為全部版本組合。
 
 ## 第三階段：MySQL／MariaDB ↔ PostgreSQL
 
@@ -24,7 +32,7 @@
 4. staging catalog／結構／逐欄內容 SHA256 全部吻合、DML 提交後再檢查 staging 與來源，才送出**一個** multi-table RENAME。只限上述版本的 InnoDB 普通表、無 FK／trigger 等相依物件，且不覆蓋名稱。碰撞會失敗，不先刪除目標；發布後再次校驗才 `Verified`。
 5. staging 之前拒絕為 `Refused`。CREATE 曾送出後失敗／取消為 `StagingRemains`，列出本輪 staging→原名與階段；DML 可回滾，但表不會消失，列數只是處理進度。RENAME 曾送出後任何失敗／ack lost 為 `Uncertain`，不推測已發布或已撤銷。兩者禁止 UI 續寫／盲重試，不自動 DROP；Task 與 parent gate 保持到實際操作停止。RENAME 送出後取消不撤銷已提交操作，需等發布／驗證結果。
 
-沒有逐表 checkpoint、自動 cleanup 或 durable 客戶端 resume journal。程序／引擎 crash 不在本輪實際驗證範圍；重啟後任何 staging 或發布物件都讓「必須空目標」預檢拒絕，需 DBA 核對實際 catalog 與本輪報告，不把名稱前綴當成自動刪除授權。不得把正常 RENAME 碰撞探測／注入 ack lost 擴大為實測斷電 crash recovery。
+沒有逐表 checkpoint、自動 cleanup 或 durable 客戶端 resume journal。本輪另以真正 application Process.Kill 驗證下述三個邊界；引擎 crash／斷電未測。重啟後任何 staging 或發布物件都讓「必須空目標」預檢拒絕，需 DBA 核對實際 catalog 與本輪報告，不把名稱前綴當成自動刪除授權。不得把正常 RENAME 碰撞探測／注入 ack lost 擴大為實測斷電 crash recovery。
 
 精確子集：有／無整數單欄或複合 PK（手動給值、最多 16 欄）、具名普通升冪 bigint 索引；BIGINT signed ↔ bigint、LONGTEXT ↔ text C、LONGBLOB ↔ bytea、NULL／NOT NULL。表／欄／索引名只接受小寫 ASCII 63 字元，索引在來源與目標名稱空間不得碰撞。MySQL `PRIMARY` 映射 PG 預設 `表名前58字元_pkey`；PG 自訂 PK 名稱無法保留為 MySQL PRIMARY，預檢拒絕。映射依來源引擎判斷：PG 自訂名稱恰為 `PRIMARY` 仍是明確名稱，PG→PG 保留並實測 `ON CONFLICT ON CONSTRAINT "PRIMARY"`，不誤當 MySQL 內建名稱。恰巧符合預設慣例的手動 PG 名稱無法由 catalog 區分；如依賴該 constraint 名稱，應用 PG 目標，不承諾跨引擎 ON CONFLICT 或字串函式行為相同。
 
@@ -33,6 +41,10 @@
 目前僅能證明直接 global／schema-level 權限的完整 catalog 可見性：SELECT、SHOW VIEW、TRIGGER、EVENT、CREATE ROUTINE、ALTER ROUTINE；角色／表級授權或缺權限會阻擋。不執行 SHOW GRANTS（MariaDB 可能含認證資訊）、不讀秘密或要求新增權限。
 
 可重跑：`python3 tests/Run-MySqlLogicalMigration.py [新證據目錄]`，先快取官方 mysql:8.4、mariadb:11.4、postgres:16-alpine。直接引用正式 Core；唯一 ownership label／loopback 隨機 ports／tmpfs，finally 僅清自有容器。`migration.log`／`evidence.json` 保存實際版本、image digest、來源 hash／清理狀態，不保存資料值／密碼。CI Linux 另跑此 fixture，四平台編譯；這與既有 provider 56/56 分開。
+
+封包與真正子程序終止另跑 `python3 tests/Run-MySqlLogicalMigration.py [新證據目錄] boundaries`，只在自有測試容器啟動參數配置 8 MiB／64 KiB，不變更任何使用者伺服器。8 MiB 目標寫入 100 列、每列各 128 KiB binary 與 UTF8 text（共 25 MiB），確認實際多批及 schema／SHA256 往返；64 KiB 目標可搬 1007 小列＋空表，128 KiB 單欄則在 DDL 前拒絕且目標 0 物件。
+
+同一正式 Core harness 在 staging／未提交 batch／published 三個邊界以耐久 marker 等待自己啟動的 child，真正 `Process.Kill` 後以新連線重跑 production preview：拒絕非空目標且不改物件；未提交 batch 的 staging 沒有資料；published 保留 1007 列＋空表並另作 schema／SHA256 反向搬移校驗。MySQL 8.4.11、MariaDB 11.4.13 三個邊界皆實測通過（Linux exit 137）。這僅證明 application process kill，不是 engine crash／power loss，也沒有自動清除／續寫能力。原獨立 audit-evidence 的兩份 real-crash 日誌與 snapshot 為唯讀歷史來源，本次 repo harness 可持續重跑，不以注入例外充當真 crash。
 
 官方語意依據：MySQL 8.4 [implicit commit](https://dev.mysql.com/doc/refman/8.4/en/implicit-commit.html)／[RENAME TABLE](https://dev.mysql.com/doc/refman/8.4/en/rename-table.html)，MariaDB [implicit commit](https://mariadb.com/docs/server/reference/sql-statements/transactions/sql-statements-that-cause-an-implicit-commit)／[RENAME TABLE](https://mariadb.com/docs/server/reference/sql-statements/data-definition/rename-table)。限於受控版本與物件子集，不宣稱所有 DDL 可回滾。
 
@@ -86,12 +98,12 @@ SQLite／PostgreSQL 工具入口在 Avalonia 工作台「邏輯搬移」。來�
 | 方向 | 現況／執行前拒絕的技術理由 | 下一階段必要能力（不是本輪已通過） |
 | --- | --- | --- |
 | MySQL/MariaDB → SQLite/SQLServer | unsigned、zero date、ENUM/SET、charset、PAD SPACE、AUTO_INCREMENT 等仍無等價映射；與 PG 的受控子集已落地 | 另訂目的端 schema／資料 codec 與語意驗證，不把 count-only transfer 當忠實轉換 |
-| SQLite/SQLServer → MySQL/MariaDB，以及 MySQL↔MariaDB／跨版本 | 不開放這些配對；與 PG 的 staging 路徑不等於其他來源語意已可保留 | 依目的端型別／定序契約與引擎版本驗證擴充；不直接沿用既有對映或自動刪 staging |
+| SQLite/SQLServer → MySQL/MariaDB，以及 MySQL↔MariaDB／其他版本 | 不開放這些配對；已開放的兩組同引擎版本與 PG staging 路徑不等於其他來源語意已可保留 | 依目的端型別／定序契約與引擎版本驗證擴充；不直接沿用既有對映或自動刪 staging |
 | SQLServer → SQLite/PG/MySQL，以及反向 | UTF-16/UTF-8、linguistic/BIN2 定序的比較／尾空白規則、rowversion、decimal/time scale、identity/default/sequence 不能把現有型別名稱替換當成保留語意 | 可重用 SQLServer catalog 的阻擋規則，但需跨 provider canonical schema／資料 codec、來源一致快照與逐欄語意／版本證據；目前只 Windows SQLServer→SQLServer 專用子集可執行 |
 | Oracle/Snowflake 與其他引擎 | NUMBER／時間、空字串 NULL、identifier/collation 與交易 DDL 不等價 | 專用 catalog／codec／交易恢復設計；本輪不開連線 |
 | MongoDB、Redis/Garnet 與表格引擎 | document/key-value model、TTL／原子操作／巢狀內容沒有通用無損表格映射 | 明確專用模型轉換契約，不當成同義 restore |
 
-上述其他方向服務在開連線前拒絕。雙向跨版本／換引擎的整體需求仍未全部完成；目前已擴充 SQLite/PG 與 MySQL/MariaDB↔PG 的可驗證子集，不是全引擎完成或發版宣告。release 仍 hold。
+SQLite/SQLServer 與 MySQL 配對、非關聯式等方向在開連線前拒絕；MySQL↔MariaDB、未知 fork／版本須讀實際 engine catalog 後拒絕，仍在任何目標 DDL 前停止。雙向跨版本／換引擎的整體需求仍未全部完成；目前已擴充 SQLite/PG、MySQL/MariaDB↔PG 與上述兩組同引擎版本的可驗證子集，不是全引擎完成或發版宣告。release 仍 hold。
 
 有 FK、其他字串定序、時間、decimal、identity、procedure/trigger 的一般資料庫仍須使用引擎官方 schema/data migration 工具與人工轉換／驗證，不是宣稱 bacpac 可無限制降版。新版 SQL Server .bak 仍不能直接還原到舊引擎，compatibility level 不改備份格式；既有原生 restore 預檢繼續保留。
 
