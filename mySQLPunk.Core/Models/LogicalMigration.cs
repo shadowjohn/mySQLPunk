@@ -1,7 +1,12 @@
 namespace MySqlPunk.Core.Models;
 
 public sealed record LogicalMigrationColumn(string Name, string Kind, bool Nullable);
-public sealed record LogicalMigrationTable(string Name, IReadOnlyList<LogicalMigrationColumn> Columns, long Rows, string ContentHash);
+public sealed record LogicalMigrationIndex(string Name, IReadOnlyList<string> Columns);
+public sealed record LogicalMigrationTable(string Name, IReadOnlyList<LogicalMigrationColumn> Columns, long Rows, string ContentHash)
+{
+    public IReadOnlyList<string> PrimaryKey { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<LogicalMigrationIndex> Indexes { get; init; } = Array.Empty<LogicalMigrationIndex>();
+}
 public sealed record LogicalMigrationPreview(
     string SourceVersion, string TargetVersion, string TargetDatabase,
     IReadOnlyList<LogicalMigrationTable> Tables, IReadOnlyList<string> Statements,

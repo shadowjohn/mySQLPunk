@@ -17,7 +17,7 @@ using (var database = new SqliteConnection("Data Source=" + databasePath))
 {
     database.Open();
     using var command = database.CreateCommand();
-    command.CommandText = "CREATE TABLE fixture (id INTEGER NOT NULL, label BLOB) STRICT; INSERT INTO fixture VALUES (1, X'00FF');";
+    command.CommandText = "CREATE TABLE fixture (id INTEGER NOT NULL, label BLOB, name TEXT COLLATE BINARY NOT NULL, PRIMARY KEY(id)) STRICT, WITHOUT ROWID; CREATE INDEX fixture_name ON fixture(name); INSERT INTO fixture VALUES (1, X'00FF', '臺灣😀');";
     command.ExecuteNonQuery();
 }
 await store.SaveAsync(new[] { new ConnectionProfile { Name = "Isolated profile operations", Provider = DatabaseProviderKind.Sqlite, Database = databasePath } });
@@ -96,6 +96,7 @@ return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().AfterSetu
             inspectMigration.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
             await Wait(() => inspectMigration.IsEnabled && applyMigration.IsEnabled);
             Check(((TextBox)Field(migration, "_report")!).Text!.Contains("STRICT"), "Actual migration UI renders schema/data preview without row values");
+            Check(((TextBox)Field(migration, "_report")!).Text!.Contains("CREATE INDEX") && !((TextBox)Field(migration, "_report")!).Text!.Contains("臺灣😀"), "Actual UI previews text/PK/index DDL without exposing values");
             ((TextBox)Field(migration, "_database")!).Text = migrationTarget + ".changed";
             Check(!applyMigration.IsEnabled, "Changed target invalidates UI approval");
             ((TextBox)Field(migration, "_database")!).Text = migrationTarget;
@@ -113,8 +114,13 @@ return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().AfterSetu
             Check(!inspectMigration.IsEnabled && !applyMigration.IsEnabled, "Verified UI completion forbids duplicate resume");
             using (var database = new SqliteConnection("Data Source=" + migrationTarget))
             {
-                database.Open(); using var command = database.CreateCommand(); command.CommandText = "SELECT count(*) FROM fixture WHERE id=1 AND label=X'00FF';";
-                Check(Convert.ToInt64(command.ExecuteScalar()) == 1, "Actual UI transfer preserves integer and binary data");
+                database.Open(); using var command = database.CreateCommand(); command.CommandText = "SELECT count(*) FROM fixture WHERE id=1 AND label=X'00FF' AND name='臺灣😀';";
+                Check(Convert.ToInt64(command.ExecuteScalar()) == 1, "Actual UI transfer preserves integer, text and binary data");
+                command.CommandText = "SELECT count(*) FROM sqlite_schema WHERE name='fixture_name' AND type='index';";
+                Check(Convert.ToInt64(command.ExecuteScalar()) == 1, "Actual UI transfer creates approved index");
+                command.CommandText = "INSERT INTO fixture VALUES(1,NULL,'duplicate');";
+                try { command.ExecuteNonQuery(); throw new Exception("Actual UI target PK must reject duplicate"); }
+                catch (SqliteException) { Check(true, "Actual UI transfer retains PK enforcement"); }
             }
             migration.Close();
             await Wait(() => Field(window, "_operationCancellation") == null);

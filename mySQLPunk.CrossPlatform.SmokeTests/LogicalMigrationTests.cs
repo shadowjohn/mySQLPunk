@@ -63,6 +63,20 @@ internal static class LogicalMigrationTests
             catch (SqliteException) { Check(!File.Exists(missing.Database), "No automatic creation of missing target"); }
             var unsupported = source.Clone(); unsupported.Provider = DatabaseProviderKind.MySql;
             Check(!(await LogicalMigrationService.PreviewAsync(unsupported, reverse, 3)).CanStart, "Unsupported engine refused without opening a network connection");
+            var large = Profile(Path.Combine(root, "large.db"));
+            using (var owner = DatabaseProviderFactory.Create(large))
+            {
+                await owner.ExecuteAsync(large.Database, "CREATE TABLE large (payload BLOB) STRICT; INSERT INTO large VALUES (zeroblob(33554432));");
+                var empty = Profile(Path.Combine(root, "large-target.db")); CreateEmpty(empty.Database);
+                var allocatedBefore = GC.GetTotalAllocatedBytes(true);
+                try { await LogicalMigrationService.PreviewAsync(large, empty, 3); throw new Exception("Oversize BLOB must be denied"); }
+                catch (InvalidOperationException error) { Check(error.Message.Contains("1 MiB"), "Length refusal before materialization"); }
+                Check(GC.GetTotalAllocatedBytes(true) - allocatedBefore < 8 * 1024 * 1024, "32 MiB BLOB is not materialized in managed memory");
+                Check(await ObjectCountAsync(empty) == 0, "Oversize read leaves target empty");
+                await owner.ExecuteAsync(large.Database, "UPDATE large SET payload=zeroblob(1048576);");
+                var boundary = await LogicalMigrationService.PreviewAsync(large, empty, 3);
+                Check(boundary.CanStart && (await LogicalMigrationService.RunAsync(large, empty, 3, boundary, empty.Database)).Outcome == LogicalMigrationOutcome.Verified, "1 MiB inclusive boundary transfers in bounded chunks");
+            }
             foreach (var definition in new[]
             {
                 "CREATE TABLE bad (id INTEGER PRIMARY KEY, payload BLOB) STRICT;",
@@ -72,7 +86,11 @@ internal static class LogicalMigrationTests
                 "CREATE TABLE bad (id TEXT COLLATE NOCASE, payload BLOB) STRICT;",
                 "CREATE TABLE bad (id INTEGER, payload BLOB);",
                 "CREATE TABLE bad (id INTEGER REFERENCES sample(number), payload BLOB) STRICT;",
-                "CREATE TABLE bad (id INTEGER, payload BLOB) STRICT; CREATE INDEX bad_index ON bad(id);",
+                "CREATE TABLE bad (id INTEGER, payload BLOB) STRICT; CREATE INDEX bad_index ON bad(id DESC);",
+                "CREATE TABLE bad (id INTEGER NOT NULL, PRIMARY KEY(id)) STRICT;",
+                "CREATE TABLE bad (id TEXT NOT NULL, PRIMARY KEY(id)) STRICT, WITHOUT ROWID; CREATE UNIQUE INDEX bad_index ON bad(id);",
+                "CREATE TABLE bad (id TEXT NOT NULL, PRIMARY KEY(id)) STRICT, WITHOUT ROWID; CREATE INDEX bad_index ON bad(lower(id));",
+                "CREATE TABLE bad (id TEXT NOT NULL, PRIMARY KEY(id)) STRICT, WITHOUT ROWID; CREATE INDEX bad_index ON bad(id) WHERE id<>'';",
                 "CREATE TABLE bad (id INTEGER, payload BLOB) STRICT; CREATE TRIGGER bad_trigger AFTER INSERT ON bad BEGIN SELECT 1; END;",
                 "CREATE VIEW bad AS SELECT 1;"
             })
@@ -82,6 +100,7 @@ internal static class LogicalMigrationTests
                 var empty = Profile(Path.Combine(root, "empty-" + Guid.NewGuid().ToString("N") + ".db")); CreateEmpty(empty.Database);
                 Check(!(await LogicalMigrationService.PreviewAsync(blocked, empty, 3)).CanStart && await ObjectCountAsync(empty) == 0, "Catalog blocks unsupported SQLite semantics");
             }
+            await TextKeysAsync(root);
         }
         finally { Directory.Delete(root, true); }
     }
@@ -103,18 +122,37 @@ internal static class LogicalMigrationTests
             await admin.ExecuteAsync("postgres", "CREATE DATABASE \"" + postgres.Database + "\";"); created = true;
             var sqlite = Profile(Path.Combine(root, "source.db"));
             using var origin = DatabaseProviderFactory.Create(sqlite);
-            await origin.ExecuteAsync(sqlite.Database, "CREATE TABLE sample (number INTEGER, payload BLOB NOT NULL) STRICT; INSERT INTO sample VALUES (-9223372036854775808,X'00FF'),(9223372036854775807,X''),(NULL,X'01'),(NULL,X'01');");
+            await origin.ExecuteAsync(sqlite.Database, "CREATE TABLE sample (number INTEGER, payload BLOB NOT NULL) STRICT; INSERT INTO sample VALUES (-9223372036854775808,X'00FF'),(9223372036854775807,X''),(NULL,X'01'),(NULL,X'01');" + BusinessSql);
             var forward = await LogicalMigrationService.PreviewAsync(sqlite, postgres, 16);
             Check(forward.CanStart, "Real PostgreSQL catalog allows restricted empty target: " + string.Join(";", forward.Blockers));
             Check((await LogicalMigrationService.RunAsync(sqlite, postgres, 16, forward, postgres.Database)).Outcome == LogicalMigrationOutcome.Verified, "SQLite -> PostgreSQL real typed transfer");
+            var pgOrder = await admin.ExecuteAsync(postgres.Database, "SELECT label FROM customers ORDER BY label;");
+            Check(pgOrder.Rows.Select(row => Convert.ToString(row[0])).SequenceEqual(new[] { "A", "a", "é", "臺灣😀" }), "Real PostgreSQL C collation retains binary Unicode ordering");
+            try { await admin.ExecuteAsync(postgres.Database, "INSERT INTO lines VALUES(1,'A');"); throw new Exception("PG composite PK must reject duplicate"); }
+            catch (Npgsql.PostgresException error) { Check(error.SqlState == "23505", "Real PG primary key enforced"); }
+            var oversizedTarget = Profile(Path.Combine(root, "pg-oversized-target.db")); CreateEmpty(oversizedTarget.Database);
+            await admin.ExecuteAsync(postgres.Database, "CREATE TABLE bounded_payload(payload bytea); INSERT INTO bounded_payload VALUES(decode(repeat('FF',33554432),'hex')); ");
+            var allocatedBefore = GC.GetTotalAllocatedBytes(true);
+            try { await LogicalMigrationService.PreviewAsync(postgres, oversizedTarget, 3); throw new Exception("Oversize PG BLOB must be refused"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("1 MiB"), "PG length refusal precedes streaming materialization"); }
+            Check(GC.GetTotalAllocatedBytes(true) - allocatedBefore < 8 * 1024 * 1024 && await ObjectCountAsync(oversizedTarget) == 0, "Real PG 32 MiB BLOB is not transported as a full managed field and target stays empty");
+            await admin.ExecuteAsync(postgres.Database, "UPDATE bounded_payload SET payload=decode(repeat('FF',1048576),'hex');");
+            var boundary = await LogicalMigrationService.PreviewAsync(postgres, oversizedTarget, 3);
+            Check(boundary.CanStart && (await LogicalMigrationService.RunAsync(postgres, oversizedTarget, 3, boundary, oversizedTarget.Database)).Outcome == LogicalMigrationOutcome.Verified, "Real PG 1 MiB boundary streams and verifies into SQLite");
+            await admin.ExecuteAsync(postgres.Database, "DROP TABLE bounded_payload;");
             var reverse = Profile(Path.Combine(root, "target.db")); CreateEmpty(reverse.Database);
             var backward = await LogicalMigrationService.PreviewAsync(postgres, reverse, 3);
-            Check(backward.CanStart && backward.Tables.Single().ContentHash == forward.Tables.Single().ContentHash, "PostgreSQL -> SQLite real catalog and content");
+            Check(backward.CanStart && backward.Tables.Select(table => table.ContentHash).SequenceEqual(forward.Tables.Select(table => table.ContentHash)), "PostgreSQL -> SQLite real catalog and content");
             Check((await LogicalMigrationService.RunAsync(postgres, reverse, 3, backward, reverse.Database)).Outcome == LogicalMigrationOutcome.Verified, "PostgreSQL -> SQLite verified commit");
+            await CheckBusinessAsync(reverse);
             using var pgOwner = DatabaseProviderFactory.Create(postgres);
             foreach (var mutation in new[]
             {
+                ("CREATE INDEX extra ON sample((number%2));", "DROP INDEX extra;"),
                 ("CREATE INDEX extra ON sample(number);", "DROP INDEX extra;"),
+                ("CREATE UNIQUE INDEX extra ON customers(label);", "DROP INDEX extra;"),
+                ("CREATE INDEX extra ON customers(label COLLATE \"POSIX\");", "DROP INDEX extra;"),
+                ("ALTER TABLE customers ALTER COLUMN label TYPE text COLLATE \"default\";", "ALTER TABLE customers ALTER COLUMN label TYPE text COLLATE \"C\";"),
                 ("ALTER TABLE sample ALTER COLUMN number SET DEFAULT 1;", "ALTER TABLE sample ALTER COLUMN number DROP DEFAULT;"),
                 ("CREATE SEQUENCE extra_sequence;", "DROP SEQUENCE extra_sequence;"),
                 ("SELECT lo_create(1736281931);", "SELECT lo_unlink(1736281931);"),
@@ -137,6 +175,63 @@ internal static class LogicalMigrationTests
             Npgsql.NpgsqlConnection.ClearAllPools();
             if (created) await admin.ExecuteAsync("postgres", "DROP DATABASE \"" + postgres.Database + "\";");
             Directory.Delete(root, true);
+        }
+    }
+
+    private const string BusinessSql = "CREATE TABLE customers (id INTEGER NOT NULL, label TEXT COLLATE BINARY NOT NULL, note TEXT, payload BLOB, PRIMARY KEY(id)) STRICT, WITHOUT ROWID; " +
+        "CREATE INDEX customer_label ON customers(label); CREATE INDEX customer_note ON customers(note,id); " +
+        "CREATE TABLE lines (customer INTEGER NOT NULL, code TEXT NOT NULL, PRIMARY KEY(customer,code)) STRICT, WITHOUT ROWID; " +
+        "INSERT INTO customers VALUES (1,'臺灣😀','',X'00FF'),(2,'A',NULL,NULL),(3,'a','é',X''),(4,'é','中文',NULL); " +
+        "INSERT INTO lines VALUES (1,'A'),(1,'a'),(2,'😀');";
+
+    private static async Task TextKeysAsync(string root)
+    {
+        var source = Profile(Path.Combine(root, "business.db"));
+        var target = Profile(Path.Combine(root, "business-target.db")); CreateEmpty(target.Database);
+        using var owner = DatabaseProviderFactory.Create(source);
+        await owner.ExecuteAsync(source.Database, BusinessSql);
+        var preview = await LogicalMigrationService.PreviewAsync(source, target, 3);
+        Check(preview.CanStart && preview.Tables.Single(table => table.Name == "customers").PrimaryKey.SequenceEqual(new[] { "id" }) && preview.Statements.Count == 4, "Real text, manual integer/composite PK and ordinary indexes preview: " + string.Join(";", preview.Blockers));
+        using (var cancel = new CancellationTokenSource())
+        {
+            var canceled = await LogicalMigrationService.RunWithObserverAsync(source, target, 3, preview, target.Database, cancel.Token,
+                (stage, connection, transaction) => { if (stage == "index") cancel.Cancel(); });
+            Check(canceled.Outcome == LogicalMigrationOutcome.RolledBack && await ObjectCountAsync(target) == 0, "Cancel after first real index rolls back schema, indexes and rows");
+        }
+        await owner.ExecuteAsync(source.Database, "DROP INDEX customer_note; CREATE INDEX customer_note ON customers(id,note);");
+        var changed = await LogicalMigrationService.RunAsync(source, target, 3, preview, target.Database);
+        Check(changed.Outcome == LogicalMigrationOutcome.RolledBack && await ObjectCountAsync(target) == 0, "Index column-order change invalidates approved fingerprint");
+        await owner.ExecuteAsync(source.Database, "DROP INDEX customer_note; CREATE INDEX customer_note ON customers(note,id);");
+        var failed = await LogicalMigrationService.RunWithObserverAsync(source, target, 3, preview, target.Database, CancellationToken.None,
+            (stage, connection, transaction) =>
+            {
+                if (stage != "verify") return;
+                using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = "DROP INDEX customer_note;"; command.ExecuteNonQuery();
+            });
+        Check(failed.Outcome == LogicalMigrationOutcome.RolledBack && await ObjectCountAsync(target) == 0, "Missing index in verification rolls back all schema/data");
+        Check((await LogicalMigrationService.RunAsync(source, target, 3, preview, target.Database)).Outcome == LogicalMigrationOutcome.Verified, "Real business schema/content verified transfer");
+        await CheckBusinessAsync(target);
+        var empty = Profile(Path.Combine(root, "text-invalid-target.db")); CreateEmpty(empty.Database);
+        foreach (var value in new[] { "CAST(X'FF' AS TEXT)", "CAST(X'410042' AS TEXT)", "printf('%.*c',1048577,'a')" })
+        {
+            await owner.ExecuteAsync(source.Database, "UPDATE customers SET note=" + value + " WHERE id=1;");
+            try { await LogicalMigrationService.PreviewAsync(source, empty, 3); throw new Exception("Invalid or oversized text must be refused"); }
+            catch (InvalidOperationException) { Check(await ObjectCountAsync(empty) == 0, "Invalid UTF8/NUL/oversized text leaves empty target"); }
+        }
+        Console.WriteLine("PASS 真實 SQLite 文字、主鍵、索引、限額與回滾子案例");
+    }
+
+    private static async Task CheckBusinessAsync(ConnectionProfile profile)
+    {
+        using var owner = DatabaseProviderFactory.Create(profile);
+        var ordered = await owner.ExecuteAsync(profile.Database, "SELECT label FROM customers ORDER BY label;");
+        Check(ordered.Rows.Select(row => Convert.ToString(row[0])).SequenceEqual(new[] { "A", "a", "é", "臺灣😀" }), "Binary UTF8 collation order preserved");
+        var indexes = await owner.ExecuteAsync(profile.Database, "PRAGMA index_list(customers);");
+        Check(indexes.Rows.Any(row => Equals(row[1], "customer_label")) && indexes.Rows.Any(row => Equals(row[1], "customer_note")), "Actual index names preserved");
+        foreach (var sql in new[] { "INSERT INTO customers(id,label) VALUES (1,'duplicate');", "INSERT INTO customers(label) VALUES ('no automatic identity');", "INSERT INTO lines VALUES(1,'A');" })
+        {
+            try { await owner.ExecuteAsync(profile.Database, sql); throw new Exception("PK constraint must reject write"); }
+            catch (SqliteException) { }
         }
     }
 

@@ -626,4 +626,4 @@
 
 # 可驗證雙向與跨引擎邏輯搬移
 
-Windows SQL Server 專用工具加入受限升版／降版／同版本方向；Avalonia 工作台新增 SQLite STRICT 與 PostgreSQL 的 INTEGER/bigint、BLOB/bytea 搬移。兩種工具都只寫入明確確認的新空目標，不把未支援型別、鍵、索引、預設值、trigger/procedure 等靜默丟掉。方向、實際版本、交易／取消／不確定重試及測試矩陣見 [LOGICAL_MIGRATION_MATRIX.md](LOGICAL_MIGRATION_MATRIX.md)。一般資料傳輸與 SQL 文字轉換不等於此處的可驗證邏輯還原。
+Windows SQL Server 專用工具加入受限升版／降版／同版本方向；Avalonia 工作台提供 SQLite STRICT 與 PostgreSQL 的 INTEGER/bigint、BLOB/bytea、有效 UTF-8 TEXT BINARY/C、非自增 PK 與普通升冪索引搬移。兩種工具都只寫入明確確認的新空目標，不把未支援型別、鍵、索引、預設值、trigger/procedure 等靜默丟掉。大型欄位先 SQL 長度／限額投影再讀值，索引及主鍵納入 fingerprint 與正式 catalog 驗證。方向、實際版本、交易／取消／不確定重試及測試矩陣見 [LOGICAL_MIGRATION_MATRIX.md](LOGICAL_MIGRATION_MATRIX.md)。一般資料傳輸與 SQL 文字轉換不等於此處的可驗證邏輯還原。
