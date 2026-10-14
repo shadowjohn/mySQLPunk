@@ -14,6 +14,16 @@ public static class SqlServerMigrationTests
         foreach (string type in new[] { "vector", "xml", "nvarchar(max)", "nvarchar(4001)", "varchar(8001)", "decimal(2,3)", "int);DROP TABLE x--" }) Check(!SqlServerCompatibilityMigration.IsSupportedType(type), "Unsafe type " + type);
         foreach (int major in SqlServerCompatibilityMigration.SupportedTargetMajors.Where(value => value < 17))
             Check(SqlServerCompatibilityMigration.Preview(Source().Catalog, Target(major).Catalog, major).CanStart, "Declared matrix " + major);
+        foreach (int sourceMajor in SqlServerCompatibilityMigration.SupportedTargetMajors)
+            foreach (int targetMajor in SqlServerCompatibilityMigration.SupportedTargetMajors)
+            {
+                var origin = Source(); origin.Catalog.MajorVersion = sourceMajor;
+                var destination = Target(targetMajor);
+                var direction = SqlServerCompatibilityMigration.Preview(origin.Catalog, destination.Catalog, targetMajor);
+                Check(direction.CanStart, "Bidirectional preflight " + sourceMajor + " -> " + targetMajor);
+                var migrated = SqlServerCompatibilityMigration.Run(direction, "empty", origin, destination, CancellationToken.None);
+                Check(migrated.Succeeded && migrated.Rows == 1001 && destination.Commits == 1, "Bidirectional verified transaction " + sourceMajor + " -> " + targetMajor);
+            }
         var from = Source(); var to = Target(15);
         var plan = SqlServerCompatibilityMigration.Preview(from.Catalog, to.Catalog, 15);
         Check(plan.CanStart && plan.Statements.Single().Contains("[na]]me]"), "Preview quoted DDL");
