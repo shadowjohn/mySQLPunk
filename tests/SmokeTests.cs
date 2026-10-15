@@ -36,6 +36,10 @@ public static partial class SmokeTests
         Run("MySQL export service and manifest atomic write", MySqlExport_ServiceAndManifest_AtomicWrite, ref passed);
         Run("MySQL import preflight scanner delimiters and manifest", MySqlImport_PreflightScanner_DelimitersAndManifest, ref passed);
         Run("MySQL import runner execution and log", MySqlImport_Runner_ExecutionAndLog, ref passed);
+        Run("MySQL import runner error detection halt and continue", MySqlImport_Runner_ErrorDetection_HaltAndContinue, ref passed);
+        Run("MySQL import runner database redirection", MySqlImport_Runner_DatabaseRedirection, ref passed);
+        Run("MySQL import runner existing object strategies", MySqlImport_Runner_ExistingObjectStrategies, ref passed);
+        Run("MySQL import runner manifest mismatch detection", MySqlImport_Runner_ManifestMismatchDetection, ref passed);
         Run("MSSQL import Transfer guards", MssqlImportTransferGuards, ref passed);
         Run("MSSQL import Transfer trial", MssqlImportTransferTrial, ref passed);
         Run("MSSQL import worker published cleanup receipt", MssqlImportPublishedReleaseRace, ref passed);

@@ -62,7 +62,8 @@ namespace mySQLPunk.lib.MySqlImport
                 if (disposed) return;
                 if (success)
                 {
-                    writer.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [OK] Line {lineNumber}: {preview}");
+                    string tag = string.IsNullOrWhiteSpace(action) ? "OK" : action;
+                    writer.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [{tag}] Line {lineNumber}: {preview}");
                 }
                 else
                 {
@@ -105,6 +106,7 @@ namespace mySQLPunk.lib.MySqlImport
                 writer.WriteLine($"Executed  : {result.ExecutedStatements} statements");
                 writer.WriteLine($"Failed    : {result.FailedStatements} statements");
                 writer.WriteLine($"Skipped   : {result.SkippedStatements} statements");
+                writer.WriteLine($"Rows      : {result.TotalRowsAffected:N0} rows affected");
                 writer.WriteLine($"Duration  : {result.Elapsed.TotalSeconds:F2} seconds");
                 writer.WriteLine($"Summary   : {result.Summary}");
                 writer.WriteLine("================================================================================");

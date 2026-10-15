@@ -568,7 +568,7 @@ namespace mySQLPunk
                 }
                 else if (Result.Status == MySqlImportStatus.CompletedWithErrors)
                 {
-                    currentStatementLabel.Text = T("⚠️ 匯入完成，但有部分語句失敗／略過。", "⚠️ Import finished with errors / skipped statements.");
+                    currentStatementLabel.Text = T("⚠️ 匯入完成，但有部分語句失敗／略過或列數不符。", "⚠️ Import finished with errors, skipped statements or row mismatch.");
                     resultText.Text = Result.Summary;
                 }
                 else if (Result.Status == MySqlImportStatus.Cancelled)
@@ -619,7 +619,7 @@ namespace mySQLPunk
             }
             currentStatementLabel.Text = p.Message;
             speedLabel.Text = string.Format(T("速率：{0:N0} KB/秒", "Speed: {0:N0} KB/s"), p.BytesPerSecond / 1024.0);
-            errorCountLabel.Text = string.Format(T("錯誤：{0} 筆", "Errors: {0}"), p.FailedStatements);
+            errorCountLabel.Text = string.Format(T("已寫入：{0:N0} 列 · 錯誤：{1} 筆", "Written: {0:N0} rows · Errors: {1}"), p.TotalRowsAffected, p.FailedStatements);
             elapsedLabel.Text = string.Format(T("耗時：{0:mm\\:ss}", "Elapsed: {0:mm\\:ss}"), p.Elapsed);
             etaLabel.Text = p.EstimatedRemaining.HasValue
                 ? string.Format(T("預估剩餘：約 {0:mm\\:ss}", "ETA: approx. {0:mm\\:ss}"), p.EstimatedRemaining.Value)

@@ -76,6 +76,7 @@ namespace mySQLPunk.lib.MySqlImport
         public int ExecutedStatements { get; }
         public int FailedStatements { get; }
         public int SkippedStatements { get; }
+        public long TotalRowsAffected { get; }
         public double BytesPerSecond { get; }
         public TimeSpan Elapsed { get; }
         public TimeSpan? EstimatedRemaining { get; }
@@ -90,6 +91,7 @@ namespace mySQLPunk.lib.MySqlImport
             int executedStatements,
             int failedStatements,
             int skippedStatements,
+            long totalRowsAffected,
             double bytesPerSecond,
             TimeSpan elapsed,
             TimeSpan? estimatedRemaining,
@@ -103,11 +105,29 @@ namespace mySQLPunk.lib.MySqlImport
             ExecutedStatements = executedStatements;
             FailedStatements = failedStatements;
             SkippedStatements = skippedStatements;
+            TotalRowsAffected = totalRowsAffected;
             BytesPerSecond = bytesPerSecond;
             Elapsed = elapsed;
             EstimatedRemaining = estimatedRemaining;
             CurrentStatementPreview = currentStatementPreview;
             Message = message;
+        }
+
+        public MySqlImportProgress(
+            Guid jobId,
+            MySqlImportStage stage,
+            long totalBytes,
+            long processedBytes,
+            int executedStatements,
+            int failedStatements,
+            int skippedStatements,
+            double bytesPerSecond,
+            TimeSpan elapsed,
+            TimeSpan? estimatedRemaining,
+            string currentStatementPreview,
+            string message)
+            : this(jobId, stage, totalBytes, processedBytes, executedStatements, failedStatements, skippedStatements, 0, bytesPerSecond, elapsed, estimatedRemaining, currentStatementPreview, message)
+        {
         }
     }
 
@@ -119,6 +139,7 @@ namespace mySQLPunk.lib.MySqlImport
         public int ExecutedStatements { get; }
         public int FailedStatements { get; }
         public int SkippedStatements { get; }
+        public long TotalRowsAffected { get; }
         public string LogPath { get; }
         public TimeSpan Elapsed { get; }
         public string Summary { get; }
@@ -131,6 +152,7 @@ namespace mySQLPunk.lib.MySqlImport
             int executedStatements,
             int failedStatements,
             int skippedStatements,
+            long totalRowsAffected,
             string logPath,
             TimeSpan elapsed,
             string summary,
@@ -142,10 +164,26 @@ namespace mySQLPunk.lib.MySqlImport
             ExecutedStatements = executedStatements;
             FailedStatements = failedStatements;
             SkippedStatements = skippedStatements;
+            TotalRowsAffected = totalRowsAffected;
             LogPath = logPath;
             Elapsed = elapsed;
             Summary = summary;
             if (errors != null) Errors.AddRange(errors);
+        }
+
+        public MySqlImportResult(
+            Guid jobId,
+            MySqlImportStatus status,
+            long fileBytes,
+            int executedStatements,
+            int failedStatements,
+            int skippedStatements,
+            string logPath,
+            TimeSpan elapsed,
+            string summary,
+            IEnumerable<string> errors = null)
+            : this(jobId, status, fileBytes, executedStatements, failedStatements, skippedStatements, 0, logPath, elapsed, summary, errors)
+        {
         }
     }
 }
