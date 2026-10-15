@@ -10,6 +10,10 @@
   - **獨立日誌與即時審計**：所有匯入執行步驟與錯誤皆獨立記錄至 `%LOCALAPPDATA%\mySQLPunk\ImportLogs`，並於匯入完成後自動比對 Native Manifest 目標列數，確認還原完整性。
 
 ### 🛠️ 問題修正與優化
+- **MySQL 匯出與匯入精靈版面與體驗優化**：
+  - **修復版面跑版坍塌**：修正步驟 2 與步驟 3 之設定 GroupBox 在 FlowLayoutPanel 內因 AutoSize 導致寬度坍塌至邊框寬度 (~15px) 造成文字嚴重擠壓折疊之跑版問題，改採標準固定寬度 (740px) 與適應性內部流式排版。
+  - **新增 MySQL 專屬高速還原與約束優化選項**：新增「匯入時關閉唯一性檢查 (`SET UNIQUE_CHECKS = 0`)，啟用 Insert Buffer 提升大量匯入速度 2~5 倍」與「防止主鍵 0 被 AUTO_INCREMENT 覆蓋 (`SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO'`)」開關，兼顧高速傾印與匯入資料正確性。
+  - **看板娘 Punky 動畫與音效支援**：匯出與匯入執行階段全面啟用看板娘 Punky（崩琦）73 幀雙緩衝整理資料動畫，並伴隨播放原版音效（`punky_report_loading.wav`）；支援一鍵靜音切換按鈕與吉祥物即時作業狀態提示。
 - **README.md 門面全新改版與文件模組化**：全面改寫 README.md 為現代、圖文並茂的開源專案門面，融入看板娘 Punky 崩琦角色元素，並加入 S1~S6 完整使用畫面截圖；深層工程與建置細節分別拆分為 `TODO.md`、`docs/DEVELOPMENT.md`、`docs/ARCHITECTURE.md` 與 `docs/DATA_SAFETY_SPEC.md`。
 
 ## [1.0.0.23] - 2026-10-14

@@ -44,6 +44,8 @@ namespace mySQLPunk.lib.MySqlExport
         public string TargetPath { get; set; }
         public bool SingleTransaction { get; set; } = true;
         public bool DisableForeignKeyChecks { get; set; } = true;
+        public bool DisableUniqueChecks { get; set; } = true;
+        public bool SetNoAutoValueOnZero { get; set; } = true;
         public bool IncludeDropStatements { get; set; } = true;
         public bool IncludeCreateDatabase { get; set; } = false;
         public bool IncludeUseDatabase { get; set; } = true;

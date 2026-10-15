@@ -132,8 +132,12 @@ namespace mySQLPunk.lib.MySqlExport
                     writer.WriteLine("-- ========================================================");
                     writer.WriteLine();
                     writer.WriteLine("SET NAMES utf8mb4;");
+                    if (options.SetNoAutoValueOnZero)
+                        writer.WriteLine("SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';");
                     if (options.DisableForeignKeyChecks)
                         writer.WriteLine("SET FOREIGN_KEY_CHECKS = 0;");
+                    if (options.DisableUniqueChecks)
+                        writer.WriteLine("SET UNIQUE_CHECKS = 0;");
                     if (options.IncludeCreateDatabase)
                     {
                         var info = db.GetDatabaseInfo(databaseName) ?? new Dictionary<string, string>();
@@ -313,6 +317,8 @@ namespace mySQLPunk.lib.MySqlExport
                         }
                     }
 
+                    if (options.DisableUniqueChecks)
+                        writer.WriteLine("SET UNIQUE_CHECKS = 1;");
                     if (options.DisableForeignKeyChecks)
                         writer.WriteLine("SET FOREIGN_KEY_CHECKS = 1;");
 

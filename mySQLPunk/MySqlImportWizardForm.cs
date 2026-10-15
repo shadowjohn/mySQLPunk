@@ -24,8 +24,8 @@ namespace mySQLPunk
         private readonly Label stepsLabel = new Label(), statusLabel = new Label(), fileFactsLabel = new Label();
         private readonly Label checkSummary = new Label(), confirmSummary = new Label();
         private readonly Label currentStatementLabel = new Label(), coverageLabel = new Label(), speedLabel = new Label();
-        private readonly Label elapsedLabel = new Label(), etaLabel = new Label(), errorCountLabel = new Label(), resultText = new Label();
-        private readonly Button nextButton = new Button(), backButton = new Button(), cancelButton = new Button(), browseButton = new Button();
+        private readonly Label elapsedLabel = new Label(), etaLabel = new Label(), errorCountLabel = new Label(), resultText = new Label(), mascotHint = new Label();
+        private readonly Button nextButton = new Button(), backButton = new Button(), cancelButton = new Button(), browseButton = new Button(), soundButton = new Button();
         private readonly Button recheckButton = new Button(), openLogButton = new Button(), openFolderButton = new Button(), copyPathButton = new Button();
         private readonly ProgressBar execBar = new ProgressBar(), scanBar = new ProgressBar();
         private readonly PunkyReportLoadingControl punky = new PunkyReportLoadingControl();
@@ -221,8 +221,14 @@ namespace mySQLPunk
             content.Controls.Add(HeaderLabel(T("步驟 3：確認執行與策略設定", "Step 3: Confirm execution and strategy")));
             content.Controls.Add(HintLabel(T("請確認目標資料庫、設定物件衝突時的處理原則與獨立日誌儲存位置。", "Review target database, conflict handling strategy, and independent log location.")));
 
-            var optGroup = new GroupBox { Text = T("匯入策略與錯誤政策", "Import and Error Policies"), Width = 700, AutoSize = true, Padding = new Padding(12), Margin = new Padding(0, 6, 0, 12) };
-            var groupFlow = Stack();
+            var optGroup = new GroupBox
+            {
+                Text = T("匯入策略與錯誤政策", "Import and Error Policies"),
+                Size = new Size(740, 140),
+                Padding = new Padding(12),
+                Margin = new Padding(0, 6, 0, 12)
+            };
+            var groupFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
             optGroup.Controls.Add(groupFlow);
 
             groupFlow.Controls.Add(new Label { Text = T("既有物件策略：", "Existing Object Strategy:"), AutoSize = true, Margin = new Padding(0, 4, 0, 4) });
@@ -327,10 +333,35 @@ namespace mySQLPunk
 
             topPanel.Controls.Add(statsFlow, 0, 0);
 
-            // 右側 Punky 動畫控制項
-            punky.Dock = DockStyle.Fill;
-            punky.MinimumSize = new Size(180, 160);
-            topPanel.Controls.Add(punky, 1, 0);
+            // 右側放置 Punky 整理資料動畫與音效控制
+            var mascotPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Padding = new Padding(12, 0, 0, 0)
+            };
+            punky.Name = "mysqlImportPunky";
+            punky.Size = new Size(200, 200);
+            punky.Margin = new Padding(0, 0, 0, 4);
+            mascotPanel.Controls.Add(punky);
+
+            mascotHint.Text = T("正在幫你匯入資料！", "Importing your data!");
+            mascotHint.Font = UiKit.Body;
+            mascotHint.AutoSize = true;
+            mascotHint.Margin = new Padding(0, 0, 0, 6);
+            mascotPanel.Controls.Add(mascotHint);
+
+            ConfigureButton(soundButton, "mysqlImportToggleSound", punky.Muted ? T("開啟聲音", "Unmute") : T("靜音", "Mute"), (s, e) =>
+            {
+                punky.Muted = !punky.Muted;
+                soundButton.Text = punky.Muted ? T("開啟聲音", "Unmute") : T("靜音", "Mute");
+            });
+            soundButton.Enabled = punky.AudioAvailable;
+            soundButton.AutoSize = true;
+            mascotPanel.Controls.Add(soundButton);
+
+            topPanel.Controls.Add(mascotPanel, 1, 0);
 
             content.Controls.Add(topPanel);
 
@@ -477,6 +508,7 @@ namespace mySQLPunk
             var prog = new Progress<MySqlImportProgress>(p => RenderProgress(p));
             clock.Restart();
             timer.Start();
+            punky.BeginExport();
 
             try
             {
@@ -517,6 +549,7 @@ namespace mySQLPunk
             }
             finally
             {
+                punky.EndExport();
                 busy = false;
                 executing = false;
                 cancelButton.Text = T("關閉", "Close");
@@ -557,6 +590,7 @@ namespace mySQLPunk
             {
                 cancellation.Cancel();
                 cancelButton.Enabled = false;
+                punky.EndExport();
                 currentStatementLabel.Text = T("正在停止匯入中...", "Stopping import...");
             }
         }

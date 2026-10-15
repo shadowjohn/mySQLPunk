@@ -24,11 +24,12 @@ namespace mySQLPunk
         private readonly RadioButton schemaData = new RadioButton(), schemaOnly = new RadioButton(), dataOnly = new RadioButton();
         private readonly CheckBox singleTransaction = new CheckBox(), disableFk = new CheckBox(), includeDrop = new CheckBox();
         private readonly CheckBox includeCreateDb = new CheckBox(), removeDefiner = new CheckBox();
+        private readonly CheckBox disableUnique = new CheckBox(), noAutoValueOnZero = new CheckBox();
         private readonly CheckBox includeViews = new CheckBox(), includeRoutines = new CheckBox(), includeTriggers = new CheckBox();
         private readonly Label stepsLabel = new Label(), statusLabel = new Label(), selectionSummary = new Label(), confirmSummary = new Label();
         private readonly Label currentObjectLabel = new Label(), percentLabel = new Label(), writtenLabel = new Label();
-        private readonly Label elapsedLabel = new Label(), speedLabel = new Label(), etaLabel = new Label(), resultText = new Label();
-        private readonly Button nextButton = new Button(), backButton = new Button(), cancelButton = new Button(), browseButton = new Button();
+        private readonly Label elapsedLabel = new Label(), speedLabel = new Label(), etaLabel = new Label(), resultText = new Label(), mascotHint = new Label();
+        private readonly Button nextButton = new Button(), backButton = new Button(), cancelButton = new Button(), browseButton = new Button(), soundButton = new Button();
         private readonly Button openFileButton = new Button(), openFolderButton = new Button();
         private readonly ProgressBar overallBar = new ProgressBar();
         private readonly PunkyReportLoadingControl punky = new PunkyReportLoadingControl();
@@ -250,15 +251,22 @@ namespace mySQLPunk
 
         private void BuildPage1(MySqlExportWizardOptions initialOptions)
         {
-            var content = Stack();
+            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(12) };
             pages[1].Controls.Add(content);
-            content.Controls.Add(HeaderLabel(T("步驟 2：設定輸出檔案與一致性選項", "Step 2: Output file and consistency settings")));
-            content.Controls.Add(HintLabel(T("設定本機匯出 SQL 路徑與讀取事務一致性保障。", "Configure local output path and read transaction consistency.")));
 
-            content.Controls.Add(new Label { Text = T("匯出目的地檔案：", "Destination SQL file:"), AutoSize = true, Margin = new Padding(0, 8, 0, 4) });
+            var header = HeaderLabel(T("步驟 2：設定輸出檔案與一致性選項", "Step 2: Output file and consistency settings"));
+            header.Location = new Point(12, 10);
+            content.Controls.Add(header);
 
-            var fileRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 0, 12) };
-            targetPathBox.Width = 600;
+            var hint = HintLabel(T("設定本機匯出 SQL 路徑與讀取事務一致性保障。", "Configure local output path and read transaction consistency."));
+            hint.Location = new Point(12, 38);
+            content.Controls.Add(hint);
+
+            var destLabel = new Label { Text = T("匯出目的地檔案：", "Destination SQL file:"), AutoSize = true, Location = new Point(12, 68) };
+            content.Controls.Add(destLabel);
+
+            var fileRow = new FlowLayoutPanel { Location = new Point(12, 90), Size = new Size(740, 38), AutoSize = false, FlowDirection = FlowDirection.LeftToRight };
+            targetPathBox.Width = 620;
             string defaultName = databaseName + "_dump_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".sql";
             targetPathBox.Text = initialOptions?.TargetPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), defaultName);
             ConfigureButton(browseButton, "exportBrowse", T("瀏覽…", "Browse…"), (s, e) =>
@@ -277,36 +285,66 @@ namespace mySQLPunk
             fileRow.Controls.AddRange(new Control[] { targetPathBox, browseButton });
             content.Controls.Add(fileRow);
 
-            var optionsGroup = new GroupBox { Text = T("進階與一致性選項", "Advanced and Consistency Options"), Width = 720, AutoSize = true, Padding = new Padding(12), Margin = new Padding(0, 4, 0, 12) };
-            var groupFlow = Stack();
-            optionsGroup.Controls.Add(groupFlow);
+            // 第一組：交易與結構相容性保障
+            var transGroup = new GroupBox
+            {
+                Text = T("交易與結構相容性保障 (Transaction & Portability)", "Transaction & Portability"),
+                Location = new Point(12, 134),
+                Size = new Size(740, 150),
+                Padding = new Padding(12)
+            };
+            var transFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
 
-            singleTransaction.Text = T("啟用一致性快照 (--single-transaction，以 REPEATABLE READ 交易讀取，避免外鍵不一致)", "Consistent snapshot (--single-transaction, repeatable read prevents foreign-key drift)");
+            singleTransaction.Text = T("啟用一致性快照 (--single-transaction，以 REPEATABLE READ 交易無鎖讀取，保障關聯一致)", "Consistent snapshot (--single-transaction, non-locking repeatable read)");
             singleTransaction.Checked = true;
             singleTransaction.AutoSize = true;
-            singleTransaction.Margin = new Padding(0, 4, 0, 8);
+            singleTransaction.Margin = new Padding(0, 4, 0, 6);
 
-            disableFk.Text = T("匯入時關閉外鍵檢查 (SET FOREIGN_KEY_CHECKS = 0)", "Disable foreign key checks on import (SET FOREIGN_KEY_CHECKS = 0)");
-            disableFk.Checked = true;
-            disableFk.AutoSize = true;
-            disableFk.Margin = new Padding(0, 0, 0, 8);
-
-            includeDrop.Text = T("包含 DROP TABLE / VIEW / ROUTINE 語句", "Include DROP TABLE / VIEW / ROUTINE statements");
-            includeDrop.Checked = true;
-            includeDrop.AutoSize = true;
-            includeDrop.Margin = new Padding(0, 0, 0, 8);
-
-            removeDefiner.Text = T("移除 DEFINER 宣告（提高還原至其他主機/帳號時的相容性）", "Remove DEFINER clauses for portability across hosts");
+            removeDefiner.Text = T("移除 DEFINER 宣告（提高還原至其他主機/帳號時的相容性）", "Remove DEFINER clauses for portability across hosts/accounts");
             removeDefiner.Checked = true;
             removeDefiner.AutoSize = true;
-            removeDefiner.Margin = new Padding(0, 0, 0, 8);
+            removeDefiner.Margin = new Padding(0, 0, 0, 6);
+
+            includeDrop.Text = T("包含 DROP TABLE / VIEW / ROUTINE / TRIGGER 語句（覆蓋舊物件）", "Include DROP statements (TABLE / VIEW / ROUTINE / TRIGGER)");
+            includeDrop.Checked = true;
+            includeDrop.AutoSize = true;
+            includeDrop.Margin = new Padding(0, 0, 0, 6);
 
             includeCreateDb.Text = T("包含 CREATE DATABASE 語句", "Include CREATE DATABASE statement");
             includeCreateDb.Checked = false;
             includeCreateDb.AutoSize = true;
 
-            groupFlow.Controls.AddRange(new Control[] { singleTransaction, disableFk, includeDrop, removeDefiner, includeCreateDb });
-            content.Controls.Add(optionsGroup);
+            transFlow.Controls.AddRange(new Control[] { singleTransaction, removeDefiner, includeDrop, includeCreateDb });
+            transGroup.Controls.Add(transFlow);
+            content.Controls.Add(transGroup);
+
+            // 第二組：MySQL 專屬高速還原與約束優化
+            var optGroup = new GroupBox
+            {
+                Text = T("MySQL 專屬高速還原與約束優化 (Engine Optimizations & Safety)", "Engine Optimizations & Safety"),
+                Location = new Point(12, 294),
+                Size = new Size(740, 130),
+                Padding = new Padding(12)
+            };
+            var optFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+
+            disableFk.Text = T("匯入時關閉外鍵檢查 (SET FOREIGN_KEY_CHECKS = 0，避免資料表相依順序報錯)", "Disable foreign key checks on import (SET FOREIGN_KEY_CHECKS = 0)");
+            disableFk.Checked = true;
+            disableFk.AutoSize = true;
+            disableFk.Margin = new Padding(0, 4, 0, 6);
+
+            disableUnique.Text = T("匯入時關閉唯一性檢查 (SET UNIQUE_CHECKS = 0，啟用 Insert Buffer 提升匯入速度 2~5 倍)", "Disable unique checks on import (SET UNIQUE_CHECKS = 0, boosts bulk INSERTs 2~5x)");
+            disableUnique.Checked = true;
+            disableUnique.AutoSize = true;
+            disableUnique.Margin = new Padding(0, 0, 0, 6);
+
+            noAutoValueOnZero.Text = T("防止主鍵 0 被 AUTO_INCREMENT 覆蓋 (SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO')", "Prevent primary key 0 from auto-increment overwrite (NO_AUTO_VALUE_ON_ZERO)");
+            noAutoValueOnZero.Checked = true;
+            noAutoValueOnZero.AutoSize = true;
+
+            optFlow.Controls.AddRange(new Control[] { disableFk, disableUnique, noAutoValueOnZero });
+            optGroup.Controls.Add(optFlow);
+            content.Controls.Add(optGroup);
         }
 
         private void BuildPage2()
@@ -378,10 +416,35 @@ namespace mySQLPunk
 
             topPanel.Controls.Add(statsFlow, 0, 0);
 
-            // 右側放置 Punky 整理資料動畫
-            punky.Dock = DockStyle.Fill;
-            punky.MinimumSize = new Size(180, 160);
-            topPanel.Controls.Add(punky, 1, 0);
+            // 右側放置 Punky 整理資料動畫與音效控制
+            var mascotPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Padding = new Padding(12, 0, 0, 0)
+            };
+            punky.Name = "mysqlPunky";
+            punky.Size = new Size(200, 200);
+            punky.Margin = new Padding(0, 0, 0, 4);
+            mascotPanel.Controls.Add(punky);
+
+            mascotHint.Text = T("正在幫你整理資料！", "Organizing your data!");
+            mascotHint.Font = UiKit.Body;
+            mascotHint.AutoSize = true;
+            mascotHint.Margin = new Padding(0, 0, 0, 6);
+            mascotPanel.Controls.Add(mascotHint);
+
+            ConfigureButton(soundButton, "mysqlToggleSound", punky.Muted ? T("開啟聲音", "Unmute") : T("靜音", "Mute"), (s, e) =>
+            {
+                punky.Muted = !punky.Muted;
+                soundButton.Text = punky.Muted ? T("開啟聲音", "Unmute") : T("靜音", "Mute");
+            });
+            soundButton.Enabled = punky.AudioAvailable;
+            soundButton.AutoSize = true;
+            mascotPanel.Controls.Add(soundButton);
+
+            topPanel.Controls.Add(mascotPanel, 1, 0);
 
             content.Controls.Add(topPanel);
 
@@ -484,6 +547,7 @@ namespace mySQLPunk
                 $"● {T("選取檢視：", "Selected Views: ")} {(includeViews.Checked ? views.Count : 0)} 個\n" +
                 $"● {T("選取常式/觸發器：", "Selected Routines/Triggers: ")} {(includeRoutines.Checked ? routines.Count : 0)} / {(includeTriggers.Checked ? triggers.Count : 0)} 個\n" +
                 $"● {T("一致性快照：", "Consistency Snapshot: ")} {(singleTransaction.Checked ? T("啟用 (--single-transaction，不鎖表)", "Enabled (--single-transaction)") : T("停用", "Disabled"))}\n" +
+                $"● {T("MySQL 引擎優化：", "MySQL Engine Optimizations: ")} {(disableUnique.Checked ? T("停用唯一檢查 (加速 2~5x)", "Unique Checks Off") : "")} {(disableFk.Checked ? T("・停用外鍵", "・FK Checks Off") : "")} {(noAutoValueOnZero.Checked ? "・NO_AUTO_VALUE_ON_ZERO" : "")}\n" +
                 $"● {T("輸出檔案路徑：", "Target Path: ")} {targetPathBox.Text}\n\n" +
                 $"{T("提示：匯出過程將全串流寫入暫存檔案，完成驗證後原子發布，不污染既有檔案。", "Notice: Streaming to staging file first, published atomically upon completion.")}";
         }
@@ -523,6 +587,8 @@ namespace mySQLPunk
             {
                 SingleTransaction = singleTransaction.Checked,
                 DisableForeignKeyChecks = disableFk.Checked,
+                DisableUniqueChecks = disableUnique.Checked,
+                SetNoAutoValueOnZero = noAutoValueOnZero.Checked,
                 IncludeDropStatements = includeDrop.Checked,
                 IncludeCreateDatabase = includeCreateDb.Checked,
                 RemoveDefiner = removeDefiner.Checked,
@@ -543,6 +609,7 @@ namespace mySQLPunk
 
             clock.Restart();
             timer.Start();
+            punky.BeginExport();
 
             try
             {
@@ -579,6 +646,7 @@ namespace mySQLPunk
             }
             finally
             {
+                punky.EndExport();
                 busy = false;
                 exporting = false;
                 cancelButton.Text = T("關閉", "Close");
@@ -628,6 +696,7 @@ namespace mySQLPunk
             {
                 cancellation.Cancel();
                 cancelButton.Enabled = false;
+                punky.EndExport();
                 currentObjectLabel.Text = T("正在取消匯出並清理暫存中...", "Cancelling export and cleaning temporary files...");
             }
         }

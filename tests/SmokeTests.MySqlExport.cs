@@ -15,6 +15,8 @@ public static partial class SmokeTests
         Assert(options.Mode == MySqlExportMode.SchemaAndData, "Default mode should be SchemaAndData");
         Assert(options.SingleTransaction, "SingleTransaction should be true by default");
         Assert(options.DisableForeignKeyChecks, "DisableForeignKeyChecks should be true by default");
+        Assert(options.DisableUniqueChecks, "DisableUniqueChecks should be true by default");
+        Assert(options.SetNoAutoValueOnZero, "SetNoAutoValueOnZero should be true by default");
         Assert(options.IncludeDropStatements, "IncludeDropStatements should be true by default");
         Assert(options.RemoveDefiner, "RemoveDefiner should be true by default");
         Assert(options.IncludeViews, "IncludeViews should be true by default");
@@ -66,6 +68,9 @@ public static partial class SmokeTests
             string content = File.ReadAllText(targetFile);
             AssertContains(content, "-- mySQLPunk MySQL Logical Dump", "Header comment present");
             AssertContains(content, "SET FOREIGN_KEY_CHECKS = 0;", "Disable FK checks statement present");
+            AssertContains(content, "SET UNIQUE_CHECKS = 0;", "Disable unique checks statement present");
+            AssertContains(content, "SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';", "Set NO_AUTO_VALUE_ON_ZERO statement present");
+            AssertContains(content, "SET UNIQUE_CHECKS = 1;", "Restore unique checks statement present");
             AssertContains(content, "USE `test_db`;", "USE database statement present");
             AssertContains(content, "CREATE TABLE `users`", "Table DDL present");
             AssertContains(content, "INSERT INTO `users`", "Table data INSERT present");
