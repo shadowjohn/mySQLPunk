@@ -5,6 +5,7 @@
 ### 🚀 新增功能
 
 ### 🛠️ 問題修正與優化
+- **README.md 門面全新改版與文件模組化**：全面改寫 README.md 為現代、圖文並茂的開源專案門面，融入看板娘 Punky 崩琦角色元素，並加入 S1~S6 完整使用畫面截圖；深層工程與建置細節分別拆分為 `TODO.md`、`docs/DEVELOPMENT.md`、`docs/ARCHITECTURE.md` 與 `docs/DATA_SAFETY_SPEC.md`。
 
 ## [1.0.0.23] - 2026-10-14
 
