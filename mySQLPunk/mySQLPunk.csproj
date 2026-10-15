@@ -315,8 +315,12 @@
     <Compile Include="ReportExportWizardForm.cs" />
     <Compile Include="MssqlImportWizardForm.cs" />
     <Compile Include="MssqlExportWizardForm.cs" />
+    <Compile Include="MySqlExportWizardForm.cs" />
+    <Compile Include="MySqlImportWizardForm.cs" />
     <Compile Include="Form1.MssqlImport.cs" />
     <Compile Include="Form1.MssqlExport.cs" />
+    <Compile Include="Form1.MySqlExport.cs" />
+    <Compile Include="Form1.MySqlImport.cs" />
     <Compile Include="ReportTemplatePreviewForm.cs" />
     <Compile Include="PunkyReportLoadingControl.cs" />
     <Compile Include="Localization.cs" />
@@ -388,6 +392,12 @@
     <Compile Include="lib\MssqlImport\MssqlImportInput.cs" />
     <Compile Include="lib\MssqlImport\MssqlImportScriptInspector.cs" />
     <Compile Include="lib\MssqlExport\MssqlExportModels.cs" />
+    <Compile Include="lib\MySqlExport\MySqlExportModels.cs" />
+    <Compile Include="lib\MySqlExport\MySqlSqlExportService.cs" />
+    <Compile Include="lib\MySqlImport\MySqlImportModels.cs" />
+    <Compile Include="lib\MySqlImport\MySqlImportLog.cs" />
+    <Compile Include="lib\MySqlImport\MySqlImportPreflightScanner.cs" />
+    <Compile Include="lib\MySqlImport\MySqlImportRunner.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotModels.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotRecoveryStore.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotBackend.cs" />

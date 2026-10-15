@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### 🚀 新增功能
+- **MySQL / MariaDB 四步 SQL 備份（傾印）與匯入精靈（對齊 MSSQL 標竿規格）**：
+  - **四步匯出精靈 (`MySqlExportWizardForm`)**：提供「模式與目標」、「物件選取（資料表／檢視／常式／觸發器）」、「選項確認（單一交易快照 `REPEATABLE READ`、外鍵約束開關、DROP 語句、移除 DEFINER）」與「即時進度與看板娘 Punky 動畫」完整四步體驗。底層改採串流直接寫入暫存檔 (`.staging.xxx.tmp`)，完成後原子移動，杜絕大型資料庫傾印時的 OOM 記憶體溢位問題。
+  - **Native Manifest 元數據校驗**：傾印檔末端自動附加原生 Manifest 區塊與 SHA-256 數位簽章，包含資料庫名稱、資料表清單、列數統計與校驗碼。
+  - **四步匯入精靈 (`MySqlImportWizardForm`)**：提供「檔案選取與目標」、「Preflight 串流預檢（編碼判定、DELIMITER 切分、單批次 32 MiB 上限、Manifest 讀取）」、「執行選項（錯誤繼續／遇錯即停、物件存在處理策略）」與「執行回報與日誌檢視」。
+  - **獨立日誌與即時審計**：所有匯入執行步驟與錯誤皆獨立記錄至 `%LOCALAPPDATA%\mySQLPunk\ImportLogs`，並於匯入完成後自動比對 Native Manifest 目標列數，確認還原完整性。
 
 ### 🛠️ 問題修正與優化
 - **README.md 門面全新改版與文件模組化**：全面改寫 README.md 為現代、圖文並茂的開源專案門面，融入看板娘 Punky 崩琦角色元素，並加入 S1~S6 完整使用畫面截圖；深層工程與建置細節分別拆分為 `TODO.md`、`docs/DEVELOPMENT.md`、`docs/ARCHITECTURE.md` 與 `docs/DATA_SAFETY_SPEC.md`。

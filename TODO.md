@@ -47,8 +47,8 @@
   2. 既有程式碼庫中已具備相對成熟的 `MySqlExportService` 與 `MySqlImportService` 底層邏輯（如 `DELIMITER` 解析、`SHOW CREATE` 提取、交易開關等），只需將底層串流強化並重構對齊 MSSQL 的四步精靈架構。
   3. 投資報酬率最高，能快速在主要客群中展現一致且專業的產品體驗。
 - **具體工作**：
-  - [ ] 匯出：移植四步精靈（選表/View ➔ 輸出設定/single-transaction ➔ 確認物件 ➔ 串流執行 + Punky 動畫 + Manifest 生成）。
-  - [ ] 匯入：移植四步精靈（選檔 ➔ 預檢掃描 DELIMITER/編碼/單批上限 ➔ 確認目標與策略 ➔ 專用 Session 執行 + Punky 動畫 + 獨立 Log + Manifest 核對）。
+  - [x] 匯出：移植四步精靈（選表/View ➔ 輸出設定/single-transaction ➔ 確認物件 ➔ 串流執行 + Punky 動畫 + Manifest 生成）。
+  - [x] 匯入：移植四步精靈（選檔 ➔ 預檢掃描 DELIMITER/編碼/單批上限 ➔ 確認目標與策略 ➔ 專用 Session 執行 + Punky 動畫 + 獨立 Log + Manifest 核對）。
 
 #### 🥈 第二優先：SQLite
 - **原因**：

@@ -32,6 +32,10 @@ public static partial class SmokeTests
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_IMPORT_WIZARD_PREVIEW") == "1") return ImportWizardPreview();
         if (Environment.GetEnvironmentVariable("MYSQLPUNK_MSSQL_WIZARD_PREVIEW") == "1") return WizardPreview();
         int passed = 0;
+        Run("MySQL export options and models defaults", MySqlExport_OptionsAndModels_Defaults, ref passed);
+        Run("MySQL export service and manifest atomic write", MySqlExport_ServiceAndManifest_AtomicWrite, ref passed);
+        Run("MySQL import preflight scanner delimiters and manifest", MySqlImport_PreflightScanner_DelimitersAndManifest, ref passed);
+        Run("MySQL import runner execution and log", MySqlImport_Runner_ExecutionAndLog, ref passed);
         Run("MSSQL import Transfer guards", MssqlImportTransferGuards, ref passed);
         Run("MSSQL import Transfer trial", MssqlImportTransferTrial, ref passed);
         Run("MSSQL import worker published cleanup receipt", MssqlImportPublishedReleaseRace, ref passed);

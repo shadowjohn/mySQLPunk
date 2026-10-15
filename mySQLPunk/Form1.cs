@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -1261,14 +1261,21 @@ namespace mySQLPunk
         }
         public void UpdateMainStatus(string msg)
         {
-            if (InvokeRequired)
+            try
             {
-                BeginInvoke(new Action<string>(UpdateMainStatus), msg);
-                return;
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    BeginInvoke(new Action<string>(UpdateMainStatus), msg);
+                    return;
+                }
+                if (lblMainStatus != null)
+                {
+                    lblMainStatus.Text = msg;
+                }
             }
-            if (lblMainStatus != null)
+            catch
             {
-                lblMainStatus.Text = msg;
+                // In headless tests or uninitialized form fixtures, safely ignore UI status updates
             }
         }
 
@@ -6668,6 +6675,11 @@ namespace mySQLPunk
                 OpenMssqlExportWizard(target, dataOnly ? lib.MssqlExport.MssqlExportMode.DataOnly : lib.MssqlExport.MssqlExportMode.SchemaAndData, null, tableName, false);
                 return;
             }
+            if (IsMySqlTarget(target))
+            {
+                OpenMySqlExportWizard(target, dataOnly ? lib.MySqlExport.MySqlExportMode.DataOnly : lib.MySqlExport.MySqlExportMode.SchemaAndData);
+                return;
+            }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
@@ -6905,7 +6917,7 @@ namespace mySQLPunk
             }
         }
 
-        private async void DumpCurrentSelectionSqlWithDialog(bool dataOnlyForTable)
+        private void DumpCurrentSelectionSqlWithDialog(bool dataOnlyForTable)
         {
             TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
@@ -6922,11 +6934,11 @@ namespace mySQLPunk
                     null, selection == null ? null : selection.ObjectName, false);
                 return;
             }
-            MySqlExportOptions mysqlOptions = null;
-            if (!dataOnlyForTable && selection == null && IsMySqlTarget(target))
+            if (IsMySqlTarget(target) && (selection == null || selection.GroupName == "Tables"))
             {
-                mysqlOptions = ShowMySqlExportOptionsDialog(target);
-                if (mysqlOptions == null) return;
+                bool tableDataOnly = selection != null && dataOnlyForTable;
+                OpenMySqlExportWizard(target, tableDataOnly ? lib.MySqlExport.MySqlExportMode.DataOnly : lib.MySqlExport.MySqlExportMode.SchemaAndData);
+                return;
             }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
@@ -6942,25 +6954,8 @@ namespace mySQLPunk
 
                 try
                 {
-                    if (mysqlOptions != null)
-                    {
-                        MySqlExportResult result = await ExportMySqlDatabaseWithProgress(target, dialog.FileName, mysqlOptions);
-                        string message = Localization.Format(
-                            "MySqlExport.Success",
-                            result.TableCount,
-                            result.ViewCount,
-                            result.RoutineCount,
-                            result.TriggerCount,
-                            result.RowCount,
-                            dialog.FileName);
-                        UpdateMainStatus(message);
-                        MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    else
-                    {
-                        DumpCurrentSelectionSqlToFile(dialog.FileName, dataOnlyForTable);
-                        MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
+                    DumpCurrentSelectionSqlToFile(dialog.FileName, dataOnlyForTable);
+                    MessageBox.Show(Localization.T("Object.SqlExported"), Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
@@ -7283,6 +7278,12 @@ namespace mySQLPunk
                 return;
             }
 
+            if (IsMySqlTarget(target))
+            {
+                OpenMySqlExportWizard(target, lib.MySqlExport.MySqlExportMode.SchemaAndData);
+                return;
+            }
+
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
                 dialog.Filter = Localization.T("Common.SqlFilesFilter");
@@ -7325,7 +7326,7 @@ namespace mySQLPunk
             return true;
         }
 
-        private async void ImportSqlWithDialog()
+        private void ImportSqlWithDialog()
         {
             TreeDatabaseTarget target = GetTargetFromCurrentSelection();
             if (target == null)
@@ -7340,11 +7341,10 @@ namespace mySQLPunk
                 return;
             }
 
-            MySqlImportOptions mysqlOptions = null;
             if (IsMySqlTarget(target))
             {
-                mysqlOptions = ShowMySqlImportOptionsDialog();
-                if (mysqlOptions == null) return;
+                OpenMySqlImportWizard(target);
+                return;
             }
 
             using (OpenFileDialog dialog = new OpenFileDialog())
@@ -7360,32 +7360,11 @@ namespace mySQLPunk
 
                 try
                 {
-                    if (mysqlOptions != null)
-                    {
-                        MySqlImportResult result = await ImportMySqlSqlFileWithProgress(target, dialog.FileName, mysqlOptions);
-                        string message = Localization.Format("MySqlImport.Success", result.ExecutedStatements, result.FailedStatements);
-                        if (result.SkippedStatements > 0)
-                        {
-                            message += Localization.Format("MySqlImport.SkippedSummary", result.SkippedStatements);
-                        }
-                        if (result.Errors.Count > 0)
-                        {
-                            message += Environment.NewLine + Localization.Format(
-                                "MySqlImport.FirstError",
-                                result.Errors[0].LineNumber,
-                                result.Errors[0].Message);
-                        }
-                        MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        UpdateMainStatus(message.Replace(Environment.NewLine, " "));
-                    }
-                    else
-                    {
-                        string script = ReadSqlScriptWithEncodingDetection(dialog.FileName);
-                        int executed = ImportSqlScript(target, script);
-                        string message = string.Format(Localization.T("ImportSql.Success"), executed);
-                        MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        UpdateMainStatus(message);
-                    }
+                    string script = ReadSqlScriptWithEncodingDetection(dialog.FileName);
+                    int executed = ImportSqlScript(target, script);
+                    string message = string.Format(Localization.T("ImportSql.Success"), executed);
+                    MessageBox.Show(message, Localization.T("Common.Complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    UpdateMainStatus(message);
                 }
                 catch (Exception ex)
                 {
