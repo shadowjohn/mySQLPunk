@@ -35,7 +35,7 @@
 | **MySQL / MariaDB** | ✅ 已具備完整四步精靈 (`MySqlExportWizardForm`)，支援選表/View/Routine/Trigger、一致性快照、Native Manifest。 | ✅ 已具備完整四步精靈 (`MySqlImportWizardForm`)，支援串流預檢、4種衝突策略、Session鎖定、終端機滑動視窗日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格）。 |
 | **SQLite** | ✅ 已具備完整四步精靈 (`SqliteExportWizardForm`)，支援選表、SpatiaLite/GeoPackage 空間幾何無損 Hex 傾印、排除虛擬表影子表、原子替換與 Native Manifest。 | ✅ 已具備完整四步精靈 (`SqliteImportWizardForm`)，支援串流狀態機預檢、SpatiaLite 動態模組自動加載、4種衝突策略、滑動視窗終端機日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS 空間特性）。 |
 | **PostgreSQL** | ✅ 已具備完整四步精靈 (`PostgreSqlExportWizardForm`)，支援選表/View、PostGIS 空間幾何無損 Hex EWKB 傾印、排除 spatial_ref_sys、REPEATABLE READ 快照與 Native Manifest。 | ✅ 已具備完整四步精靈 (`PostgreSqlImportWizardForm`)，支援狀態機 Lexer (精準解析 Dollar Quotes 與巢狀註解)、PostGIS 自動安裝開關、4種衝突策略、2,000行滑動視窗日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS PostGIS 空間特性）。 |
-| **Oracle** | 走舊版 `DatabaseDumpService`，字串拼接。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取。 | **高危 OOM 風險**；無法處理 PL/SQL 區塊 (`/` 結尾)；缺少 RAW/LOB 分塊支援。 |
+| **Oracle** | ✅ 已具備完整四步精靈 (`OracleExportWizardForm`)，支援選表/View、Oracle Spatial (`SDO_GEOMETRY`) 無損 WKB 傾印、排除 R-Tree 內部影子表 (`MDRT_*`)、`USER_SDO_GEOM_METADATA` 註冊、`SET TRANSACTION READ ONLY;` 快照與 Native Manifest。 | ✅ 已具備完整四步精靈 (`OracleImportWizardForm`)，支援串流狀態機預檢 (精準解析 PL/SQL 區塊與獨立斜線 `/`)、4種衝突策略、2,000行滑動視窗終端機日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS Oracle Spatial 與 PL/SQL 特長）。 |
 
 ---
 
@@ -68,12 +68,13 @@
   - [x] 匯出：支援四步精靈（選表/View ➔ 輸出設定/快照隔離/排除 spatial_ref_sys ➔ 物件清單 ➔ 串流執行 + Punky 動畫 + Manifest 生成）；PostGIS geometry/geography/raster 轉無損 EWKB 十六進位字面量；保留 GIST/SP-GIST 空間索引。
   - [x] 匯入：支援四步精靈（選檔 ➔ 串流狀態機預檢 Dollar Quotes 與巢狀註解 ➔ 4種物件衝突策略與 PostGIS 自動加載 ➔ 串流執行 + Punky 動畫 + 2,000行滑動視窗終端機日誌 + 獨立 Log + Manifest 逐表筆數核對）。
 
-#### 🎖️ 第四優先：Oracle
+#### 🎖️ 第四優先：Oracle（崩琦 GIS Oracle Spatial 空間特長對齊）
 - **原因**：
-  1. 企業級封閉環境，使用情境相對特定。
-  2. 需處理 PL/SQL 特殊分隔語意（`/` 獨立行代表編譯區塊結束）。
+  1. 企業級大型資料庫與政府空間資訊系統（如國土測繪、地籍圖資、水利圖資）廣泛採用 Oracle Spatial (`MDSYS.SDO_GEOMETRY`)，為崩琦 GIS 核心場景。
+  2. 需處理 PL/SQL 特殊分隔語意（內部多個邏輯分號 `;`，必須以獨立行 `/` 作為區塊終止符）。
 - **具體工作**：
-  - [ ] 匯出/匯入改為串流架構，支援 PL/SQL 區塊解析與 LOB 欄位分段。
+  - [x] 匯出：支援四步精靈（選表/View ➔ 輸出設定/唯讀交易快照/排除空間影子表 ➔ 物件清單 ➔ 串流執行 + Punky 動畫 + Manifest 生成）；探測 `SDO_GEOMETRY` 空間幾何欄位並轉為無損 `SDO_UTIL.FROM_WKBGEOMETRY(HEXTORAW('...'))`；產出 `USER_SDO_GEOM_METADATA` 空間中繼字典註冊；保留 `INDEXTYPE IS MDSYS.SPATIAL_INDEX` 空間索引；預設排除 `MDRT_*`、`MDXT_*`、`MDRS_*` 內部影子表。
+  - [x] 匯入：支援四步精靈（選檔 ➔ 串流狀態機預檢 PL/SQL 獨立斜線 `/` 與空間幾何關鍵字 ➔ 4種物件衝突策略 ➔ 串流執行 + Punky 動畫 + 2,000行滑動視窗終端機日誌 + 獨立 Log + Manifest 逐表筆數核對）。
 
 ---
 

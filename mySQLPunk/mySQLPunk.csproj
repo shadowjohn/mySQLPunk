@@ -329,6 +329,10 @@
     <Compile Include="PostgreSqlImportWizardForm.cs" />
     <Compile Include="Form1.PostgreSqlExport.cs" />
     <Compile Include="Form1.PostgreSqlImport.cs" />
+    <Compile Include="OracleExportWizardForm.cs" />
+    <Compile Include="OracleImportWizardForm.cs" />
+    <Compile Include="Form1.OracleExport.cs" />
+    <Compile Include="Form1.OracleImport.cs" />
     <Compile Include="ReportTemplatePreviewForm.cs" />
     <Compile Include="PunkyReportLoadingControl.cs" />
     <Compile Include="Localization.cs" />
@@ -418,6 +422,12 @@
     <Compile Include="lib\PostgreSqlImport\PostgreSqlImportLog.cs" />
     <Compile Include="lib\PostgreSqlImport\PostgreSqlImportPreflightScanner.cs" />
     <Compile Include="lib\PostgreSqlImport\PostgreSqlImportRunner.cs" />
+    <Compile Include="lib\OracleExport\OracleExportModels.cs" />
+    <Compile Include="lib\OracleExport\OracleSqlExportService.cs" />
+    <Compile Include="lib\OracleImport\OracleImportModels.cs" />
+    <Compile Include="lib\OracleImport\OracleImportLog.cs" />
+    <Compile Include="lib\OracleImport\OracleImportPreflightScanner.cs" />
+    <Compile Include="lib\OracleImport\OracleImportRunner.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotModels.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotRecoveryStore.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotBackend.cs" />

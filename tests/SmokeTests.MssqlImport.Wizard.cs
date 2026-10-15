@@ -384,7 +384,7 @@ public static partial class SmokeTests
     }
     private static void ImportWizard_Routing()
     {
-        foreach (string provider in new[] { "mssql", "SQLSERVER", "oracle" })
+        foreach (string provider in new[] { "mssql", "SQLSERVER", "sybase" })
         using (var fixture = new RoutingFixture(provider, "Tables"))
         {
             int opened = 0, legacy = 0;
@@ -400,7 +400,7 @@ public static partial class SmokeTests
                 new Func<OpenFileDialog, DialogResult>(dialog => { legacy++; return DialogResult.Cancel; }));
             typeof(Form1).GetField("MssqlImportStatusSink", flags).SetValue(fixture.Form, new Action<string>(text => fixture.Status.Add(text)));
             fixture.Invoke("ImportSqlWithDialog");
-            bool native = provider != "oracle";
+            bool native = provider != "sybase";
             Assert(opened == (native ? 1 : 0) && legacy == (native ? 0 : 1), "Actual file handler routes only MSSQL before legacy file selection.");
             if (native)
             {

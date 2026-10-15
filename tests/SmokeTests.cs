@@ -53,6 +53,13 @@ public static partial class SmokeTests
         Run("PostgreSQL import runner execution and manifest verification", PostgreSqlImport_Runner_ExecutionAndManifestVerification, ref passed);
         Run("PostgreSQL import runner existing object strategies", PostgreSqlImport_Runner_ExistingObjectStrategies, ref passed);
         Run("PostgreSQL import runner transaction rollback on failure", PostgreSqlImport_Runner_TransactionRollbackOnFailure, ref passed);
+        Run("Oracle export options and models defaults", OracleExport_OptionsAndModels_Defaults, ref passed);
+        Run("Oracle export service and manifest streaming and SDO_GEOMETRY", OracleExport_ServiceAndManifest_StreamingAndSdoGeometry, ref passed);
+        Run("Oracle import preflight scanner SDO_GEOMETRY and PL/SQL", OracleImport_PreflightScanner_SdoGeometryAndPlSql, ref passed);
+        Run("Oracle import preflight scanner embedded NUL", OracleImport_PreflightScanner_EmbeddedNul, ref passed);
+        Run("Oracle import runner execution and manifest verification", OracleImport_Runner_ExecutionAndManifestVerification, ref passed);
+        Run("Oracle import runner existing object strategies", OracleImport_Runner_ExistingObjectStrategies, ref passed);
+        Run("Oracle import runner transaction rollback on failure", OracleImport_Runner_TransactionRollbackOnFailure, ref passed);
         Run("MSSQL import Transfer guards", MssqlImportTransferGuards, ref passed);
         Run("MSSQL import Transfer trial", MssqlImportTransferTrial, ref passed);
         Run("MSSQL import worker published cleanup receipt", MssqlImportPublishedReleaseRace, ref passed);

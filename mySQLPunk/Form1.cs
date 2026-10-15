@@ -6690,6 +6690,11 @@ namespace mySQLPunk
                 OpenPostgreSqlExportWizard(target, dataOnly ? lib.PostgreSqlExport.PostgreSqlExportMode.DataOnly : lib.PostgreSqlExport.PostgreSqlExportMode.SchemaAndData, tableName);
                 return;
             }
+            if (IsOracleTarget(target))
+            {
+                OpenOracleExportWizard(target, dataOnly ? lib.OracleExport.OracleExportMode.DataOnly : lib.OracleExport.OracleExportMode.SchemaAndData, tableName);
+                return;
+            }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
@@ -6962,6 +6967,12 @@ namespace mySQLPunk
                 OpenPostgreSqlExportWizard(target, tableDataOnly ? lib.PostgreSqlExport.PostgreSqlExportMode.DataOnly : lib.PostgreSqlExport.PostgreSqlExportMode.SchemaAndData, selection == null ? null : selection.ObjectName);
                 return;
             }
+            if (IsOracleTarget(target) && (selection == null || selection.GroupName == "Tables" || selection.GroupName == "Views"))
+            {
+                bool tableDataOnly = selection != null && dataOnlyForTable;
+                OpenOracleExportWizard(target, tableDataOnly ? lib.OracleExport.OracleExportMode.DataOnly : lib.OracleExport.OracleExportMode.SchemaAndData, selection == null ? null : selection.ObjectName);
+                return;
+            }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
@@ -7057,6 +7068,13 @@ namespace mySQLPunk
             return target != null &&
                    ((target.Database != null && string.Equals(target.Database.ProviderName, "postgresql", StringComparison.OrdinalIgnoreCase)) ||
                     string.Equals(target.ProviderName, "postgresql", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsOracleTarget(TreeDatabaseTarget target)
+        {
+            return target != null &&
+                   ((target.Database != null && string.Equals(target.Database.ProviderName, "oracle", StringComparison.OrdinalIgnoreCase)) ||
+                    string.Equals(target.ProviderName, "oracle", StringComparison.OrdinalIgnoreCase));
         }
 
 
@@ -7326,6 +7344,12 @@ namespace mySQLPunk
                 return;
             }
 
+            if (IsOracleTarget(target))
+            {
+                OpenOracleExportWizard(target, lib.OracleExport.OracleExportMode.SchemaAndData);
+                return;
+            }
+
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
                 dialog.Filter = Localization.T("Common.SqlFilesFilter");
@@ -7398,6 +7422,12 @@ namespace mySQLPunk
             if (IsPostgreSqlTarget(target))
             {
                 OpenPostgreSqlImportWizard(target);
+                return;
+            }
+
+            if (IsOracleTarget(target))
+            {
+                OpenOracleImportWizard(target);
                 return;
             }
 
