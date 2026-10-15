@@ -97,6 +97,15 @@ public static partial class SmokeTests
             string logContent = File.ReadAllText(result.LogPath);
             AssertContains(logContent, "mySQLPunk MySQL Import Execution Log", "Log contains start header");
             AssertContains(logContent, "Status    : Completed", "Log contains completion status");
+
+            string rawCommented = "-- table structure\r\n-- more comment\r\nCREATE TABLE `orders` (`id` int);\r\n";
+            string headline1 = MySqlImportRunner.SanitizeSqlHeadline(rawCommented);
+            AssertEquals("CREATE TABLE `orders` (`id` int);", headline1, "Commented DDL headline match");
+
+            string hugeInsert = "INSERT INTO `orders` VALUES " + new string('A', 500);
+            string headline2 = MySqlImportRunner.SanitizeSqlHeadline(hugeInsert);
+            Assert(headline2.Length <= 135, "Headline length bounded to prevent memory growth");
+            AssertContains(headline2, "INSERT INTO `orders` VALUES (...)", "Huge insert condensed");
         }
         finally
         {

@@ -20,18 +20,19 @@ namespace mySQLPunk
         private readonly Panel[] pages = new Panel[4];
         private readonly TextBox sourcePathBox = new TextBox(), targetDbBox = new TextBox(), logPathBox = new TextBox();
         private readonly ComboBox strategyCombo = new ComboBox();
-        private readonly CheckBox continueOnError = new CheckBox(), confirmCheck = new CheckBox();
+        private readonly CheckBox continueOnError = new CheckBox(), confirmCheck = new CheckBox(), autoScrollCheck = new CheckBox();
         private readonly Label stepsLabel = new Label(), statusLabel = new Label(), fileFactsLabel = new Label();
-        private readonly Label checkSummary = new Label(), confirmSummary = new Label();
+        private readonly Label checkSummary = new Label(), confirmSummary = new Label(), logTitleLabel = new Label(), logCountLabel = new Label();
         private readonly Label currentStatementLabel = new Label(), coverageLabel = new Label(), speedLabel = new Label();
         private readonly Label elapsedLabel = new Label(), etaLabel = new Label(), errorCountLabel = new Label(), resultText = new Label(), mascotHint = new Label();
-        private readonly Button nextButton = new Button(), backButton = new Button(), cancelButton = new Button(), browseButton = new Button(), soundButton = new Button();
+        private readonly Button nextButton = new Button(), backButton = new Button(), cancelButton = new Button(), browseButton = new Button(), soundButton = new Button(), clearLogButton = new Button();
         private readonly Button recheckButton = new Button(), openLogButton = new Button(), openFolderButton = new Button(), copyPathButton = new Button();
         private readonly ProgressBar execBar = new ProgressBar(), scanBar = new ProgressBar();
         private readonly PunkyReportLoadingControl punky = new PunkyReportLoadingControl();
         private readonly ListBox errorList = new ListBox();
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 250 };
         private readonly Stopwatch clock = new Stopwatch();
+        private const int MaxLogLines = 2000;
 
         private MySqlImportPreflight preflight;
         private MySqlImportRequest request;
@@ -365,9 +366,53 @@ namespace mySQLPunk
 
             content.Controls.Add(topPanel);
 
+            // 終端機風格即時執行日誌區塊
+            var logContainer = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 10, 0, 0) };
+
+            var logHeader = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 32,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false
+            };
+
+            logTitleLabel.Text = T("即時執行日誌", "Live Execution Log");
+            logTitleLabel.Font = UiKit.Subtitle;
+            logTitleLabel.AutoSize = true;
+            logTitleLabel.Margin = new Padding(0, 4, 12, 0);
+
+            logCountLabel.Text = string.Format(T("（保留最新 {0:N0} 行）", "(Rolling latest {0:N0} lines)"), MaxLogLines);
+            logCountLabel.Font = UiKit.Body;
+            logCountLabel.ForeColor = Color.Gray;
+            logCountLabel.AutoSize = true;
+            logCountLabel.Margin = new Padding(0, 6, 20, 0);
+
+            autoScrollCheck.Text = T("自動滾動", "Auto-scroll");
+            autoScrollCheck.Checked = true;
+            autoScrollCheck.AutoSize = true;
+            autoScrollCheck.Margin = new Padding(0, 5, 12, 0);
+
+            ConfigureButton(clearLogButton, "importClearLog", T("清空日誌", "Clear"), (s, e) =>
+            {
+                errorList.Items.Clear();
+            });
+            clearLogButton.MinimumSize = new Size(70, 26);
+            clearLogButton.Height = 26;
+            clearLogButton.Margin = new Padding(0, 2, 0, 0);
+
+            logHeader.Controls.AddRange(new Control[] { logTitleLabel, logCountLabel, autoScrollCheck, clearLogButton });
+            logContainer.Controls.Add(logHeader);
+
+            errorList.Name = "importLogList";
             errorList.Dock = DockStyle.Fill;
-            content.Controls.Add(errorList);
+            errorList.IntegralHeight = false;
+            errorList.BorderStyle = BorderStyle.FixedSingle;
+            errorList.Font = new Font("Consolas", 9f, FontStyle.Regular);
+            logContainer.Controls.Add(errorList);
             errorList.BringToFront();
+
+            content.Controls.Add(logContainer);
         }
 
         private void UpdateFileFacts()
@@ -537,6 +582,11 @@ namespace mySQLPunk
                     resultText.Text = Result.Summary;
                 }
 
+                if (!string.IsNullOrWhiteSpace(Result?.Summary))
+                {
+                    AppendLogLine("🏁 " + Result.Summary);
+                }
+
                 openLogButton.Visible = true;
                 openFolderButton.Visible = true;
                 copyPathButton.Visible = true;
@@ -546,6 +596,7 @@ namespace mySQLPunk
                 timer.Stop();
                 clock.Stop();
                 currentStatementLabel.Text = T("❌ 發生非預期例外：", "❌ Unexpected exception: ") + ex.Message;
+                AppendLogLine("❌ " + ex.Message);
             }
             finally
             {
@@ -576,11 +627,41 @@ namespace mySQLPunk
 
             if (!string.IsNullOrWhiteSpace(p.CurrentStatementPreview))
             {
-                if (errorList.Items.Count < 200)
+                AppendLogLine(p.CurrentStatementPreview);
+            }
+        }
+
+        private void AppendLogLine(string headline)
+        {
+            if (string.IsNullOrWhiteSpace(headline)) return;
+
+            string entry = $"[{DateTime.Now:HH:mm:ss}] {headline}";
+
+            if (errorList.Items.Count >= MaxLogLines)
+            {
+                errorList.BeginUpdate();
+                try
                 {
-                    errorList.Items.Add($"[{DateTime.Now:HH:mm:ss}] {p.CurrentStatementPreview}");
-                    errorList.TopIndex = errorList.Items.Count - 1;
+                    int excess = errorList.Items.Count - MaxLogLines + 1;
+                    for (int i = 0; i < excess && errorList.Items.Count > 0; i++)
+                    {
+                        errorList.Items.RemoveAt(0);
+                    }
+                    errorList.Items.Add(entry);
                 }
+                finally
+                {
+                    errorList.EndUpdate();
+                }
+            }
+            else
+            {
+                errorList.Items.Add(entry);
+            }
+
+            if (autoScrollCheck.Checked && errorList.Items.Count > 0)
+            {
+                errorList.TopIndex = errorList.Items.Count - 1;
             }
         }
 

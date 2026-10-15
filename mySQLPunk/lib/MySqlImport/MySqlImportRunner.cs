@@ -63,6 +63,8 @@ namespace mySQLPunk.lib.MySqlImport
                     int currentLine = 0;
                     string line;
 
+                    long lastReportMs = 0;
+
                     while ((line = reader.ReadLine()) != null)
                     {
                         cancellation.ThrowIfCancellationRequested();
@@ -110,17 +112,26 @@ namespace mySQLPunk.lib.MySqlImport
 
                             if (!string.IsNullOrWhiteSpace(sql))
                             {
-                                bool ok = ExecuteBatchStatement(sql, batchStartLine, options, log, ref executed, ref failed, ref skipped, errors);
+                                string headline;
+                                bool ok = ExecuteBatchStatement(sql, batchStartLine, options, log, ref executed, ref failed, ref skipped, errors, out headline);
                                 if (!ok && !options.ContinueOnError)
                                 {
                                     log.LogInfo("Execution stopped on error as requested by options.");
+                                    ReportProgress(progress, request.JobId, MySqlImportStage.Executing, fileBytes, fs.Position, executed, failed, skipped, clock, headline);
                                     break;
+                                }
+
+                                long now = clock.ElapsedMilliseconds;
+                                bool isDdl = IsSignificantStatement(headline);
+                                if (!ok || isDdl || (now - lastReportMs >= 60))
+                                {
+                                    lastReportMs = now;
+                                    ReportProgress(progress, request.JobId, MySqlImportStage.Executing, fileBytes, fs.Position, executed, failed, skipped, clock, headline);
                                 }
                             }
 
                             currentBatch.Clear();
                             batchStartLine = currentLine + 1;
-                            ReportProgress(progress, request.JobId, MySqlImportStage.Executing, fileBytes, fs.Position, executed, failed, skipped, clock, sql);
                         }
                     }
 
@@ -130,7 +141,9 @@ namespace mySQLPunk.lib.MySqlImport
                         string remainingSql = currentBatch.ToString().Trim();
                         if (!string.IsNullOrWhiteSpace(remainingSql))
                         {
-                            ExecuteBatchStatement(remainingSql, batchStartLine, options, log, ref executed, ref failed, ref skipped, errors);
+                            string headline;
+                            ExecuteBatchStatement(remainingSql, batchStartLine, options, log, ref executed, ref failed, ref skipped, errors, out headline);
+                            ReportProgress(progress, request.JobId, MySqlImportStage.Executing, fileBytes, fs.Position, executed, failed, skipped, clock, headline);
                         }
                     }
                 }
@@ -224,15 +237,17 @@ namespace mySQLPunk.lib.MySqlImport
             ref int executed,
             ref int failed,
             ref int skipped,
-            List<string> errors)
+            List<string> errors,
+            out string headline)
         {
-            string preview = sql.Length > 120 ? sql.Substring(0, 120).Replace("\r", " ").Replace("\n", " ") + "..." : sql.Replace("\r", " ").Replace("\n", " ");
+            string cleanSql = SanitizeSqlHeadline(sql);
 
             try
             {
                 db.ExecSQL(sql);
                 executed++;
-                log.LogStatement(line, preview, true);
+                log.LogStatement(line, cleanSql, true);
+                headline = "✔ " + cleanSql;
                 return true;
             }
             catch (Exception ex)
@@ -241,9 +256,56 @@ namespace mySQLPunk.lib.MySqlImport
                 string err = ex.Message;
                 errors.Add($"Line {line}: {err}");
                 string action = options.ContinueOnError ? "SkipBatch" : "HaltExecution";
-                log.LogStatement(line, preview, false, err, action);
+                log.LogStatement(line, cleanSql, false, err, action);
+                headline = $"❌ [行 {line}] {cleanSql} ➔ 錯誤: {err}";
                 return false;
             }
+        }
+
+        public static string SanitizeSqlHeadline(string sql, int maxLength = 130)
+        {
+            if (string.IsNullOrWhiteSpace(sql)) return string.Empty;
+
+            string[] lines = sql.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+            string firstActionable = null;
+            foreach (var l in lines)
+            {
+                string t = l.Trim();
+                if (string.IsNullOrEmpty(t)) continue;
+                if (t.StartsWith("--") || t.StartsWith("#") || t.StartsWith("/*")) continue;
+                firstActionable = t;
+                break;
+            }
+
+            string target = firstActionable ?? (lines.Length > 0 ? lines[0].Trim() : sql.Trim());
+
+            if (target.StartsWith("INSERT INTO", StringComparison.OrdinalIgnoreCase))
+            {
+                int valIdx = target.IndexOf("VALUES", StringComparison.OrdinalIgnoreCase);
+                if (valIdx > 0 && target.Length > 80)
+                {
+                    target = target.Substring(0, valIdx + 6) + " (...)";
+                }
+            }
+
+            string collapsed = Regex.Replace(target, @"\s+", " ").Trim();
+            if (collapsed.Length > maxLength)
+                collapsed = collapsed.Substring(0, maxLength) + "…";
+
+            return collapsed;
+        }
+
+        private static bool IsSignificantStatement(string headline)
+        {
+            if (string.IsNullOrEmpty(headline)) return false;
+            string upper = headline.ToUpperInvariant();
+            return upper.Contains("CREATE ")
+                || upper.Contains("DROP ")
+                || upper.Contains("ALTER ")
+                || upper.Contains("LOCK ")
+                || upper.Contains("UNLOCK ")
+                || upper.Contains("USE ")
+                || upper.Contains("TRUNCATE ");
         }
 
         private static void ReportProgress(
