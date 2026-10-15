@@ -32,7 +32,7 @@
 
 | 資料庫 Provider | SQL 傾印 (匯出) 現況 | SQL 檔案匯入現況 | 主要缺口與風險 |
 | :--- | :--- | :--- | :--- |
-| **MySQL / MariaDB** | 具備 `MySqlExportService`，支援 DDL 串流、DELIMITER、移除 DEFINER 等。但僅透過 SaveFileDialog 直接執行，無精靈。 | 具備 `MySqlImportService` 與簡易選項視窗，使用跑者遮罩進度視窗 (`RunnerProgressOverlay`)。 | 缺少四步精靈介面、缺乏選表與相依 View 挑選、無預檢掃描 (編碼/批次大小)、無獨立 Import Log 檔案、無結尾 Manifest 列數核對。 |
+| **MySQL / MariaDB** | ✅ 已具備完整四步精靈 (`MySqlExportWizardForm`)，支援選表/View/Routine/Trigger、一致性快照、Native Manifest。 | ✅ 已具備完整四步精靈 (`MySqlImportWizardForm`)，支援串流預檢、4種衝突策略、Session鎖定、終端機滑動視窗日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格）。 |
 | **SQLite** | 走舊版 `DatabaseDumpService`，使用 `StringBuilder` 拼接整份資料庫字串。 | 走舊版 `ImportSqlScript`，`File.ReadAllBytes` 一次性加載全文後用分號切割執行。 | **高危 OOM 風險**：大資料庫匯出/匯入必崩潰；無選表功能、無交易保護 (`BEGIN IMMEDIATE`)、無批次進度條、無日誌。 |
 | **PostgreSQL** | 走舊版 `DatabaseDumpService`，字串拼接；進階型別 (bytea, jsonb, array, uuid) 處理簡陋。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取後以分號切割。 | **高危 OOM 風險**；無法正確處理 Dollar-quoted (`$$...$$`) 預存程序或函數語法（分號會被誤切）；無 Repeatable Read 一致性快照；無進度。 |
 | **Oracle** | 走舊版 `DatabaseDumpService`，字串拼接。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取。 | **高危 OOM 風險**；無法處理 PL/SQL 區塊 (`/` 結尾)；缺少 RAW/LOB 分塊支援。 |
