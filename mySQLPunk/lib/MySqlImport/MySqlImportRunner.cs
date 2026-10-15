@@ -134,7 +134,11 @@ namespace mySQLPunk.lib.MySqlImport
                         // 檢查 Native Manifest
                         if (trimmed.StartsWith("--"))
                         {
-                            if (trimmed.Contains("mySQLPunk Native Manifest")) readingManifest = true;
+                            if (trimmed.Contains("mySQLPunk Native Manifest") && !readingManifest)
+                            {
+                                readingManifest = true;
+                                log.LogInfo("Detected Native Manifest in SQL script footer.");
+                            }
 
                             var match = Regex.Match(trimmed, @"^--\s*Manifest-Table:\s*([^\s|]+)\s*\|\s*Rows:\s*(\d+)", RegexOptions.IgnoreCase);
                             if (match.Success && long.TryParse(match.Groups[2].Value, out long r))

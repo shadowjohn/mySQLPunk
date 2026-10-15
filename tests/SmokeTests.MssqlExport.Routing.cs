@@ -121,7 +121,7 @@ public static partial class SmokeTests
 
     private static void Routing_LegacyBranches()
     {
-        foreach (string provider in new[] { "sqlite", "postgresql" })
+        foreach (string provider in new[] { "postgresql", "oracle" })
         foreach (string handler in new[] { "DumpSelectedTableSql", "DumpCurrentSelectionSqlWithDialog", "DumpSelectedDatabaseSqlWithDialog", "BackupSelectedDatabaseWithDialog" })
         using (var fixture = new RoutingFixture(provider, "Tables"))
         {

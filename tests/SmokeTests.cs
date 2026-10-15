@@ -40,6 +40,12 @@ public static partial class SmokeTests
         Run("MySQL import runner database redirection", MySqlImport_Runner_DatabaseRedirection, ref passed);
         Run("MySQL import runner existing object strategies", MySqlImport_Runner_ExistingObjectStrategies, ref passed);
         Run("MySQL import runner manifest mismatch detection", MySqlImport_Runner_ManifestMismatchDetection, ref passed);
+        Run("SQLite export options and models defaults", SqliteExport_OptionsAndModels_Defaults, ref passed);
+        Run("SQLite export service and manifest streaming and hex blob", SqliteExport_ServiceAndManifest_StreamingAndHexBlob, ref passed);
+        Run("SQLite import preflight scanner SpatiaLite and manifest", SqliteImport_PreflightScanner_SpatiaLiteAndManifest, ref passed);
+        Run("SQLite import runner execution and manifest verification", SqliteImport_Runner_ExecutionAndManifestVerification, ref passed);
+        Run("SQLite import runner existing object strategies", SqliteImport_Runner_ExistingObjectStrategies, ref passed);
+        Run("SQLite import runner transaction rollback on failure", SqliteImport_Runner_TransactionRollbackOnFailure, ref passed);
         Run("MSSQL import Transfer guards", MssqlImportTransferGuards, ref passed);
         Run("MSSQL import Transfer trial", MssqlImportTransferTrial, ref passed);
         Run("MSSQL import worker published cleanup receipt", MssqlImportPublishedReleaseRace, ref passed);

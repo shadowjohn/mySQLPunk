@@ -33,7 +33,7 @@
 | 資料庫 Provider | SQL 傾印 (匯出) 現況 | SQL 檔案匯入現況 | 主要缺口與風險 |
 | :--- | :--- | :--- | :--- |
 | **MySQL / MariaDB** | ✅ 已具備完整四步精靈 (`MySqlExportWizardForm`)，支援選表/View/Routine/Trigger、一致性快照、Native Manifest。 | ✅ 已具備完整四步精靈 (`MySqlImportWizardForm`)，支援串流預檢、4種衝突策略、Session鎖定、終端機滑動視窗日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格）。 |
-| **SQLite** | 走舊版 `DatabaseDumpService`，使用 `StringBuilder` 拼接整份資料庫字串。 | 走舊版 `ImportSqlScript`，`File.ReadAllBytes` 一次性加載全文後用分號切割執行。 | **高危 OOM 風險**：大資料庫匯出/匯入必崩潰；無選表功能、無交易保護 (`BEGIN IMMEDIATE`)、無批次進度條、無日誌。 |
+| **SQLite** | ✅ 已具備完整四步精靈 (`SqliteExportWizardForm`)，支援選表、SpatiaLite/GeoPackage 空間幾何無損 Hex 傾印、排除虛擬表影子表、原子替換與 Native Manifest。 | ✅ 已具備完整四步精靈 (`SqliteImportWizardForm`)，支援串流狀態機預檢、SpatiaLite 動態模組自動加載、4種衝突策略、滑動視窗終端機日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS 空間特性）。 |
 | **PostgreSQL** | 走舊版 `DatabaseDumpService`，字串拼接；進階型別 (bytea, jsonb, array, uuid) 處理簡陋。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取後以分號切割。 | **高危 OOM 風險**；無法正確處理 Dollar-quoted (`$$...$$`) 預存程序或函數語法（分號會被誤切）；無 Repeatable Read 一致性快照；無進度。 |
 | **Oracle** | 走舊版 `DatabaseDumpService`，字串拼接。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取。 | **高危 OOM 風險**；無法處理 PL/SQL 區塊 (`/` 結尾)；缺少 RAW/LOB 分塊支援。 |
 
@@ -50,14 +50,14 @@
   - [x] 匯出：移植四步精靈（選表/View ➔ 輸出設定/single-transaction ➔ 確認物件 ➔ 串流執行 + Punky 動畫 + Manifest 生成）。
   - [x] 匯入：移植四步精靈（選檔 ➔ 預檢掃描 DELIMITER/編碼/單批上限 ➔ 確認目標與策略 ➔ 專用 Session 執行 + Punky 動畫 + 獨立 Log + Manifest 核對）。
 
-#### 🥈 第二優先：SQLite
+#### 🥈 第二優先：SQLite（崩琦 GIS 招牌特色對齊）
 - **原因**：
   1. 單機檔案型資料庫，無遠端網路干擾或伺服器權限設定，建置回歸與驗證最迅速。
-  2. 目前的 SQLite 匯出/匯入是記憶體拼接，最迫切需要解救大資料庫 OOM 的問題。
-  3. 透過 SQLite 實作，可以檢驗並淬鍊出跨資料庫共用的「通用 SQL 匯出/匯入精靈」基底類別 (Generic Wizard Base)。
+  2. 徹底解決過去舊版 SQLite 匯出/匯入記憶體拼接造成大庫 OOM 的致命缺點。
+  3. 深度支援 SpatiaLite 與 GeoPackage 空間幾何無損傾印 (`X'...'` HEX)、排除龐大空間中繼表 (`spatial_ref_sys`) 與虛擬表影子表 (`_node`, `_rowid` 等)。
 - **具體工作**：
-  - [ ] 匯出：改用真正的串流 StreamWriter 寫檔；支援 `BEGIN IMMEDIATE` 一致性交易；支援側車註解 (Sidecar Comment) 隨結構導出。
-  - [ ] 匯入：串流 Parser 解析標準 SQLite 語法；封裝為單一交易（失敗自動 Rollback）；加入進度估算與 Log。
+  - [x] 匯出：改用真正的串流 StreamWriter 寫檔；支援 `BEGIN IMMEDIATE` 一致性交易；支援側車註解 (Sidecar Comment) 隨結構導出；空間幾何 BLOB 無損 Hex 傾印；排除 R-Tree 影子表；產生 Native Manifest。
+  - [x] 匯入：串流狀態機 Lexer 解析；支援 SpatiaLite 動態模組自動加載；交易包覆與 PRAGMA 性能優化；4種物件衝突策略；2,000 行滑動視窗終端機日誌；Manifest 逐表筆數核對。
 
 #### 🥉 第三優先：PostgreSQL
 - **原因**：

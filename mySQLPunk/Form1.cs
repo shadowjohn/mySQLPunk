@@ -6680,6 +6680,11 @@ namespace mySQLPunk
                 OpenMySqlExportWizard(target, dataOnly ? lib.MySqlExport.MySqlExportMode.DataOnly : lib.MySqlExport.MySqlExportMode.SchemaAndData);
                 return;
             }
+            if (IsSqliteTarget(target))
+            {
+                OpenSqliteExportWizard(target, dataOnly ? lib.SqliteExport.SqliteExportMode.DataOnly : lib.SqliteExport.SqliteExportMode.SchemaAndData, tableName);
+                return;
+            }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
@@ -6940,6 +6945,12 @@ namespace mySQLPunk
                 OpenMySqlExportWizard(target, tableDataOnly ? lib.MySqlExport.MySqlExportMode.DataOnly : lib.MySqlExport.MySqlExportMode.SchemaAndData);
                 return;
             }
+            if (IsSqliteTarget(target) && (selection == null || selection.GroupName == "Tables"))
+            {
+                bool tableDataOnly = selection != null && dataOnlyForTable;
+                OpenSqliteExportWizard(target, tableDataOnly ? lib.SqliteExport.SqliteExportMode.DataOnly : lib.SqliteExport.SqliteExportMode.SchemaAndData, selection == null ? null : selection.ObjectName);
+                return;
+            }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
@@ -7029,6 +7040,7 @@ namespace mySQLPunk
         {
             return target != null && string.Equals(target.ProviderName, "mysql", StringComparison.OrdinalIgnoreCase);
         }
+
 
         private async Task<MySqlExportResult> ExportMySqlDatabaseWithProgress(TreeDatabaseTarget target, string targetPath, MySqlExportOptions options)
         {
@@ -7284,6 +7296,12 @@ namespace mySQLPunk
                 return;
             }
 
+            if (IsSqliteTarget(target))
+            {
+                OpenSqliteExportWizard(target, lib.SqliteExport.SqliteExportMode.SchemaAndData);
+                return;
+            }
+
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
                 dialog.Filter = Localization.T("Common.SqlFilesFilter");
@@ -7344,6 +7362,12 @@ namespace mySQLPunk
             if (IsMySqlTarget(target))
             {
                 OpenMySqlImportWizard(target);
+                return;
+            }
+
+            if (IsSqliteTarget(target))
+            {
+                OpenSqliteImportWizard(target);
                 return;
             }
 
