@@ -4,6 +4,79 @@
 
 ---
 
+## 🚀 SQL 傾印 (備份) 與匯入功能對齊計畫（以 MSSQL 標竿為準）
+
+前陣子 shadowjohn 為 SQL Server (MSSQL) 建立了極高標準的**「邏輯 SQL 傾印匯出精靈 (`MssqlExport`)」**與**「四步原生 SQL 匯入精靈 (`MssqlImport`)」**。本計畫旨在將其他主流資料庫（MySQL、SQLite、PostgreSQL、Oracle）全面對齊此一嚴謹規格。
+
+### 📌 MSSQL 目前的標竿規格 (Gold Standard)
+
+1. **SQL 傾印 (匯出) 精靈**：
+   - **四步精靈引導**：選取資料表與相依檢視 (支援篩選與全選) ➔ 輸出路徑與一致性快照設定 ➔ 確認物件清單與預估 ➔ 執行進度、Punky 整理資料動畫、即時傳輸速率與完成回報。
+   - **串流式檔案處理**：全串流寫入本機私有 Staging 檔案後原子替換，**絕不**將整庫拼接為記憶體字串，徹底杜絕 OutOfMemory (OOM)。
+   - **超大欄位分塊串流**：LOB、XML、二進位與原生 Geometry 資料支援分塊 (Chunked) 串流寫入，單列可跨批次。
+   - **交易一致性快照防護**：支援可選的一致性讀取快照 (如 MSSQL SNAPSHOT 隔離)，防範外鍵關聯不一致；若變更 DB 設定具備專用逾時預算與故障復原日誌 (Recovery Journal)。
+   - **Footer Native Manifest**：匯出檔結尾附帶清單摘要（資料表數量、逐表行數 COUNT_BIG、SHA-256 核對碼），作為還原校驗依據。
+   - **官方 CLI 相容性**：產出的 SQL 嚴格相容官方 sqlcmd 與 Go sqlcmd。
+
+2. **SQL 檔匯入精靈**：
+   - **四步精靈引導**：選擇檔案與目標資料庫 ➔ 完整串流預檢 (Preflight) ➔ 確認執行與錯誤政策 ➔ 執行即時進度、Punky 動畫與音效切換、錯誤紀錄。
+   - **串流預檢 (Preflight)**：預先掃描編碼 (嚴格 UTF-8 或帶 BOM 的 UTF-16)、批次分隔符 (GO)、單批次上限 (32 MiB) 與目標資料庫連線/空庫狀態，不預先執行任何 SQL。
+   - **專屬連線 Session**：全腳本依序在同一專用 Session 執行，保留暫存表 (#temp)、SET 旗標、交易與分段 LOB 狀態。
+   - **彈性錯誤政策**：預設遇錯停止；在安全前提下支援「略過失敗批次並繼續」（限無未完交易與安全 LOB 狀態）。
+   - **獨立日誌記錄**：每次執行於 `%LOCALAPPDATA%\mySQLPunk\ImportLogs` 建立獨立 Log 檔，保留所有錯誤代碼、行號與 Probe 清理紀錄，不覆蓋舊檔。
+   - **Manifest 自動核對**：還原完成後，自動讀取結尾 Manifest 比對資料庫現存資料表數與列數。
+
+---
+
+### 🔍 各資料庫 Provider 現況缺口盤點
+
+| 資料庫 Provider | SQL 傾印 (匯出) 現況 | SQL 檔案匯入現況 | 主要缺口與風險 |
+| :--- | :--- | :--- | :--- |
+| **MySQL / MariaDB** | 具備 `MySqlExportService`，支援 DDL 串流、DELIMITER、移除 DEFINER 等。但僅透過 SaveFileDialog 直接執行，無精靈。 | 具備 `MySqlImportService` 與簡易選項視窗，使用跑者遮罩進度視窗 (`RunnerProgressOverlay`)。 | 缺少四步精靈介面、缺乏選表與相依 View 挑選、無預檢掃描 (編碼/批次大小)、無獨立 Import Log 檔案、無結尾 Manifest 列數核對。 |
+| **SQLite** | 走舊版 `DatabaseDumpService`，使用 `StringBuilder` 拼接整份資料庫字串。 | 走舊版 `ImportSqlScript`，`File.ReadAllBytes` 一次性加載全文後用分號切割執行。 | **高危 OOM 風險**：大資料庫匯出/匯入必崩潰；無選表功能、無交易保護 (`BEGIN IMMEDIATE`)、無批次進度條、無日誌。 |
+| **PostgreSQL** | 走舊版 `DatabaseDumpService`，字串拼接；進階型別 (bytea, jsonb, array, uuid) 處理簡陋。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取後以分號切割。 | **高危 OOM 風險**；無法正確處理 Dollar-quoted (`$$...$$`) 預存程序或函數語法（分號會被誤切）；無 Repeatable Read 一致性快照；無進度。 |
+| **Oracle** | 走舊版 `DatabaseDumpService`，字串拼接。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取。 | **高危 OOM 風險**；無法處理 PL/SQL 區塊 (`/` 結尾)；缺少 RAW/LOB 分塊支援。 |
+
+---
+
+### 🎯 實施評估與建議順序
+
+#### 🥇 第一優先：MySQL / MariaDB（推薦首選）
+- **原因**：
+  1. `mySQLPunk` 的核心品牌與最高頻使用情境正是 MySQL！
+  2. 既有程式碼庫中已具備相對成熟的 `MySqlExportService` 與 `MySqlImportService` 底層邏輯（如 `DELIMITER` 解析、`SHOW CREATE` 提取、交易開關等），只需將底層串流強化並重構對齊 MSSQL 的四步精靈架構。
+  3. 投資報酬率最高，能快速在主要客群中展現一致且專業的產品體驗。
+- **具體工作**：
+  - [ ] 匯出：移植四步精靈（選表/View ➔ 輸出設定/single-transaction ➔ 確認物件 ➔ 串流執行 + Punky 動畫 + Manifest 生成）。
+  - [ ] 匯入：移植四步精靈（選檔 ➔ 預檢掃描 DELIMITER/編碼/單批上限 ➔ 確認目標與策略 ➔ 專用 Session 執行 + Punky 動畫 + 獨立 Log + Manifest 核對）。
+
+#### 🥈 第二優先：SQLite
+- **原因**：
+  1. 單機檔案型資料庫，無遠端網路干擾或伺服器權限設定，建置回歸與驗證最迅速。
+  2. 目前的 SQLite 匯出/匯入是記憶體拼接，最迫切需要解救大資料庫 OOM 的問題。
+  3. 透過 SQLite 實作，可以檢驗並淬鍊出跨資料庫共用的「通用 SQL 匯出/匯入精靈」基底類別 (Generic Wizard Base)。
+- **具體工作**：
+  - [ ] 匯出：改用真正的串流 StreamWriter 寫檔；支援 `BEGIN IMMEDIATE` 一致性交易；支援側車註解 (Sidecar Comment) 隨結構導出。
+  - [ ] 匯入：串流 Parser 解析標準 SQLite 語法；封裝為單一交易（失敗自動 Rollback）；加入進度估算與 Log。
+
+#### 🥉 第三優先：PostgreSQL
+- **原因**：
+  1. 企業與現代開發廣泛使用，重要性極高。
+  2. 語法複雜度較高：需要支援 Dollar-quoted (`$$` 或 `$tag$`) 函數/預存程序本體、Bytea Hex 轉義、Array 與 Jsonb 原生字面量。
+  3. 可導入 PostgreSQL 原生的 `REPEATABLE READ` 交易快照保證匯出一致性。
+- **具體工作**：
+  - [ ] 匯出：Schema 命名空間分組、支援 `public` 及自訂 Schema 的 Table/View 選取；串流寫入與進階型別格式化。
+  - [ ] 匯入：開發 PostgreSQL 專屬 Statement Lexer（精確識別 Dollar Quotes、SQL 註解與跳脫字串，不隨意在分號切斷）；支援錯誤略過與 Manifest 驗證。
+
+#### 🎖️ 第四優先：Oracle
+- **原因**：
+  1. 企業級封閉環境，使用情境相對特定。
+  2. 需處理 PL/SQL 特殊分隔語意（`/` 獨立行代表編譯區塊結束）。
+- **具體工作**：
+  - [ ] 匯出/匯入改為串流架構，支援 PL/SQL 區塊解析與 LOB 欄位分段。
+
+---
+
 ## 🐧 Linux / macOS 跨平台版功能遷移
 
 跨平台預覽版目前以 Avalonia (.NET 8) 打造，核心資料庫功能已具備，以下功能正分階段由 Windows 完整版遷移：
@@ -62,7 +135,3 @@
   - [ ] 加入 SOCKS5 代理支援（讓資料庫連線可透過 SOCKS5 穿透）
 - [ ] **程式碼簽名**
   - [ ] Windows 安裝檔加入 Code Signing 憑證，消除初次下載的 SmartScreen 警告
-
----
-
-> 💡 如果您想參與以上任一項目的開發，歡迎閱讀 [`CONTRIBUTING.md`](CONTRIBUTING.md) 並提交 PR！
