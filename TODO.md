@@ -34,7 +34,7 @@
 | :--- | :--- | :--- | :--- |
 | **MySQL / MariaDB** | ✅ 已具備完整四步精靈 (`MySqlExportWizardForm`)，支援選表/View/Routine/Trigger、一致性快照、Native Manifest。 | ✅ 已具備完整四步精靈 (`MySqlImportWizardForm`)，支援串流預檢、4種衝突策略、Session鎖定、終端機滑動視窗日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格）。 |
 | **SQLite** | ✅ 已具備完整四步精靈 (`SqliteExportWizardForm`)，支援選表、SpatiaLite/GeoPackage 空間幾何無損 Hex 傾印、排除虛擬表影子表、原子替換與 Native Manifest。 | ✅ 已具備完整四步精靈 (`SqliteImportWizardForm`)，支援串流狀態機預檢、SpatiaLite 動態模組自動加載、4種衝突策略、滑動視窗終端機日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS 空間特性）。 |
-| **PostgreSQL** | 走舊版 `DatabaseDumpService`，字串拼接；進階型別 (bytea, jsonb, array, uuid) 處理簡陋。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取後以分號切割。 | **高危 OOM 風險**；無法正確處理 Dollar-quoted (`$$...$$`) 預存程序或函數語法（分號會被誤切）；無 Repeatable Read 一致性快照；無進度。 |
+| **PostgreSQL** | ✅ 已具備完整四步精靈 (`PostgreSqlExportWizardForm`)，支援選表/View、PostGIS 空間幾何無損 Hex EWKB 傾印、排除 spatial_ref_sys、REPEATABLE READ 快照與 Native Manifest。 | ✅ 已具備完整四步精靈 (`PostgreSqlImportWizardForm`)，支援狀態機 Lexer (精準解析 Dollar Quotes 與巢狀註解)、PostGIS 自動安裝開關、4種衝突策略、2,000行滑動視窗日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS PostGIS 空間特性）。 |
 | **Oracle** | 走舊版 `DatabaseDumpService`，字串拼接。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取。 | **高危 OOM 風險**；無法處理 PL/SQL 區塊 (`/` 結尾)；缺少 RAW/LOB 分塊支援。 |
 
 ---
@@ -59,14 +59,14 @@
   - [x] 匯出：改用真正的串流 StreamWriter 寫檔；支援 `BEGIN IMMEDIATE` 一致性交易；支援側車註解 (Sidecar Comment) 隨結構導出；空間幾何 BLOB 無損 Hex 傾印；排除 R-Tree 影子表；產生 Native Manifest。
   - [x] 匯入：串流狀態機 Lexer 解析；支援 SpatiaLite 動態模組自動加載；交易包覆與 PRAGMA 性能優化；4種物件衝突策略；2,000 行滑動視窗終端機日誌；Manifest 逐表筆數核對。
 
-#### 🥉 第三優先：PostgreSQL
+#### 🥉 第三優先：PostgreSQL（崩琦 GIS PostGIS 空間特長對齊）
 - **原因**：
-  1. 企業與現代開發廣泛使用，重要性極高。
-  2. 語法複雜度較高：需要支援 Dollar-quoted (`$$` 或 `$tag$`) 函數/預存程序本體、Bytea Hex 轉義、Array 與 Jsonb 原生字面量。
-  3. 可導入 PostgreSQL 原生的 `REPEATABLE READ` 交易快照保證匯出一致性。
+  1. 企業與現代空間資訊系統（GIS）廣泛使用，為崩琦 GIS 核心亮點。
+  2. 語法複雜度較高：需要支援 Dollar-quoted (`$$` 或 `$tag$`) 函數/預存程序本體、Bytea Hex 轉義、Array、Jsonb 與幾何 (EWKB) 原生字面量。
+  3. 導入 PostgreSQL 原生的 `REPEATABLE READ` 交易快照保證匯出一致性，並無損傾印 PostGIS 幾何資料。
 - **具體工作**：
-  - [ ] 匯出：Schema 命名空間分組、支援 `public` 及自訂 Schema 的 Table/View 選取；串流寫入與進階型別格式化。
-  - [ ] 匯入：開發 PostgreSQL 專屬 Statement Lexer（精確識別 Dollar Quotes、SQL 註解與跳脫字串，不隨意在分號切斷）；支援錯誤略過與 Manifest 驗證。
+  - [x] 匯出：支援四步精靈（選表/View ➔ 輸出設定/快照隔離/排除 spatial_ref_sys ➔ 物件清單 ➔ 串流執行 + Punky 動畫 + Manifest 生成）；PostGIS geometry/geography/raster 轉無損 EWKB 十六進位字面量；保留 GIST/SP-GIST 空間索引。
+  - [x] 匯入：支援四步精靈（選檔 ➔ 串流狀態機預檢 Dollar Quotes 與巢狀註解 ➔ 4種物件衝突策略與 PostGIS 自動加載 ➔ 串流執行 + Punky 動畫 + 2,000行滑動視窗終端機日誌 + 獨立 Log + Manifest 逐表筆數核對）。
 
 #### 🎖️ 第四優先：Oracle
 - **原因**：

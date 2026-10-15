@@ -6685,6 +6685,11 @@ namespace mySQLPunk
                 OpenSqliteExportWizard(target, dataOnly ? lib.SqliteExport.SqliteExportMode.DataOnly : lib.SqliteExport.SqliteExportMode.SchemaAndData, tableName);
                 return;
             }
+            if (IsPostgreSqlTarget(target))
+            {
+                OpenPostgreSqlExportWizard(target, dataOnly ? lib.PostgreSqlExport.PostgreSqlExportMode.DataOnly : lib.PostgreSqlExport.PostgreSqlExportMode.SchemaAndData, tableName);
+                return;
+            }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
@@ -6951,6 +6956,12 @@ namespace mySQLPunk
                 OpenSqliteExportWizard(target, tableDataOnly ? lib.SqliteExport.SqliteExportMode.DataOnly : lib.SqliteExport.SqliteExportMode.SchemaAndData, selection == null ? null : selection.ObjectName);
                 return;
             }
+            if (IsPostgreSqlTarget(target) && (selection == null || selection.GroupName == "Tables" || selection.GroupName == "Views"))
+            {
+                bool tableDataOnly = selection != null && dataOnlyForTable;
+                OpenPostgreSqlExportWizard(target, tableDataOnly ? lib.PostgreSqlExport.PostgreSqlExportMode.DataOnly : lib.PostgreSqlExport.PostgreSqlExportMode.SchemaAndData, selection == null ? null : selection.ObjectName);
+                return;
+            }
 
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
@@ -7039,6 +7050,13 @@ namespace mySQLPunk
         private static bool IsMySqlTarget(TreeDatabaseTarget target)
         {
             return target != null && string.Equals(target.ProviderName, "mysql", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPostgreSqlTarget(TreeDatabaseTarget target)
+        {
+            return target != null &&
+                   ((target.Database != null && string.Equals(target.Database.ProviderName, "postgresql", StringComparison.OrdinalIgnoreCase)) ||
+                    string.Equals(target.ProviderName, "postgresql", StringComparison.OrdinalIgnoreCase));
         }
 
 
@@ -7302,6 +7320,12 @@ namespace mySQLPunk
                 return;
             }
 
+            if (IsPostgreSqlTarget(target))
+            {
+                OpenPostgreSqlExportWizard(target, lib.PostgreSqlExport.PostgreSqlExportMode.SchemaAndData);
+                return;
+            }
+
             using (SaveFileDialog dialog = new SaveFileDialog())
             {
                 dialog.Filter = Localization.T("Common.SqlFilesFilter");
@@ -7368,6 +7392,12 @@ namespace mySQLPunk
             if (IsSqliteTarget(target))
             {
                 OpenSqliteImportWizard(target);
+                return;
+            }
+
+            if (IsPostgreSqlTarget(target))
+            {
+                OpenPostgreSqlImportWizard(target);
                 return;
             }
 

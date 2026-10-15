@@ -325,6 +325,10 @@
     <Compile Include="SqliteImportWizardForm.cs" />
     <Compile Include="Form1.SqliteExport.cs" />
     <Compile Include="Form1.SqliteImport.cs" />
+    <Compile Include="PostgreSqlExportWizardForm.cs" />
+    <Compile Include="PostgreSqlImportWizardForm.cs" />
+    <Compile Include="Form1.PostgreSqlExport.cs" />
+    <Compile Include="Form1.PostgreSqlImport.cs" />
     <Compile Include="ReportTemplatePreviewForm.cs" />
     <Compile Include="PunkyReportLoadingControl.cs" />
     <Compile Include="Localization.cs" />
@@ -408,6 +412,12 @@
     <Compile Include="lib\SqliteImport\SqliteImportLog.cs" />
     <Compile Include="lib\SqliteImport\SqliteImportPreflightScanner.cs" />
     <Compile Include="lib\SqliteImport\SqliteImportRunner.cs" />
+    <Compile Include="lib\PostgreSqlExport\PostgreSqlExportModels.cs" />
+    <Compile Include="lib\PostgreSqlExport\PostgreSqlSqlExportService.cs" />
+    <Compile Include="lib\PostgreSqlImport\PostgreSqlImportModels.cs" />
+    <Compile Include="lib\PostgreSqlImport\PostgreSqlImportLog.cs" />
+    <Compile Include="lib\PostgreSqlImport\PostgreSqlImportPreflightScanner.cs" />
+    <Compile Include="lib\PostgreSqlImport\PostgreSqlImportRunner.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotModels.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotRecoveryStore.cs" />
     <Compile Include="lib\MssqlExport\MssqlSnapshotBackend.cs" />

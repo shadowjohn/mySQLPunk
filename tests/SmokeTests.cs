@@ -46,6 +46,13 @@ public static partial class SmokeTests
         Run("SQLite import runner execution and manifest verification", SqliteImport_Runner_ExecutionAndManifestVerification, ref passed);
         Run("SQLite import runner existing object strategies", SqliteImport_Runner_ExistingObjectStrategies, ref passed);
         Run("SQLite import runner transaction rollback on failure", SqliteImport_Runner_TransactionRollbackOnFailure, ref passed);
+        Run("PostgreSQL export options and models defaults", PostgreSqlExport_OptionsAndModels_Defaults, ref passed);
+        Run("PostgreSQL export service and manifest streaming and hex EWKB", PostgreSqlExport_ServiceAndManifest_StreamingAndHexEwkb, ref passed);
+        Run("PostgreSQL import preflight scanner PostGIS and dollar quotes", PostgreSqlImport_PreflightScanner_PostgisAndDollarQuotes, ref passed);
+        Run("PostgreSQL import preflight scanner embedded NUL", PostgreSqlImport_PreflightScanner_EmbeddedNul, ref passed);
+        Run("PostgreSQL import runner execution and manifest verification", PostgreSqlImport_Runner_ExecutionAndManifestVerification, ref passed);
+        Run("PostgreSQL import runner existing object strategies", PostgreSqlImport_Runner_ExistingObjectStrategies, ref passed);
+        Run("PostgreSQL import runner transaction rollback on failure", PostgreSqlImport_Runner_TransactionRollbackOnFailure, ref passed);
         Run("MSSQL import Transfer guards", MssqlImportTransferGuards, ref passed);
         Run("MSSQL import Transfer trial", MssqlImportTransferTrial, ref passed);
         Run("MSSQL import worker published cleanup receipt", MssqlImportPublishedReleaseRace, ref passed);
