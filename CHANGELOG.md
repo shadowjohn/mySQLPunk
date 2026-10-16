@@ -10,6 +10,7 @@
   - **獨立日誌與即時審計**：所有匯入執行步驟與錯誤皆獨立記錄至 `%LOCALAPPDATA%\mySQLPunk\ImportLogs`，並於匯入完成後自動比對 Native Manifest 目標列數；筆數符合不代表全部資料值與結構已驗收。
 
 ### 🛠️ 問題修正與優化
+- **MySQL 空間欄位匯出與提前檢查**：普通 2D Geometry 改以 WKB 與每筆 SRID 匯出，保留 NULL、排除 generated 欄位；全部選表先檢查欄位與大小，再開始寫檔。失敗後清除速率／ETA，顯示未發布狀態；100% 只代表成功產檔。來源單列仍限 1 MiB，實機還原與跨引擎 SRS 相容性尚待驗收。
 - **MySQL／SQLite／Oracle 匯出匯入修整**：修正衝突策略誤刪／漏匯、SQL 字串誤改、provider 失敗被當成功、交易與取消清理；改用獨立工作連線與保留舊檔的原子發布。SQLite 補上 trigger、generated 欄位、rowid／序號及文字 bytes 往返；Oracle 補來源快照、逐列 reader、SRID／metadata 與 bounded LOB 分段。單表入口預設不包含不相關物件。支援上限與尚未驗收項目見 [驗證文件](docs/design/db-wizard-repairs/verification.md)。
 - **MySQL 匯出與匯入精靈版面與體驗優化**：
   - **修復版面跑版坍塌**：修正步驟 2 與步驟 3 之設定 GroupBox 在 FlowLayoutPanel 內因 AutoSize 導致寬度坍塌至邊框寬度 (~15px) 造成文字嚴重擠壓折疊之跑版問題，改採標準固定寬度 (740px) 與適應性內部流式排版。

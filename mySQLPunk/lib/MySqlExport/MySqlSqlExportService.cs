@@ -46,6 +46,19 @@ namespace mySQLPunk.lib.MySqlExport
             catch { return new List<string>(); }
         }
 
+        // The wizard may call this before confirmation. It must not scan data,
+        // count rows, start a transaction, or cache metadata across attempts.
+        public void ValidateTableDataCompatibility(IEnumerable<string> selectedTables, CancellationToken cancellation)
+        {
+            if (selectedTables == null) throw new ArgumentNullException(nameof(selectedTables));
+            foreach (string table in selectedTables)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                LoadTableShape(table, cancellation);
+            }
+            cancellation.ThrowIfCancellationRequested();
+        }
+
         public List<MySqlRoutineInfo> LoadRoutines()
         {
             try { return MySqlExportService.GetRoutines(db, databaseName) ?? new List<MySqlRoutineInfo>(); }
@@ -93,6 +106,8 @@ namespace mySQLPunk.lib.MySqlExport
             var selectedViews = options.IncludeViews ? (options.SelectedViews?.ToList() ?? new List<string>()) : new List<string>();
             var selectedRoutines = options.IncludeRoutines ? (options.SelectedRoutines?.ToList() ?? new List<string>()) : new List<string>();
             var selectedTriggers = options.IncludeTriggers ? (options.SelectedTriggers?.ToList() ?? new List<string>()) : new List<string>();
+            var tableShapes = new Dictionary<string, TableShape>(StringComparer.Ordinal);
+            var tableRowCounts = new Dictionary<string, long>(StringComparer.Ordinal);
 
             bool inTransaction = false;
             bool publicationAttempted = false;
@@ -108,7 +123,28 @@ namespace mySQLPunk.lib.MySqlExport
                     inTransaction = true;
                 }
                 if (options.Mode != MySqlExportMode.SchemaOnly)
-                    foreach (var table in selectedTables) estimatedTotalRows += db.CountRows(databaseName, table);
+                {
+                    // Validate the whole selection before any potentially expensive
+                    // row scan. All metadata is fresh and belongs to this attempt.
+                    foreach (string table in selectedTables)
+                    {
+                        ReportProgress(progress, MySqlExportStage.ReadingCatalog, table, 0, selectedTables.Count, 0, 0, 0, clock);
+                        tableShapes[table] = LoadTableShape(table, cancellation);
+                    }
+                    foreach (string table in selectedTables)
+                    {
+                        cancellation.ThrowIfCancellationRequested();
+                        ReportProgress(progress, MySqlExportStage.ReadingCatalog, table, 0, selectedTables.Count, 0, estimatedTotalRows, 0, clock);
+                        CheckRowBound(table, tableShapes[table], cancellation);
+                        long count = db.CountRows(databaseName, table);
+                        if (count < 0) throw new InvalidOperationException("Invalid source row count: " + table);
+                        tableRowCounts[table] = count;
+                        estimatedTotalRows += count;
+                        cancellation.ThrowIfCancellationRequested();
+                    }
+                }
+
+                cancellation.ThrowIfCancellationRequested();
 
                 using (var fileStream = new FileStream(stagingPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 65536))
                 using (var writer = new StreamWriter(fileStream, new UTF8Encoding(false)))
@@ -183,8 +219,8 @@ namespace mySQLPunk.lib.MySqlExport
                             cancellation.ThrowIfCancellationRequested();
                             string table = selectedTables[i];
                             long tableRows = 0;
-                            long totalTableRows = db.CountRows(databaseName, table);
-                            var shape = LoadGeneratedColumnsAndCheckRowBound(table, cancellation);
+                            long totalTableRows = tableRowCounts[table];
+                            var shape = tableShapes[table];
 
                             ReportProgress(progress, MySqlExportStage.WritingData, table, i, selectedTables.Count, totalProcessedRows, estimatedTotalRows, fileStream.Position, clock);
 
@@ -196,10 +232,9 @@ namespace mySQLPunk.lib.MySqlExport
                                 cancellation.ThrowIfCancellationRequested();
                                 if (page.Rows.Count == 0) break;
 
-                                var writableColumns = page.Columns.Cast<DataColumn>().Where(c => !shape.Generated.Contains(c.ColumnName)).ToList();
-                                if (writableColumns.Count == 0) throw new NotSupportedException("Tables containing only generated columns require a native client: " + table);
+                                var writableColumns = shape.Writable;
                                 string prefix = "INSERT INTO " + MySqlImportRunner.QuoteIdentifier(table) + " (" +
-                                    string.Join(", ", writableColumns.Select(c => MySqlImportRunner.QuoteIdentifier(c.ColumnName))) + ") VALUES\r\n";
+                                    string.Join(", ", writableColumns.Select(c => MySqlImportRunner.QuoteIdentifier(c.Name))) + ") VALUES\r\n";
                                 var insert = new StringBuilder(prefix);
                                 foreach (DataRow row in page.Rows)
                                 {
@@ -208,7 +243,8 @@ namespace mySQLPunk.lib.MySqlExport
                                     for (int c = 0; c < writableColumns.Count; c++)
                                     {
                                         if (c > 0) rowText.Append(", ");
-                                        rowText.Append(ToBoundedLiteral(row[writableColumns[c]]));
+                                        var column = writableColumns[c];
+                                        rowText.Append(column.Spatial ? ToSpatialLiteral(row[column.Name], row[column.SridAlias], table + "." + column.Name) : ToBoundedLiteral(row[column.Name]));
                                         if (rowText.Length > MaxInsertBytes) throw new NotSupportedException("Single row exceeds safe logical-export limit: " + table);
                                     }
                                     rowText.Append(")");
@@ -494,6 +530,17 @@ namespace mySQLPunk.lib.MySqlExport
 
         private const int MaxSourceRowBytes = 1024 * 1024;
         private const int MaxInsertBytes = 8 * 1024 * 1024;
+        private static readonly HashSet<string> SpatialTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "geometry", "point", "linestring", "polygon", "multipoint", "multilinestring", "multipolygon", "geometrycollection"
+        };
+        private static readonly HashSet<string> ScalarTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "dec", "numeric", "fixed",
+            "float", "double", "real", "bit", "bool", "boolean", "char", "varchar", "binary", "varbinary",
+            "tinyblob", "blob", "mediumblob", "longblob", "tinytext", "text", "mediumtext", "longtext",
+            "enum", "set", "json", "date", "datetime", "timestamp", "time", "year"
+        };
 
         private void RequireExecution(string sql)
         {
@@ -502,70 +549,133 @@ namespace mySQLPunk.lib.MySqlExport
                 throw new InvalidOperationException(DatabaseExecutionResultService.GetFailureReason(result));
         }
 
-        private TableShape LoadGeneratedColumnsAndCheckRowBound(string table, CancellationToken cancellation)
+        private TableShape LoadTableShape(string table, CancellationToken cancellation)
         {
+            cancellation.ThrowIfCancellationRequested();
             DataTable columns = db.GetColumns(databaseName, table);
+            cancellation.ThrowIfCancellationRequested();
             if (columns == null || columns.Rows.Count == 0) throw new InvalidOperationException("Missing column metadata: " + table);
             string nameColumn = columns.Columns.Contains("Field") ? "Field" : "COLUMN_NAME";
             string extraColumn = columns.Columns.Contains("Extra") ? "Extra" : "EXTRA";
             if (!columns.Columns.Contains(nameColumn) || !columns.Columns.Contains(extraColumn))
                 throw new NotSupportedException("Generated-column metadata unavailable: " + table);
+            string typeColumn = columns.Columns.Contains("Type") ? "Type" : "DATA_TYPE";
+            if (!columns.Columns.Contains(typeColumn))
+                throw new NotSupportedException("Column type metadata unavailable; use a native MySQL export: " + table);
             var shape = new TableShape();
-            var generated = shape.Generated;
             var sizes = new List<string>();
             foreach (DataRow column in columns.Rows)
             {
+                cancellation.ThrowIfCancellationRequested();
                 string name = Convert.ToString(column[nameColumn]);
+                if (string.IsNullOrWhiteSpace(name) || !shape.Names.Add(name))
+                    throw new InvalidOperationException("Missing or duplicate column identity: " + table);
                 string extra = Convert.ToString(column[extraColumn]);
                 string expression = columns.Columns.Contains("GenerationExpression") ? Convert.ToString(column["GenerationExpression"]) : "";
                 if (extra.IndexOf("VIRTUAL", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    extra.IndexOf("STORED", StringComparison.OrdinalIgnoreCase) >= 0 || !string.IsNullOrWhiteSpace(expression)) generated.Add(name);
-                string type = columns.Columns.Contains("Type") ? Convert.ToString(column["Type"]) :
-                    columns.Columns.Contains("DATA_TYPE") ? Convert.ToString(column["DATA_TYPE"]) : "";
-                if (type.IndexOf("geometry", StringComparison.OrdinalIgnoreCase) >= 0 || type.IndexOf("point", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    type.IndexOf("polygon", StringComparison.OrdinalIgnoreCase) >= 0 || type.IndexOf("linestring", StringComparison.OrdinalIgnoreCase) >= 0)
-                    throw new NotSupportedException("Spatial column values require a native MySQL export: " + table + "." + name);
-                shape.Names.Add(name);
-                sizes.Add("COALESCE(OCTET_LENGTH(" + MySqlImportRunner.QuoteIdentifier(name) + "),0)");
+                    extra.IndexOf("STORED", StringComparison.OrdinalIgnoreCase) >= 0 || !string.IsNullOrWhiteSpace(expression)) continue;
+                string declaredType = Convert.ToString(column[typeColumn]).Trim();
+                int suffix = declaredType.IndexOfAny(new[] { '(', ' ', '\t', '\r', '\n' });
+                string type = suffix < 0 ? declaredType : declaredType.Substring(0, suffix);
+                bool spatial = SpatialTypes.Contains(type);
+                if (!spatial && !ScalarTypes.Contains(type))
+                    throw new NotSupportedException("Unsupported MySQL column type '" + (declaredType.Length == 0 ? "unknown" : declaredType) + "'; use a native MySQL export: " + table + "." + name);
+                string quoted = MySqlImportRunner.QuoteIdentifier(name);
+                var writable = new ColumnShape { Name = name, Spatial = spatial, SourceExpression = spatial ? "ST_AsWKB(" + quoted + ")" : quoted };
+                shape.Writable.Add(writable);
+                sizes.Add(spatial ? "(COALESCE(OCTET_LENGTH(" + writable.SourceExpression + "),0) + CASE WHEN " + quoted + " IS NULL THEN 0 ELSE 10 END)" :
+                    "COALESCE(OCTET_LENGTH(" + quoted + "),0)");
             }
+            if (shape.Writable.Count == 0)
+                throw new NotSupportedException("Tables containing only generated columns require a native MySQL export: " + table);
+            shape.RowBytesAlias = AllocateHelperAlias(shape.Names, "__mysqlpunk_row_bytes");
+            int spatialIndex = 0;
+            foreach (ColumnShape column in shape.Writable.Where(c => c.Spatial))
+                column.SridAlias = AllocateHelperAlias(shape.Names, "__mysqlpunk_srid_" + (spatialIndex++).ToString(CultureInfo.InvariantCulture));
+            shape.ByteExpression = string.Join(" + ", sizes);
+            return shape;
+        }
+
+        private void CheckRowBound(string table, TableShape shape, CancellationToken cancellation)
+        {
             cancellation.ThrowIfCancellationRequested();
-            string sql = "SELECT COALESCE(MAX(" + string.Join(" + ", sizes) + "),0) AS MaxRowBytes FROM " +
+            string sql = "SELECT COALESCE(MAX(" + shape.ByteExpression + "),0) AS MaxRowBytes FROM " +
                 MySqlImportRunner.QuoteIdentifier(databaseName) + "." + MySqlImportRunner.QuoteIdentifier(table) + ";";
             DataTable bounds = db.SelectSQL(sql);
+            cancellation.ThrowIfCancellationRequested();
             if (bounds == null || bounds.Rows.Count != 1 || !bounds.Columns.Contains("MaxRowBytes") || bounds.Rows[0]["MaxRowBytes"] == DBNull.Value)
                 throw new InvalidOperationException("Cannot establish a safe source row-size bound: " + table);
             long maxBytes = Convert.ToInt64(bounds.Rows[0]["MaxRowBytes"], CultureInfo.InvariantCulture);
             if (maxBytes < 0 || maxBytes > MaxSourceRowBytes)
                 throw new NotSupportedException("Source row exceeds 1 MiB materialization limit; use a native MySQL export: " + table);
-            shape.ByteExpression = string.Join(" + ", sizes);
-            return shape;
         }
 
         private sealed class TableShape
         {
-            public readonly List<string> Names = new List<string>();
-            public readonly HashSet<string> Generated = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            public string ByteExpression;
+            public readonly HashSet<string> Names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            public readonly List<ColumnShape> Writable = new List<ColumnShape>();
+            public string ByteExpression, RowBytesAlias;
+        }
+
+        private sealed class ColumnShape
+        {
+            public string Name, SourceExpression, SridAlias;
+            public bool Spatial;
+        }
+
+        private static string AllocateHelperAlias(HashSet<string> names, string preferred)
+        {
+            string alias = preferred;
+            while (!names.Add(alias)) alias += "_";
+            return alias;
         }
 
         private DataTable ReadBoundedPage(string table, TableShape shape, long offset, int limit)
         {
-            string marker = "__mysqlpunk_row_bytes";
-            while (shape.Names.Contains(marker)) marker += "_";
+            string marker = shape.RowBytesAlias;
             // Server-side CASE prevents a concurrently enlarged LOB from being
             // materialized even when the user disabled the snapshot option.
             string predicate = "(" + shape.ByteExpression + ") <= " + MaxSourceRowBytes;
-            string projection = string.Join(", ", shape.Names.Select(name => "CASE WHEN " + predicate + " THEN " +
-                MySqlImportRunner.QuoteIdentifier(name) + " ELSE NULL END AS " + MySqlImportRunner.QuoteIdentifier(name)));
+            var expressions = new List<string>();
+            foreach (ColumnShape column in shape.Writable)
+            {
+                expressions.Add("CASE WHEN " + predicate + " THEN " + column.SourceExpression + " ELSE NULL END AS " + MySqlImportRunner.QuoteIdentifier(column.Name));
+                if (column.Spatial)
+                    expressions.Add("CASE WHEN " + predicate + " THEN ST_SRID(" + MySqlImportRunner.QuoteIdentifier(column.Name) + ") ELSE NULL END AS " + MySqlImportRunner.QuoteIdentifier(column.SridAlias));
+            }
+            string projection = string.Join(", ", expressions);
             DataTable page = db.SelectSQL("SELECT " + projection + ", (" + shape.ByteExpression + ") AS " + marker +
                 " FROM " + MySqlImportRunner.QuoteIdentifier(databaseName) + "." + MySqlImportRunner.QuoteIdentifier(table) +
                 " LIMIT " + offset.ToString(CultureInfo.InvariantCulture) + ", " + limit.ToString(CultureInfo.InvariantCulture) + ";");
             if (page == null || !page.Columns.Contains(marker)) throw new InvalidOperationException("Bounded source page query failed: " + table);
+            foreach (ColumnShape column in shape.Writable)
+                if (!page.Columns.Contains(column.Name) || (column.Spatial && !page.Columns.Contains(column.SridAlias)))
+                    throw new InvalidOperationException("Missing bounded source column: " + table + "." + column.Name);
             foreach (DataRow row in page.Rows)
-                if (row[marker] == DBNull.Value || Convert.ToInt64(row[marker], CultureInfo.InvariantCulture) > MaxSourceRowBytes)
+                if (row[marker] == DBNull.Value || Convert.ToInt64(row[marker], CultureInfo.InvariantCulture) < 0 || Convert.ToInt64(row[marker], CultureInfo.InvariantCulture) > MaxSourceRowBytes)
                     throw new NotSupportedException("Source row exceeds 1 MiB materialization limit: " + table);
             page.Columns.Remove(marker);
             return page;
+        }
+
+        private static string ToSpatialLiteral(object wkb, object srid, string column)
+        {
+            bool noWkb = wkb == null || wkb == DBNull.Value;
+            bool noSrid = srid == null || srid == DBNull.Value;
+            if (noWkb && noSrid) return "NULL";
+            byte[] bytes = wkb as byte[];
+            if (noWkb || noSrid || bytes == null || bytes.Length == 0)
+                throw new InvalidOperationException("Invalid spatial WKB/SRID value: " + column);
+            if (!(srid is byte) && !(srid is sbyte) && !(srid is short) && !(srid is ushort) && !(srid is int) && !(srid is uint) &&
+                !(srid is long) && !(srid is ulong) && !(srid is decimal))
+                throw new InvalidOperationException("Spatial SRID must be an unsigned 32-bit integer: " + column);
+            decimal value = Convert.ToDecimal(srid, CultureInfo.InvariantCulture);
+            if (value < 0 || value > uint.MaxValue || decimal.Truncate(value) != value)
+                throw new InvalidOperationException("Spatial SRID must be an unsigned 32-bit integer: " + column);
+            // Use the matching source/target default SRS axis convention. The
+            // two-argument form is shared by MySQL and MariaDB; this is not a
+            // cross-vendor geographic SRS migration or coordinate transform.
+            return "ST_GeomFromWKB(" + ToBoundedLiteral(bytes) + "," + ((uint)value).ToString(CultureInfo.InvariantCulture) + ")";
         }
 
         private static string ToBoundedLiteral(object value)
@@ -624,6 +734,9 @@ namespace mySQLPunk.lib.MySqlExport
             string message;
             switch (stage)
             {
+                case MySqlExportStage.ReadingCatalog:
+                    message = string.Format(ReportText.Get("正在檢查資料表型別、列大小與筆數：{0}", "Checking table types, row size and row count: {0}"), currentObject);
+                    break;
                 case MySqlExportStage.WritingSchema:
                     message = Localization.Format("MySqlExport.ProgressTableStructure", currentObject);
                     break;

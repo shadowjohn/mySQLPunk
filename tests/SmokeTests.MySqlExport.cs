@@ -272,6 +272,97 @@ public static partial class SmokeTests
         finally { Directory.Delete(directory, true); Localization.SetLanguage(previousLanguage, false); }
     }
 
+    private static void MySqlExport_EarlyCompatibilityAndTerminalUi()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        Localization.SetLanguage(Localization.English, false);
+        string directory = Path.Combine(Path.GetTempPath(), "mysqlpunk-preflight-ui-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            Type wizard = typeof(IDatabase).Assembly.GetType("mySQLPunk.MySqlExportWizardForm", true);
+            var db = new MockMySqlExportDatabase { MetadataType = "vector" };
+            string path = Path.Combine(directory, "dump.sql");
+            var options = new MySqlExportWizardOptions(MySqlExportMode.SchemaAndData, path) { SingleTransaction = false };
+            using (var form = (System.Windows.Forms.Form)Activator.CreateInstance(wizard, BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { db, "test_db", options }, null))
+            {
+                MySqlSnapshotPump((Task)wizard.GetMethod("LoadCatalogAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                wizard.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(form, 1);
+                wizard.GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null);
+                MySqlSnapshotPump((Task)wizard.GetMethod("OnNextAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                Assert((int)wizard.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form) == 1, "Unsupported data type must block advance to export confirmation");
+                AssertContains(GetPrivateField<System.Windows.Forms.Label>(form, "statusLabel").Text, "vector", "Preflight identifies unsupported type before starting");
+                Assert(db.PageReads == 0 && !File.Exists(path), "Early compatibility checks must not read data pages or write the target");
+                db.MetadataType = "varchar";
+                MySqlSnapshotPump((Task)wizard.GetMethod("OnNextAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                Assert((int)wizard.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form) == 2, "Corrected selection/type permits a fresh preflight and confirmation");
+                db.MetadataType = "vector";
+                wizard.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(form, 1);
+                GetPrivateField<System.Windows.Forms.RadioButton>(form, "schemaOnly").Checked = true;
+                MySqlSnapshotPump((Task)wizard.GetMethod("OnNextAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                Assert((int)wizard.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form) == 2, "Schema-only bypasses data-value type restriction");
+                GetPrivateField<System.Windows.Forms.RadioButton>(form, "schemaData").Checked = true;
+                var progress = new MySqlExportProgress(MySqlExportStage.WritingRoutines, "procedure", 1, 1, 2, 2, 128, 10, TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(4), "Writing routine");
+                wizard.GetMethod("RenderProgress", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, new object[] { progress });
+                Assert(GetPrivateField<System.Windows.Forms.ProgressBar>(form, "overallBar").Value == 99, "All data tables done cannot imply publication success");
+                db.MetadataType = "varchar";
+                db.RowCount = 4; // Two rows are read; the next empty page forces a late count failure.
+                db.OnPageRead = () => Thread.Sleep(150); // Give actual progress a measurable speed/ETA.
+                wizard.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(form, 3);
+                MySqlSnapshotPump((Task)wizard.GetMethod("StartExportAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                var failed = (mySQLPunk.lib.MySqlExport.MySqlExportResult)wizard.GetProperty("Result", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form);
+                Assert(!failed.Success && failed.TotalRows == 2 && db.PageReads >= 2, "Terminal assertions exercise failure after real page progress, not an empty initial screen");
+                AssertEquals("", GetPrivateField<System.Windows.Forms.Label>(form, "etaLabel").Text, "Failed export must remove stale ETA");
+                AssertEquals("", GetPrivateField<System.Windows.Forms.Label>(form, "speedLabel").Text, "Failed export must remove stale speed");
+                AssertContains(GetPrivateField<System.Windows.Forms.Label>(form, "writtenLabel").Text, "unpublished", "Failure makes unpublished state explicit");
+                Assert(GetPrivateField<System.Windows.Forms.Button>(form, "backButton").Enabled, "Early runtime failure still permits returning to settings");
+            }
+        }
+        finally { Directory.Delete(directory, true); Localization.SetLanguage(previousLanguage, false); }
+    }
+
+    private static void MySqlExport_CompatibilityCancellationLifetime()
+    {
+        Type wizard = typeof(IDatabase).Assembly.GetType("mySQLPunk.MySqlExportWizardForm", true);
+        foreach (bool closeWhileChecking in new[] { false, true })
+        using (var entered = new ManualResetEventSlim())
+        using (var release = new ManualResetEventSlim())
+        {
+            var db = new MockMySqlExportDatabase { OnMetadataRead = () => { entered.Set(); Assert(release.Wait(10000), "Synthetic metadata gate must be released"); } };
+            var options = new MySqlExportWizardOptions(MySqlExportMode.SchemaAndData, Path.Combine(Path.GetTempPath(), "unused-preflight-" + Guid.NewGuid().ToString("N") + ".sql"));
+            using (var form = (System.Windows.Forms.Form)Activator.CreateInstance(wizard, BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { db, "test_db", options }, null))
+            {
+                MySqlSnapshotPump((Task)wizard.GetMethod("LoadCatalogAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                IntPtr handle = form.Handle;
+                wizard.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(form, 1);
+                Task check = (Task)wizard.GetMethod("OnNextAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null);
+                try
+                {
+                    Assert(entered.Wait(5000), "Metadata work must execute asynchronously");
+                    Assert(!GetPrivateField<System.Windows.Forms.Button>(form, "nextButton").Enabled && !GetPrivateField<System.Windows.Forms.Button>(form, "backButton").Enabled, "Precheck blocks navigation while the worker owns the session");
+                    if (closeWhileChecking)
+                    {
+                        form.Close(); form.Close();
+                        Assert(!form.IsDisposed, "Repeated close must wait for metadata worker cleanup");
+                    }
+                    else wizard.GetMethod("RequestCancel", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null);
+                }
+                finally { release.Set(); }
+                MySqlSnapshotPump(check);
+                Assert(!(bool)wizard.GetField("busy", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form), "Precheck must release busy state");
+                Assert(GetPrivateField<CancellationTokenSource>(form, "cancellation") == null, "Precheck owns and releases exactly one CTS");
+                Assert((int)wizard.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form) == 1, "Cancelled/closing precheck cannot advance to confirmation");
+                if (closeWhileChecking) Assert(form.IsDisposed, "Requested close completes after worker cleanup");
+                else
+                {
+                    db.OnMetadataRead = null;
+                    MySqlSnapshotPump((Task)wizard.GetMethod("OnNextAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                    Assert((int)wizard.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form) == 2, "Cancelled check can be retried with a fresh CTS");
+                }
+            }
+        }
+    }
+
     private static void MySqlSnapshotPump(Task task)
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -293,8 +384,11 @@ public static partial class SmokeTests
         public string Failure;
         public string Engine = "InnoDB", OtherEngine, StatusFailure;
         public string StatusName = "users";
+        public string MetadataType = "varchar";
+        public Action OnMetadataRead;
         public int StatusReads;
         public long MaxRowBytes = 32;
+        public long RowCount = 2;
         public int PageReads;
         public Action OnPageRead;
         public readonly List<string> ExecutedSql = new List<string>();
@@ -378,12 +472,13 @@ public static partial class SmokeTests
 
         public DataTable GetColumns(string databaseName, string tableName)
         {
+            OnMetadataRead?.Invoke();
             var dt = new DataTable();
             dt.Columns.Add("COLUMN_NAME");
             dt.Columns.Add("DATA_TYPE");
             dt.Columns.Add("Extra");
             dt.Rows.Add("id", "int", "");
-            dt.Rows.Add("name", "varchar", "");
+            dt.Rows.Add("name", MetadataType, "");
             if (Generated) dt.Rows.Add("computed", "int", "VIRTUAL GENERATED");
             return dt;
         }
@@ -413,7 +508,7 @@ public static partial class SmokeTests
         public bool ViewExists(string databaseName, string viewName) => true;
         public void RenameTable(string databaseName, string oldTableName, string newTableName) { }
         public void RenameView(string databaseName, string oldViewName, string newViewName) { }
-        public long CountRows(string databaseName, string tableName) => 2;
+        public long CountRows(string databaseName, string tableName) => RowCount;
         public DataTable GetCopyColumns(string databaseName, string tableName) => new DataTable();
         public DataTable GetCopyIndexes(string databaseName, string tableName) => new DataTable();
         public void CreateTableForCopy(string databaseName, string tableName, DataTable sourceColumns, string sourceProvider) { }

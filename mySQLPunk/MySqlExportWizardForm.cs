@@ -130,6 +130,7 @@ namespace mySQLPunk
             dataOnly.CheckedChanged += (s, e) => UpdateSnapshotAvailability();
 
             statusLabel.AutoSize = true;
+            statusLabel.MaximumSize = new Size(1000, 0);
             statusLabel.Margin = new Padding(0, 8, 0, 6);
             root.Controls.Add(statusLabel, 0, 2);
 
@@ -414,6 +415,7 @@ namespace mySQLPunk
             var statsFlow = Stack();
             currentObjectLabel.Font = UiKit.Subtitle;
             currentObjectLabel.AutoSize = true;
+            currentObjectLabel.MaximumSize = new Size(680, 0);
             statsFlow.Controls.Add(currentObjectLabel);
 
             overallBar.Width = 520;
@@ -438,6 +440,7 @@ namespace mySQLPunk
             statsFlow.Controls.Add(timeRow);
 
             resultText.AutoSize = true;
+            resultText.MaximumSize = new Size(680, 0);
             resultText.Margin = new Padding(0, 6, 0, 8);
             statsFlow.Controls.Add(resultText);
 
@@ -630,9 +633,10 @@ namespace mySQLPunk
             }
             else if (step == 3)
             {
-                nextButton.Text = T("完成", "Finished");
+                nextButton.Text = Result != null && Result.Success ? T("完成", "Finished") : T("關閉", "Close");
                 nextButton.Enabled = !busy;
             }
+            if (busy) nextButton.Enabled = false;
         }
 
         private void UpdateConfirmSummary()
@@ -654,10 +658,49 @@ namespace mySQLPunk
         private async Task OnNextAsync()
         {
             if (busy) return;
-            if (step < 2)
+            if (step == 0)
             {
+                statusLabel.Text = "";
                 step++;
                 ShowPage();
+            }
+            else if (step == 1)
+            {
+                busy = true;
+                cancellation = new CancellationTokenSource();
+                ShowPage();
+                statusLabel.Text = T("正在檢查所有選取資料表的欄位相容性...", "Checking column compatibility for all selected tables...");
+                try
+                {
+                    if (!schemaOnly.Checked)
+                    {
+                        var selected = catalog.Where(t => t.IsSelected).Select(t => t.Name).ToList();
+                        await Task.Run(() => service.ValidateTableDataCompatibility(selected, cancellation.Token));
+                    }
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    if (!closing)
+                    {
+                        statusLabel.Text = "";
+                        step = 2;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    statusLabel.Text = T("已取消相容性檢查。", "Compatibility check cancelled.");
+                }
+                catch (Exception ex)
+                {
+                    statusLabel.Text = T("尚無法匯出資料：", "Data export is unavailable: ") + ex.Message;
+                }
+                finally
+                {
+                    busy = false;
+                    cancellation.Dispose();
+                    cancellation = null;
+                    cancelButton.Enabled = true;
+                    ShowPage();
+                    if (closing) Close();
+                }
             }
             else if (step == 2)
             {
@@ -677,6 +720,7 @@ namespace mySQLPunk
             exporting = true;
             cancellation = new CancellationTokenSource();
             nextButton.Enabled = false;
+            nextButton.Text = T("匯出中...", "Exporting...");
             backButton.Enabled = false;
             cancelButton.Text = T("停止匯出", "Stop Export");
             logList.Items.Clear();
@@ -741,7 +785,7 @@ namespace mySQLPunk
                 else if (Result.Stage == MySqlExportStage.Cancelled)
                 {
                     currentObjectLabel.Text = T("⚠️ 匯出已被使用者取消。", "⚠️ Export cancelled by user.");
-                    resultText.Text = T("暫存檔案已自動清理，未更動目標檔案。", "Staging file was deleted, destination untouched.");
+                    resultText.Text = T("本次匯出未完成，沒有發布新的目標檔案；可調整設定後重試。", "Export did not complete; no new target file was published. Adjust settings to retry.");
                 }
                 else
                 {
@@ -754,12 +798,29 @@ namespace mySQLPunk
                 timer.Stop();
                 clock.Stop();
                 currentObjectLabel.Text = T("❌ 發生非預期錯誤：", "❌ Unexpected error: ") + ex.Message;
+                resultText.Text = ex.Message;
             }
             finally
             {
+                exporting = false;
+                timer.Stop();
+                clock.Stop();
+                speedLabel.Text = etaLabel.Text = "";
+                elapsedLabel.Text = string.Format(T("耗時：{0:mm\\:ss}", "Elapsed: {0:mm\\:ss}"), Result?.Elapsed ?? clock.Elapsed);
+                if (Result != null && Result.Success)
+                {
+                    overallBar.Value = 100;
+                    percentLabel.Text = "100%";
+                }
+                else
+                {
+                    overallBar.Value = Math.Min(99, overallBar.Value);
+                    percentLabel.Text = overallBar.Value + T("%（未完成）", "% (incomplete)");
+                    writtenLabel.Text = string.Format(T("已處理：{0:N0} 列（未發布）", "Processed: {0:N0} rows (unpublished)"), Result?.TotalRows ?? lastProgress?.ProcessedRows ?? 0);
+                    openFileButton.Visible = openFolderButton.Visible = false;
+                }
                 punky.EndExport();
                 busy = false;
-                exporting = false;
                 cancelButton.Text = T("關閉", "Close");
                 cancelButton.Enabled = true;
                 cancellation.Dispose();
@@ -773,7 +834,7 @@ namespace mySQLPunk
         {
             if (p.TotalTables > 0)
             {
-                int val = Math.Min(100, Math.Max(0, (int)(p.CompletedTables * 100.0 / p.TotalTables)));
+                int val = p.Stage == MySqlExportStage.Completed ? 100 : Math.Min(99, Math.Max(0, (int)(p.CompletedTables * 100.0 / p.TotalTables)));
                 overallBar.Value = val;
                 percentLabel.Text = $"{val}%";
             }

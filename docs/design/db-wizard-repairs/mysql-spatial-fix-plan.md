@@ -1,0 +1,14 @@
+# MySQL spatial export and early validation repair
+
+2026-10-16. User screenshot: city_geometry.SHAPE is rejected at 77% after 12:36. This is an explicit unsupported-type failure, not evidence of a stalled connection. User authorizes code and simulated testing now; native restore is deferred. Keep the current repair worktree and architecture.
+
+1. Reproduce late spatial failure with the actual exporter and recording source; preserve old output and retain regression evidence. Independently trace the native importer/parser and official MySQL/MariaDB format contracts.
+2. Support the eight ordinary 2D MySQL geometry types using bounded ST_AsWKB + per-row ST_SRID and ST_GeomFromWKB(binary,srid). Skip generated values; retain exact quoted identifiers and collision-free helper aliases. Require correct null pairing, binary payload and integral uint32 SRID. Keep 1 MiB source-row, 16-row page, 8 MiB INSERT budgets and server CASE guards.
+3. Metadata-only checks before confirmation; a failed check retains settings and blocks advance. The worker independently inspects all selected metadata first, then all byte bounds/counts before staging/data pages, within its requested snapshot. Never trust confirmation metadata as runtime cache. Schema-only bypasses data-only exclusions.
+4. Terminal UI must show failure rather than an apparent stalled job: no live ETA/rate after stop; processed counts remain labelled unpublished. Reserve100% for successfully published output. Retain settings recovery and retry confirmation.
+5. Root owns Form/integration/shared smoke registration; provider worker owns service + new geometry tests; independent reviewer inspects the finished patch. Test malformed/null/type/SRID/alias/generated/bounds/races, late unsupported selection, schema-only, parser/import expressions and terminal/confirmation UI. Run focused tests, full smoke, Debug/Release and encoding audits before local commit.
+6. Preserve UTF-8 no-BOM and existing CRLF source/test / LF document conventions. Do not read saved connections, connect to/start any database, convert engines, change DB settings, push or merge.
+
+Compatibility boundary: default two-argument functions preserve semantics for compatible engine/SRS round trips. MySQL8 uses SRS-defined geographic axis order; migration between MySQL8 and older MySQL/MariaDB geographic semantics or custom SRS definitions is not certified. WKB tests and parser/manifest success are not database value-fidelity proof. Native restore and production acceptance remain pending.
+
+References: [MySQL conversion](https://dev.mysql.com/doc/refman/8.0/en/gis-format-conversion-functions.html), [MySQL constructor](https://dev.mysql.com/doc/refman/8.0/en/gis-wkb-functions.html), [MariaDB constructor](https://mariadb.com/docs/server/reference/sql-statements/geometry-constructors/wkb/st_geomfromwkb).
