@@ -32,10 +32,10 @@
 
 | 資料庫 Provider | SQL 傾印 (匯出) 現況 | SQL 檔案匯入現況 | 主要缺口與風險 |
 | :--- | :--- | :--- | :--- |
-| **MySQL / MariaDB** | 具備 `MySqlExportService`，支援 DDL 串流、DELIMITER、移除 DEFINER 等。但僅透過 SaveFileDialog 直接執行，無精靈。 | 具備 `MySqlImportService` 與簡易選項視窗，使用跑者遮罩進度視窗 (`RunnerProgressOverlay`)。 | 缺少四步精靈介面、缺乏選表與相依 View 挑選、無預檢掃描 (編碼/批次大小)、無獨立 Import Log 檔案、無結尾 Manifest 列數核對。 |
-| **SQLite** | 走舊版 `DatabaseDumpService`，使用 `StringBuilder` 拼接整份資料庫字串。 | 走舊版 `ImportSqlScript`，`File.ReadAllBytes` 一次性加載全文後用分號切割執行。 | **高危 OOM 風險**：大資料庫匯出/匯入必崩潰；無選表功能、無交易保護 (`BEGIN IMMEDIATE`)、無批次進度條、無日誌。 |
-| **PostgreSQL** | 走舊版 `DatabaseDumpService`，字串拼接；進階型別 (bytea, jsonb, array, uuid) 處理簡陋。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取後以分號切割。 | **高危 OOM 風險**；無法正確處理 Dollar-quoted (`$$...$$`) 預存程序或函數語法（分號會被誤切）；無 Repeatable Read 一致性快照；無進度。 |
-| **Oracle** | 走舊版 `DatabaseDumpService`，字串拼接。 | 走舊版 `ImportSqlScript`，一次性記憶體讀取。 | **高危 OOM 風險**；無法處理 PL/SQL 區塊 (`/` 結尾)；缺少 RAW/LOB 分塊支援。 |
+| **MySQL / MariaDB** | 四步精靈、選表／模式、獨立連線、InnoDB 快照、generated 欄位投影、WKB／SRID 空間欄位、提前檢查與原子發布已補強。 | 共用預檢／執行 lexer、識別字限定的目標處理、衝突策略、交易／清理結果與錯誤日誌已補強。 | 本機回歸後仍需實機往返；來源單列目前限 1 MiB、INSERT 限 8 MiB。更大 LOB 分段與主動中斷執行中命令尚待擴充。 |
+| **SQLite** | 原生逐列 reader、來源快照、generated 欄位投影、rowid／序號、文字／BLOB bytes 與原子發布已補強。 | 策略值綁定、DROP 保護、trigger 解析、嚴格 UTF-8、交易／PRAGMA 清理與日誌已補強。 | 私有 SQLite 往返驗收；單列目前限 8 MiB。SpatiaLite／GeoPackage 擴充模組與多 GiB、實體 UI 仍需另外驗收，不能只靠筆數宣稱無損。 |
+| **PostgreSQL** | ✅ 已具備完整四步精靈 (`PostgreSqlExportWizardForm`)，支援選表/View、PostGIS 空間幾何無損 Hex EWKB 傾印、排除 spatial_ref_sys、REPEATABLE READ 快照與 Native Manifest。 | ✅ 已具備完整四步精靈 (`PostgreSqlImportWizardForm`)，支援狀態機 Lexer (精準解析 Dollar Quotes 與巢狀註解)、PostGIS 自動安裝開關、4種衝突策略、2,000行滑動視窗日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS PostGIS 空間特性）。 |
+| **Oracle** | 獨立連線、來源 READ ONLY、原生逐列 reader、Spatial 原始 metadata／SRID、bounded LOB 與原子發布修整。 | 檢查 provider 結果、目標 owner、交易、共用 lexer、日誌與進度 bytes 修整。 | 仍待 Oracle／Spatial 實機往返；大型值、identity、LRS／曲線及跨 owner 腳本有明確支援邊界，詳見修整驗證文件。尚未宣稱完全對齊 MSSQL。 |
 
 ---
 
@@ -47,33 +47,34 @@
   2. 既有程式碼庫中已具備相對成熟的 `MySqlExportService` 與 `MySqlImportService` 底層邏輯（如 `DELIMITER` 解析、`SHOW CREATE` 提取、交易開關等），只需將底層串流強化並重構對齊 MSSQL 的四步精靈架構。
   3. 投資報酬率最高，能快速在主要客群中展現一致且專業的產品體驗。
 - **具體工作**：
-  - [ ] 匯出：移植四步精靈（選表/View ➔ 輸出設定/single-transaction ➔ 確認物件 ➔ 串流執行 + Punky 動畫 + Manifest 生成）。
-  - [ ] 匯入：移植四步精靈（選檔 ➔ 預檢掃描 DELIMITER/編碼/單批上限 ➔ 確認目標與策略 ➔ 專用 Session 執行 + Punky 動畫 + 獨立 Log + Manifest 核對）。
+  - [x] 匯出：移植四步精靈（選表/View ➔ 輸出設定/single-transaction ➔ 確認物件 ➔ 串流執行 + Punky 動畫 + Manifest 生成）。
+  - [x] 匯入：移植四步精靈（選檔 ➔ 預檢掃描 DELIMITER/編碼/單批上限 ➔ 確認目標與策略 ➔ 專用 Session 執行 + Punky 動畫 + 獨立 Log + Manifest 核對）。
 
-#### 🥈 第二優先：SQLite
+#### 🥈 第二優先：SQLite（崩琦 GIS 招牌特色對齊）
 - **原因**：
   1. 單機檔案型資料庫，無遠端網路干擾或伺服器權限設定，建置回歸與驗證最迅速。
-  2. 目前的 SQLite 匯出/匯入是記憶體拼接，最迫切需要解救大資料庫 OOM 的問題。
-  3. 透過 SQLite 實作，可以檢驗並淬鍊出跨資料庫共用的「通用 SQL 匯出/匯入精靈」基底類別 (Generic Wizard Base)。
+  2. 徹底解決過去舊版 SQLite 匯出/匯入記憶體拼接造成大庫 OOM 的致命缺點。
+  3. 深度支援 SpatiaLite 與 GeoPackage 空間幾何無損傾印 (`X'...'` HEX)、排除龐大空間中繼表 (`spatial_ref_sys`) 與虛擬表影子表 (`_node`, `_rowid` 等)。
 - **具體工作**：
-  - [ ] 匯出：改用真正的串流 StreamWriter 寫檔；支援 `BEGIN IMMEDIATE` 一致性交易；支援側車註解 (Sidecar Comment) 隨結構導出。
-  - [ ] 匯入：串流 Parser 解析標準 SQLite 語法；封裝為單一交易（失敗自動 Rollback）；加入進度估算與 Log。
+  - [x] 匯出：改用真正的串流 StreamWriter 寫檔；支援 `BEGIN IMMEDIATE` 一致性交易；支援側車註解 (Sidecar Comment) 隨結構導出；空間幾何 BLOB 無損 Hex 傾印；排除 R-Tree 影子表；產生 Native Manifest。
+  - [x] 匯入：串流狀態機 Lexer 解析；支援 SpatiaLite 動態模組自動加載；交易包覆與 PRAGMA 性能優化；4種物件衝突策略；2,000 行滑動視窗終端機日誌；Manifest 逐表筆數核對。
 
-#### 🥉 第三優先：PostgreSQL
+#### 🥉 第三優先：PostgreSQL（崩琦 GIS PostGIS 空間特長對齊）
 - **原因**：
-  1. 企業與現代開發廣泛使用，重要性極高。
-  2. 語法複雜度較高：需要支援 Dollar-quoted (`$$` 或 `$tag$`) 函數/預存程序本體、Bytea Hex 轉義、Array 與 Jsonb 原生字面量。
-  3. 可導入 PostgreSQL 原生的 `REPEATABLE READ` 交易快照保證匯出一致性。
+  1. 企業與現代空間資訊系統（GIS）廣泛使用，為崩琦 GIS 核心亮點。
+  2. 語法複雜度較高：需要支援 Dollar-quoted (`$$` 或 `$tag$`) 函數/預存程序本體、Bytea Hex 轉義、Array、Jsonb 與幾何 (EWKB) 原生字面量。
+  3. 導入 PostgreSQL 原生的 `REPEATABLE READ` 交易快照保證匯出一致性，並無損傾印 PostGIS 幾何資料。
 - **具體工作**：
-  - [ ] 匯出：Schema 命名空間分組、支援 `public` 及自訂 Schema 的 Table/View 選取；串流寫入與進階型別格式化。
-  - [ ] 匯入：開發 PostgreSQL 專屬 Statement Lexer（精確識別 Dollar Quotes、SQL 註解與跳脫字串，不隨意在分號切斷）；支援錯誤略過與 Manifest 驗證。
+  - [x] 匯出：支援四步精靈（選表/View ➔ 輸出設定/快照隔離/排除 spatial_ref_sys ➔ 物件清單 ➔ 串流執行 + Punky 動畫 + Manifest 生成）；PostGIS geometry/geography/raster 轉無損 EWKB 十六進位字面量；保留 GIST/SP-GIST 空間索引。
+  - [x] 匯入：支援四步精靈（選檔 ➔ 串流狀態機預檢 Dollar Quotes 與巢狀註解 ➔ 4種物件衝突策略與 PostGIS 自動加載 ➔ 串流執行 + Punky 動畫 + 2,000行滑動視窗終端機日誌 + 獨立 Log + Manifest 逐表筆數核對）。
 
-#### 🎖️ 第四優先：Oracle
+#### 🎖️ 第四優先：Oracle（崩琦 GIS Oracle Spatial 空間特長對齊）
 - **原因**：
-  1. 企業級封閉環境，使用情境相對特定。
-  2. 需處理 PL/SQL 特殊分隔語意（`/` 獨立行代表編譯區塊結束）。
+  1. 企業級大型資料庫與政府空間資訊系統（如國土測繪、地籍圖資、水利圖資）廣泛採用 Oracle Spatial (`MDSYS.SDO_GEOMETRY`)，為崩琦 GIS 核心場景。
+  2. 需處理 PL/SQL 特殊分隔語意（內部多個邏輯分號 `;`，必須以獨立行 `/` 作為區塊終止符）。
 - **具體工作**：
-  - [ ] 匯出/匯入改為串流架構，支援 PL/SQL 區塊解析與 LOB 欄位分段。
+  - [x] 匯出：支援四步精靈（選表/View ➔ 輸出設定/唯讀交易快照/排除空間影子表 ➔ 物件清單 ➔ 串流執行 + Punky 動畫 + Manifest 生成）；探測 `SDO_GEOMETRY` 空間幾何欄位並轉為無損 `SDO_UTIL.FROM_WKBGEOMETRY(HEXTORAW('...'))`；產出 `USER_SDO_GEOM_METADATA` 空間中繼字典註冊；保留 `INDEXTYPE IS MDSYS.SPATIAL_INDEX` 空間索引；預設排除 `MDRT_*`、`MDXT_*`、`MDRS_*` 內部影子表。
+  - [x] 匯入：支援四步精靈（選檔 ➔ 串流狀態機預檢 PL/SQL 獨立斜線 `/` 與空間幾何關鍵字 ➔ 4種物件衝突策略 ➔ 串流執行 + Punky 動畫 + 2,000行滑動視窗終端機日誌 + 獨立 Log + Manifest 逐表筆數核對）。
 
 ---
 

@@ -14,15 +14,17 @@ namespace mySQLPunk.lib
         public string ConnectionString { get; private set; }
 
         internal SqlConnection NativeMssqlConnection { get; private set; }
+        internal IDatabase NativeDatabase { get; private set; }
 
         public ConnectionOpenResult(IDatabase database, List<string> databases, string connectionString = null)
             : this(database, databases, connectionString, null)
         {
         }
 
-        internal ConnectionOpenResult(IDatabase database, List<string> databases, string connectionString, SqlConnection nativeMssqlConnection)
+        internal ConnectionOpenResult(IDatabase database, List<string> databases, string connectionString, SqlConnection nativeMssqlConnection, IDatabase nativeDatabase = null)
         {
             NativeMssqlConnection = nativeMssqlConnection;
+            NativeDatabase = nativeDatabase ?? database;
             Database = database;
             Databases = databases ?? new List<string>();
             ConnectionString = connectionString ?? string.Empty;
@@ -56,7 +58,12 @@ namespace mySQLPunk.lib
             return Open(connection, loadDatabases, false);
         }
 
-        private static ConnectionOpenResult Open(Dictionary<string, object> connection, bool loadDatabases, bool importOnly)
+        internal static ConnectionOpenResult OpenWizardConnection(Dictionary<string, object> connection)
+        {
+            return Open(connection, false, false, true);
+        }
+
+        private static ConnectionOpenResult Open(Dictionary<string, object> connection, bool loadDatabases, bool importOnly, bool wizardOnly = false)
         {
             if (connection == null) throw new ArgumentNullException("connection");
             Dictionary<string, object> effective = new Dictionary<string, object>(connection);
@@ -79,13 +86,23 @@ namespace mySQLPunk.lib
                 string connectionString = importOnly
                     ? ConnectionConfigurationService.BuildMssqlImportConnectionString(effective)
                     : ConnectionConfigurationService.BuildConnectionString(effective);
+                if (wizardOnly && provider == "mysql")
+                {
+                    var builder = new MySqlConnectionStringBuilder(connectionString) { Pooling = false };
+                    connectionString = builder.ConnectionString;
+                }
+                if (wizardOnly && provider == "oracle")
+                {
+                    var builder = new Oracle.ManagedDataAccess.Client.OracleConnectionStringBuilder(connectionString) { Pooling = false };
+                    connectionString = builder.ConnectionString;
+                }
                 IDatabase rawDatabase = ConnectionConfigurationService.CreateDatabase(provider);
                 database = tunnel == null ? rawDatabase : new SecuredDatabase(rawDatabase, tunnel);
                 if (tunnel != null) tunnel = null;
                 database.SetConn(connectionString);
                 database.Open();
                 List<string> databases = loadDatabases ? database.GetDatabases() : new List<string>();
-                return new ConnectionOpenResult(database, databases, connectionString, (rawDatabase as my_mssql)?.MCT);
+                return new ConnectionOpenResult(database, databases, connectionString, (rawDatabase as my_mssql)?.MCT, rawDatabase);
             }
             catch
             {

@@ -3,8 +3,23 @@
 ## [Unreleased]
 
 ### 🚀 新增功能
+- **MySQL / MariaDB 四步 SQL 備份（傾印）與匯入精靈**：
+  - **四步匯出精靈 (`MySqlExportWizardForm`)**：提供「模式與目標」、「物件選取（資料表／檢視／常式／觸發器）」、「選項確認（單一交易快照 `REPEATABLE READ`、外鍵約束開關、DROP 語句、移除 DEFINER）」與「即時進度與看板娘 Punky 動畫」完整四步體驗。底層改採串流直接寫入暫存檔 (`.staging.xxx.tmp`)，完成後原子替換。來源頁面與輸出批次有明確大小限制；較大 LOB 與實機效能邊界見修整驗證文件。
+  - **Native Manifest 元數據校驗**：傾印檔末端自動附加原生 Manifest 區塊與 SHA-256 校驗碼，包含資料庫名稱、資料表清單、列數統計與校驗碼。
+  - **四步匯入精靈 (`MySqlImportWizardForm`)**：提供「檔案選取與目標」、「Preflight 串流預檢（編碼判定、DELIMITER 切分、單批次 32 MiB 上限、Manifest 讀取）」、「執行選項（錯誤繼續／遇錯即停、物件存在處理策略）」與「執行回報與日誌檢視」。
+  - **獨立日誌與即時審計**：所有匯入執行步驟與錯誤皆獨立記錄至 `%LOCALAPPDATA%\mySQLPunk\ImportLogs`，並於匯入完成後自動比對 Native Manifest 目標列數；筆數符合不代表全部資料值與結構已驗收。
 
 ### 🛠️ 問題修正與優化
+- **MySQL 空間欄位匯出與提前檢查**：普通 2D Geometry 改以 WKB 與每筆 SRID 匯出，保留 NULL、排除 generated 欄位；全部選表先檢查欄位與大小，再開始寫檔。失敗後清除速率／ETA，顯示未發布狀態；100% 只代表成功產檔。來源單列仍限 1 MiB，實機還原與跨引擎 SRS 相容性尚待驗收。
+- **MySQL／SQLite／Oracle 匯出匯入修整**：修正衝突策略誤刪／漏匯、SQL 字串誤改、provider 失敗被當成功、交易與取消清理；改用獨立工作連線與保留舊檔的原子發布。SQLite 補上 trigger、generated 欄位、rowid／序號及文字 bytes 往返；Oracle 補來源快照、逐列 reader、SRID／metadata 與 bounded LOB 分段。單表入口預設不包含不相關物件。支援上限與尚未驗收項目見 [驗證文件](docs/design/db-wizard-repairs/verification.md)。
+- **MySQL 匯出與匯入精靈版面與體驗優化**：
+  - **修復版面跑版坍塌**：修正步驟 2 與步驟 3 之設定 GroupBox 在 FlowLayoutPanel 內因 AutoSize 導致寬度坍塌至邊框寬度 (~15px) 造成文字嚴重擠壓折疊之跑版問題，改採標準固定寬度 (740px) 與適應性內部流式排版。
+  - **新增 MySQL 專屬高速還原與約束優化選項**：新增「匯入時關閉唯一性檢查 (`SET UNIQUE_CHECKS = 0`)，啟用 Insert Buffer 提升大量匯入速度 2~5 倍」與「防止主鍵 0 被 AUTO_INCREMENT 覆蓋 (`SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO'`)」開關，兼顧高速傾印與匯入資料正確性。
+  - **看板娘 Punky 動畫與音效支援**：匯出與匯入執行階段全面啟用看板娘 Punky（崩琦）73 幀雙緩衝整理資料動畫，並伴隨播放原版音效（`punky_report_loading.wav`）；支援一鍵靜音切換按鈕與吉祥物即時作業狀態提示。
+  - **匯入即時終端機日誌與 2,000 行滑動視窗防護**：
+    - **解決白內容與空白渲染**：萃取精準單行 SQL 摘要 Headline，徹底濾除前綴換行與多行註解，大批次 INSERT 自動濃縮並截斷至 130 字元，徹底修復 WinForms ListBox 因原始多行換行導致繪出空白大區塊的問題。
+    - **2,000 行 FIFO 滑動視窗（防 RAM 爆）**：建立常數級記憶體安全機制（2,000 行 $\times$ ~130 字元 $\approx$ 300 KB），當累積超過 2,000 行時以批次平滑淘汰最舊項目，杜絕長期執行造成 OOM 記憶體溢位。
+    - **流暢串流繪出與 UI 節流**：一般大批次 INSERT 採 60ms (~16 FPS) 節流串流繪出，重要 DDL 與錯誤則即時送達；介面新增「自動滾動」開關與「清空日誌」按鈕，兼顧即時瀑布流視覺與手動回溯檢視。
 - **README.md 門面全新改版與文件模組化**：全面改寫 README.md 為現代、圖文並茂的開源專案門面，融入看板娘 Punky 崩琦角色元素，並加入 S1~S6 完整使用畫面截圖；深層工程與建置細節分別拆分為 `TODO.md`、`docs/DEVELOPMENT.md`、`docs/ARCHITECTURE.md` 與 `docs/DATA_SAFETY_SPEC.md`。
 
 ## [1.0.0.23] - 2026-10-14
