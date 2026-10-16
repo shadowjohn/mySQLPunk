@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using mySQLPunk;
 using mySQLPunk.lib;
 using mySQLPunk.lib.MySqlExport;
 
@@ -143,12 +145,155 @@ public static partial class SmokeTests
         finally { Directory.Delete(directory, true); }
     }
 
+    private static void MySqlExport_SnapshotCatalogMetadata()
+    {
+        var engineProperty = typeof(MySqlTableExportItem).GetProperty("Engine");
+        Assert(engineProperty != null, "Catalog must expose verified engine metadata before export");
+        foreach (string engine in new[] { "InnoDB", "MyISAM", "MEMORY", null })
+        {
+            var db = new MockMySqlExportDatabase { Engine = engine };
+            var items = new MySqlSqlExportService(db, "test_db").LoadTableCatalog();
+            AssertEquals(engine ?? "", Convert.ToString(engineProperty.GetValue(items[0])), "Catalog retains engine or unknown");
+            Assert(db.StatusReads == 1, "Catalog loads status once rather than per table");
+        }
+        foreach (string failure in new[] { "throw", "null", "columns", "missing" })
+        {
+            var items = new MySqlSqlExportService(new MockMySqlExportDatabase { StatusFailure = failure }, "test_db").LoadTableCatalog();
+            Assert(items.Count == 1 && string.IsNullOrEmpty(Convert.ToString(engineProperty.GetValue(items[0]))), "Unavailable engine stays unknown; ordinary catalog remains usable: " + failure);
+        }
+    }
+
+    private static void MySqlExport_OrdinaryModeAndSnapshotGuard()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "mysqlpunk-snapshot-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string path = Path.Combine(directory, "dump.sql");
+            var options = new MySqlExportWizardOptions(MySqlExportMode.SchemaAndData, path) { SingleTransaction = false, SelectedTables = new List<string> { "users" } };
+            foreach (string engine in new[] { "MyISAM", "MEMORY", null })
+            {
+                var db = new MockMySqlExportDatabase { Engine = engine };
+                var result = new MySqlSqlExportService(db, "test_db").ExportAsync(options, null, CancellationToken.None).Result;
+                Assert(result.Success && result.TotalRows == 2, "Ordinary export works without an InnoDB guarantee: " + result.ErrorMessage);
+                AssertContains(File.ReadAllText(path), "-- SingleTransaction: False", "Dump must not claim snapshot consistency");
+                Assert(!db.ExecutedSql.Exists(sql => sql.Contains("START TRANSACTION") || sql.Contains("LOCK TABLES")), "Ordinary export must not acquire snapshot/table locks");
+            }
+            options.SingleTransaction = true;
+            var drift = new MockMySqlExportDatabase();
+            new MySqlSqlExportService(drift, "test_db").LoadTableCatalog();
+            drift.Engine = "MyISAM";
+            File.WriteAllText(path, "previous backup");
+            var failed = new MySqlSqlExportService(drift, "test_db").ExportAsync(options, null, CancellationToken.None).Result;
+            Assert(!failed.Success && drift.PageReads == 0, "Fresh runtime guard rejects engine changes before reading pages");
+            AssertContains(failed.ErrorMessage, "MyISAM", "Failure identifies actual engine");
+            AssertEquals("previous backup", File.ReadAllText(path), "Guard preserves previous backup");
+            Assert(Directory.GetFiles(directory, "*.tmp").Length == 0, "Guard leaves no incomplete artifact");
+            foreach (var unavailable in new[] { new MockMySqlExportDatabase { StatusFailure = "throw" }, new MockMySqlExportDatabase { StatusName = "Users" } })
+            {
+                failed = new MySqlSqlExportService(unavailable, "test_db").ExportAsync(options, null, CancellationToken.None).Result;
+                Assert(!failed.Success && unavailable.PageReads == 0, "Missing metadata or case-mismatched identity must not borrow another table's engine");
+                Assert(failed.ErrorMessage.IndexOf("snapshot", StringComparison.OrdinalIgnoreCase) >= 0 || failed.ErrorMessage.Contains("一致性快照"), "Guard explains snapshot requirement in the selected language");
+                Assert(failed.ErrorMessage.IndexOf("settings", StringComparison.OrdinalIgnoreCase) >= 0 || failed.ErrorMessage.Contains("輸出設定"), "Guard provides actionable settings guidance");
+                AssertEquals("previous backup", File.ReadAllText(path), "Metadata uncertainty preserves old output");
+            }
+            var caseItems = new MySqlSqlExportService(new MockMySqlExportDatabase { StatusName = "Users" }, "test_db").LoadTableCatalog();
+            Assert(!caseItems[0].SupportsConsistentSnapshot, "Catalog must not assume case-insensitive table identity");
+            options.Mode = MySqlExportMode.SchemaOnly;
+            Assert(new MySqlSqlExportService(drift, "test_db").ExportAsync(options, null, CancellationToken.None).Result.Success, "Schema-only export requires no transactional engine");
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    private static void MySqlExport_SnapshotWizardRecovery()
+    {
+        string previousLanguage = Localization.CurrentLanguage;
+        Localization.SetLanguage(Localization.English, false);
+        var wizardType = typeof(IDatabase).Assembly.GetType("mySQLPunk.MySqlExportWizardForm", true);
+        string directory = Path.Combine(Path.GetTempPath(), "mysqlpunk-snapshot-ui-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var db = new MockMySqlExportDatabase { OtherEngine = "MyISAM" };
+            var options = new MySqlExportWizardOptions(MySqlExportMode.SchemaAndData, Path.Combine(directory, "dump.sql"));
+            using (var form = (System.Windows.Forms.Form)Activator.CreateInstance(wizardType, BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { db, "test_db", options }, null))
+            {
+                MySqlSnapshotPump((Task)wizardType.GetMethod("LoadCatalogAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                var snapshot = GetPrivateField<System.Windows.Forms.CheckBox>(form, "singleTransaction");
+                var items = GetPrivateField<List<MySqlTableExportItem>>(form, "catalog");
+                Action refresh = () => wizardType.GetMethod("UpdateSelectionSummary", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null);
+                Assert(!snapshot.Enabled && !snapshot.Checked, "Mixed engines must offer ordinary export before execution");
+                AssertContains(GetPrivateField<System.Windows.Forms.Label>(form, "snapshotHint").Text, "legacy (MyISAM)", "Hint identifies incompatible selection");
+                GetPrivateField<System.Windows.Forms.TextBox>(form, "search").Text = "users";
+                Assert(!snapshot.Enabled, "Search-hidden selected table still controls consistency");
+                items[1].IsSelected = false; refresh();
+                Assert(snapshot.Enabled && snapshot.Checked, "All selected InnoDB tables restore preferred snapshot");
+                snapshot.Checked = false;
+                items[1].IsSelected = true; refresh(); items[1].IsSelected = false; refresh();
+                Assert(snapshot.Enabled && !snapshot.Checked, "Explicit snapshot-off survives selection changes");
+                var schema = GetPrivateField<System.Windows.Forms.RadioButton>(form, "schemaOnly");
+                snapshot.Checked = true; schema.Checked = true;
+                Assert(!snapshot.Enabled && !snapshot.Checked, "Schema-only must not claim a snapshot");
+                wizardType.GetMethod("UpdateConfirmSummary", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null);
+                AssertContains(GetPrivateField<System.Windows.Forms.Label>(form, "confirmSummary").Text, "snapshot", "English schema-only summary remains explicit about consistency");
+                GetPrivateField<System.Windows.Forms.RadioButton>(form, "schemaData").Checked = true;
+                Assert(snapshot.Enabled && snapshot.Checked, "Returning to data mode restores preferred snapshot");
+                db.Engine = "MyISAM";
+                wizardType.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(form, 3);
+                MySqlSnapshotPump((Task)wizardType.GetMethod("StartExportAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                Assert(GetPrivateField<System.Windows.Forms.Button>(form, "backButton").Enabled, "Failure permits settings recovery after cleanup");
+                typeof(System.Windows.Forms.Button).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(GetPrivateField<System.Windows.Forms.Button>(form, "backButton"), new object[] { EventArgs.Empty });
+                Assert((int)wizardType.GetField("step", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form) == 1, "Failure returns to output settings");
+                snapshot.Checked = false;
+                wizardType.GetMethod("UpdateConfirmSummary", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null);
+                AssertContains(GetPrivateField<System.Windows.Forms.Label>(form, "confirmSummary").Text, "cross-table", "Ordinary confirmation warns about cross-table inconsistency");
+                MySqlSnapshotPump((Task)wizardType.GetMethod("OnNextAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                Assert(!File.Exists(options.TargetPath), "Returning to settings requires confirmation before retry");
+                MySqlSnapshotPump((Task)wizardType.GetMethod("OnNextAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                var result = (mySQLPunk.lib.MySqlExport.MySqlExportResult)wizardType.GetProperty("Result", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form);
+                Assert(result.Success && File.Exists(options.TargetPath), "User can confirm ordinary mode and retry successfully");
+                Assert(!GetPrivateField<System.Windows.Forms.Button>(form, "backButton").Enabled, "Success only offers closing/output actions");
+                db.OnPageRead = () => GetPrivateField<CancellationTokenSource>(form, "cancellation").Cancel();
+                MySqlSnapshotPump((Task)wizardType.GetMethod("StartExportAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                result = (mySQLPunk.lib.MySqlExport.MySqlExportResult)wizardType.GetProperty("Result", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form);
+                Assert(result.Stage == MySqlExportStage.Cancelled && GetPrivateField<System.Windows.Forms.Button>(form, "backButton").Enabled, "Cancellation also permits settings recovery");
+                Assert(!GetPrivateField<System.Windows.Forms.Button>(form, "openFileButton").Visible, "Retry/cancel must remove previous success affordances");
+                Assert(GetPrivateField<System.Windows.Forms.ProgressBar>(form, "overallBar").Value < 100, "Cancelled retry cannot retain completed progress");
+                Assert(mySQLPunk.lib.MySqlImport.MySqlImportPreflightScanner.Scan(options.TargetPath, CancellationToken.None).Passed, "Cancelled retry preserves the prior verified backup");
+            }
+            foreach (string failure in new[] { "throw", "missing", "columns" })
+            using (var form = (System.Windows.Forms.Form)Activator.CreateInstance(wizardType, BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { new MockMySqlExportDatabase { StatusFailure = failure }, "test_db", options }, null))
+            {
+                MySqlSnapshotPump((Task)wizardType.GetMethod("LoadCatalogAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null));
+                var snapshot = GetPrivateField<System.Windows.Forms.CheckBox>(form, "singleTransaction");
+                Assert(!snapshot.Enabled && !snapshot.Checked, "Unknown engines permit only ordinary export: " + failure);
+            }
+        }
+        finally { Directory.Delete(directory, true); Localization.SetLanguage(previousLanguage, false); }
+    }
+
+    private static void MySqlSnapshotPump(Task task)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (!task.IsCompleted && watch.ElapsedMilliseconds < 15000)
+        {
+            System.Windows.Forms.Application.DoEvents();
+            Thread.Sleep(1);
+        }
+        Assert(task.IsCompleted, "Synthetic wizard task must complete within 15 seconds");
+        task.GetAwaiter().GetResult();
+        System.Windows.Forms.Application.DoEvents();
+    }
+
     private sealed class MockMySqlExportDatabase : IDatabase
     {
         public ConnectionState State => ConnectionState.Open;
         public string ProviderName => "MySQL";
         public bool Generated;
         public string Failure;
+        public string Engine = "InnoDB", OtherEngine, StatusFailure;
+        public string StatusName = "users";
+        public int StatusReads;
         public long MaxRowBytes = 32;
         public int PageReads;
         public Action OnPageRead;
@@ -228,7 +373,7 @@ public static partial class SmokeTests
         }
 
         public List<string> GetDatabases() => new List<string> { "test_db" };
-        public List<string> GetTables(string databaseName) => new List<string> { "users" };
+        public List<string> GetTables(string databaseName) => OtherEngine == null ? new List<string> { "users" } : new List<string> { "users", "legacy" };
         public List<string> GetViews(string databaseName) => new List<string> { "active_users" };
 
         public DataTable GetColumns(string databaseName, string tableName)
@@ -246,8 +391,15 @@ public static partial class SmokeTests
         public DataTable GetIndexes(string databaseName, string tableName) => new DataTable();
         public DataTable GetTableStatus(string databaseName)
         {
-            var dt = new DataTable(); dt.Columns.Add("Name"); dt.Columns.Add("Engine");
-            dt.Rows.Add("users", Failure == "engine" ? "MyISAM" : "InnoDB"); return dt;
+            StatusReads++;
+            if (StatusFailure == "throw") throw new InvalidOperationException("metadata unavailable");
+            if (StatusFailure == "null") return null;
+            var dt = new DataTable();
+            if (StatusFailure == "columns") return dt;
+            dt.Columns.Add("Name"); dt.Columns.Add("Engine");
+            if (StatusFailure != "missing") dt.Rows.Add(StatusName, Failure == "engine" ? "MyISAM" : Engine);
+            if (OtherEngine != null) dt.Rows.Add("legacy", OtherEngine);
+            return dt;
         }
         public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
 

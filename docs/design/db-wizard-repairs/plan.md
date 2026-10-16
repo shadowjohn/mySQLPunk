@@ -49,3 +49,7 @@ The accepted review already supplies the design and root causes; no additional d
 - Ruling: keep native MySQL source snapshots limited to verified InnoDB, keep Oracle SYS read-only and cross-session-user spatial metadata restrictions explicit, and reject ambiguous SQL scope. Conservative failures can require the native client but preserve data rather than pretending general SQL confinement.
 
 - Final root gate: all 294 smoke groups plus AutoReleasePolicy passed; explicit Debug and Release application builds passed. Optional live tests were skipped. All three independent scoped reviews/re-reviews approved. Existing-file BOM/newlines and diff whitespace were audited; no code edits after final gate.
+
+## MySQL snapshot failure follow-up (2026-10-16)
+
+The user screenshot shows an engine compatibility failure at execution; it does not establish the real engine. Localized correction: load/show engine metadata before confirmation, disable unsupported/unknown snapshots with a visible ordinary-export warning, remember the user's snapshot preference, exempt schema-only mode, retain the fresh service guard, and permit failed/cancelled attempts to return to settings. The user confirms the displayed ordinary mode before execution; the service never silently falls back. Add catalog, ordinary/guard, and form recovery regressions, then run smoke/build and one independent scoped review. No real database or saved connection access.

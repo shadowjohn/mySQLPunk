@@ -28,12 +28,14 @@ namespace mySQLPunk.lib.MySqlExport
         {
             var list = new List<MySqlTableExportItem>();
             var tables = db.GetTables(databaseName);
+            DataTable status = null;
+            try { status = db.GetTableStatus(databaseName); } catch { }
             foreach (var table in tables)
             {
                 if (string.IsNullOrWhiteSpace(table)) continue;
                 long count = 0;
                 try { count = db.CountRows(databaseName, table); } catch { }
-                list.Add(new MySqlTableExportItem(table, count, true));
+                list.Add(new MySqlTableExportItem(table, count, true) { Engine = ReadTableEngine(status, table) });
             }
             return list;
         }
@@ -460,16 +462,33 @@ namespace mySQLPunk.lib.MySqlExport
             return sql;
         }
 
+        private static string ReadTableEngine(DataTable status, string table)
+        {
+            if (status == null || !status.Columns.Contains("Name") || !status.Columns.Contains("Engine")) return null;
+            // Match the catalog identity exactly; case-sensitive servers may contain both Foo and foo.
+            DataRow entry = status.Rows.Cast<DataRow>().FirstOrDefault(r => string.Equals(Convert.ToString(r["Name"]), table, StringComparison.Ordinal));
+            string engine = entry == null ? null : Convert.ToString(entry["Engine"]);
+            return string.IsNullOrWhiteSpace(engine) ? null : engine.Trim();
+        }
+
         private void RequireTransactionalTables(List<string> selectedTables)
         {
-            DataTable status = db.GetTableStatus(databaseName);
-            if (status == null || !status.Columns.Contains("Name") || !status.Columns.Contains("Engine"))
-                throw new InvalidOperationException("Cannot verify table engines for a consistent snapshot.");
+            DataTable status;
+            try { status = db.GetTableStatus(databaseName); }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(ReportText.Get(
+                    "無法確認資料表引擎，不能使用一致性快照。請返回輸出設定，取消一致性快照後使用一般匯出。",
+                    "Cannot verify table engines for a consistent snapshot. Return to output settings and turn off the snapshot for an ordinary export."), ex);
+            }
             foreach (string table in selectedTables)
             {
-                DataRow entry = status.Rows.Cast<DataRow>().FirstOrDefault(r => string.Equals(Convert.ToString(r["Name"]), table, StringComparison.OrdinalIgnoreCase));
-                if (entry == null || !string.Equals(Convert.ToString(entry["Engine"]), "InnoDB", StringComparison.OrdinalIgnoreCase))
-                    throw new NotSupportedException("Consistent snapshot requires verified InnoDB tables: " + table);
+                var item = new MySqlTableExportItem(table, 0) { Engine = ReadTableEngine(status, table) };
+                if (!item.SupportsConsistentSnapshot)
+                    throw new NotSupportedException(string.Format(ReportText.Get(
+                        "一致性快照只支援已確認的 InnoDB 資料表：{0}（引擎：{1}）。請返回輸出設定，取消一致性快照後使用一般匯出；跨表資料可能不一致。",
+                        "Consistent snapshot requires verified InnoDB tables: {0} (engine: {1}). Return to output settings and turn off the snapshot for an ordinary export; cross-table data may be inconsistent."),
+                        table, item.Engine ?? ReportText.Get("無法確認", "unknown")));
             }
         }
 

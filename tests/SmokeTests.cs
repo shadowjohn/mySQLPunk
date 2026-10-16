@@ -40,6 +40,9 @@ public static partial class SmokeTests
         Run("MySQL import regression target literals and strategies", MySqlImport_Regression_TargetLiteralsAndStrategies, ref passed);
         Run("MySQL import regression cancel transactions and preflight", MySqlImport_Regression_CancelTransactionsAndPreflight, ref passed);
         Run("MySQL export regression generated bounds and failures", MySqlExport_Regression_GeneratedBoundsAndFailures, ref passed);
+        Run("MySQL export snapshot catalog metadata", MySqlExport_SnapshotCatalogMetadata, ref passed);
+        Run("MySQL export ordinary mode and snapshot guard", MySqlExport_OrdinaryModeAndSnapshotGuard, ref passed);
+        Run("MySQL export snapshot wizard recovery", MySqlExport_SnapshotWizardRecovery, ref passed);
         Run("MySQL export options and models defaults", MySqlExport_OptionsAndModels_Defaults, ref passed);
         Run("MySQL export service and manifest atomic write", MySqlExport_ServiceAndManifest_AtomicWrite, ref passed);
         Run("MySQL import preflight scanner delimiters and manifest", MySqlImport_PreflightScanner_DelimitersAndManifest, ref passed);

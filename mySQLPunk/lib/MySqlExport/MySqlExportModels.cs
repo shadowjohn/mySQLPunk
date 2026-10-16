@@ -28,6 +28,8 @@ namespace mySQLPunk.lib.MySqlExport
     {
         public string Name { get; set; }
         public long EstimatedRows { get; set; }
+        public string Engine { get; set; }
+        public bool SupportsConsistentSnapshot => string.Equals(Engine, "InnoDB", StringComparison.OrdinalIgnoreCase);
         public bool IsSelected { get; set; }
 
         public MySqlTableExportItem(string name, long estimatedRows, bool isSelected = true)

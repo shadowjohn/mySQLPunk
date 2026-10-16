@@ -28,6 +28,7 @@ namespace mySQLPunk
         private readonly CheckBox disableUnique = new CheckBox(), noAutoValueOnZero = new CheckBox();
         private readonly CheckBox includeViews = new CheckBox(), includeRoutines = new CheckBox(), includeTriggers = new CheckBox();
         private readonly Label stepsLabel = new Label(), statusLabel = new Label(), selectionSummary = new Label(), confirmSummary = new Label();
+        private readonly Label snapshotHint = new Label();
         private readonly Label currentObjectLabel = new Label(), percentLabel = new Label(), writtenLabel = new Label();
         private readonly Label elapsedLabel = new Label(), speedLabel = new Label(), etaLabel = new Label(), resultText = new Label(), mascotHint = new Label();
         private readonly Button nextButton = new Button(), backButton = new Button(), cancelButton = new Button(), browseButton = new Button(), soundButton = new Button();
@@ -45,6 +46,7 @@ namespace mySQLPunk
         private CancellationTokenSource cancellation;
         private MySqlExportProgress lastProgress;
         private bool busy, closing, exporting;
+        private bool snapshotPreferred, updatingSnapshot;
         private int step;
 
         internal MySqlExportResult Result { get; private set; }
@@ -116,6 +118,17 @@ namespace mySQLPunk
                 includeTriggers.Checked = initialOptions.IncludeTriggers;
             }
 
+            snapshotPreferred = singleTransaction.Checked;
+            singleTransaction.CheckedChanged += (s, e) =>
+            {
+                if (updatingSnapshot) return;
+                snapshotPreferred = singleTransaction.Checked;
+                UpdateSnapshotAvailability();
+            };
+            schemaData.CheckedChanged += (s, e) => UpdateSnapshotAvailability();
+            schemaOnly.CheckedChanged += (s, e) => UpdateSnapshotAvailability();
+            dataOnly.CheckedChanged += (s, e) => UpdateSnapshotAvailability();
+
             statusLabel.AutoSize = true;
             statusLabel.Margin = new Padding(0, 8, 0, 6);
             root.Controls.Add(statusLabel, 0, 2);
@@ -129,7 +142,14 @@ namespace mySQLPunk
             };
             ConfigureButton(cancelButton, "exportCancel", T("取消", "Cancel"), (s, e) => { if (busy) RequestCancel(); else Close(); });
             ConfigureButton(nextButton, "exportNext", T("下一步 →", "Next →"), async (s, e) => await OnNextAsync());
-            ConfigureButton(backButton, "exportBack", T("← 上一步", "← Back"), (s, e) => { if (!busy && step > 0 && step < 3) { step--; ShowPage(); } });
+            ConfigureButton(backButton, "exportBack", T("← 上一步", "← Back"), (s, e) =>
+            {
+                if (!busy && step > 0 && (step < 3 || Result == null || !Result.Success))
+                {
+                    step = step == 3 ? 1 : step - 1;
+                    ShowPage();
+                }
+            });
 
             footer.Controls.AddRange(new Control[] { cancelButton, nextButton, backButton });
             root.Controls.Add(footer, 0, 3);
@@ -241,6 +261,7 @@ namespace mySQLPunk
             tableGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "ColSelect", HeaderText = T("選取", "Select"), FillWeight = 20 });
             tableGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ColName", HeaderText = T("資料表名稱", "Table Name"), FillWeight = 55, ReadOnly = true });
             tableGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ColRows", HeaderText = T("預估列數", "Estimated Rows"), FillWeight = 25, ReadOnly = true });
+            tableGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ColEngine", HeaderText = T("引擎", "Engine"), FillWeight = 20, ReadOnly = true });
 
             tableGrid.CellValueChanged += (s, e) =>
             {
@@ -308,12 +329,12 @@ namespace mySQLPunk
             {
                 Text = T("交易與結構相容性保障 (Transaction & Portability)", "Transaction & Portability"),
                 Location = new Point(12, 134),
-                Size = new Size(740, 150),
+                Size = new Size(740, 260),
                 Padding = new Padding(12)
             };
             var transFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
 
-            singleTransaction.Text = T("啟用一致性快照 (--single-transaction，以 REPEATABLE READ 交易無鎖讀取，保障關聯一致)", "Consistent snapshot (--single-transaction, non-locking repeatable read)");
+            singleTransaction.Text = T("啟用一致性快照（僅支援 InnoDB，--single-transaction）", "Consistent snapshot (InnoDB only, --single-transaction)");
             singleTransaction.Checked = true;
             singleTransaction.AutoSize = true;
             singleTransaction.Margin = new Padding(0, 4, 0, 6);
@@ -332,7 +353,10 @@ namespace mySQLPunk
             includeCreateDb.Checked = false;
             includeCreateDb.AutoSize = true;
 
-            transFlow.Controls.AddRange(new Control[] { singleTransaction, removeDefiner, includeDrop, includeCreateDb });
+            snapshotHint.AutoSize = true;
+            snapshotHint.MaximumSize = new Size(700, 0);
+            snapshotHint.Margin = new Padding(0, 0, 0, 10);
+            transFlow.Controls.AddRange(new Control[] { singleTransaction, snapshotHint, removeDefiner, includeDrop, includeCreateDb });
             transGroup.Controls.Add(transFlow);
             content.Controls.Add(transGroup);
 
@@ -340,7 +364,7 @@ namespace mySQLPunk
             var optGroup = new GroupBox
             {
                 Text = T("MySQL 專屬高速還原與約束優化 (Engine Optimizations & Safety)", "Engine Optimizations & Safety"),
-                Location = new Point(12, 294),
+                Location = new Point(12, 404),
                 Size = new Size(740, 130),
                 Padding = new Padding(12)
             };
@@ -373,6 +397,7 @@ namespace mySQLPunk
             content.Controls.Add(HintLabel(T("請確認本次匯出參數，點擊「開始匯出」即會串流寫入本機檔案。", "Review export parameters. Click 'Start Export' to begin streaming to local file.")));
 
             confirmSummary.AutoSize = true;
+            confirmSummary.MaximumSize = new Size(950, 0);
             confirmSummary.Margin = new Padding(0, 12, 0, 16);
             content.Controls.Add(confirmSummary);
         }
@@ -493,7 +518,7 @@ namespace mySQLPunk
                     foreach (var item in catalog) item.IsSelected = selected.Contains(item.Name);
                 }
                 tableGrid.Rows.Clear();
-                foreach (var item in catalog) tableGrid.Rows.Add(item.IsSelected, item.Name, item.EstimatedRows.ToString("N0"));
+                foreach (var item in catalog) tableGrid.Rows.Add(item.IsSelected, item.Name, item.EstimatedRows.ToString("N0"), item.Engine ?? T("無法確認", "Unknown"));
                 statusLabel.Text = "";
                 UpdateSelectionSummary();
             }
@@ -516,7 +541,7 @@ namespace mySQLPunk
             {
                 if (string.IsNullOrWhiteSpace(term) || item.Name.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    tableGrid.Rows.Add(item.IsSelected, item.Name, item.EstimatedRows.ToString("N0"));
+                    tableGrid.Rows.Add(item.IsSelected, item.Name, item.EstimatedRows.ToString("N0"), item.Engine ?? T("無法確認", "Unknown"));
                 }
             }
             UpdateSelectionSummary();
@@ -536,6 +561,40 @@ namespace mySQLPunk
             selectionSummary.Text = string.Format(
                 T("已選取 {0} / {1} 張資料表（預估約 {2:N0} 筆資料）", "Selected {0} / {1} tables (approx. {2:N0} rows)"),
                 selectedCount, catalog.Count, totalRows);
+            UpdateSnapshotAvailability();
+        }
+
+        private void UpdateSnapshotAvailability()
+        {
+            var selected = catalog.Where(t => t.IsSelected).ToList();
+            var incompatible = selected.Where(t => !t.SupportsConsistentSnapshot).ToList();
+            bool available = !schemaOnly.Checked && selected.Count > 0 && incompatible.Count == 0;
+            updatingSnapshot = true;
+            try
+            {
+                singleTransaction.Enabled = available;
+                singleTransaction.Checked = available && snapshotPreferred;
+            }
+            finally { updatingSnapshot = false; }
+
+            string ordinaryWarning = T(
+                "一般匯出不鎖定資料表；持續寫入時，跨表資料可能不一致，還原時也可能發生外鍵衝突。",
+                "Ordinary export does not lock tables; concurrent writes can cause cross-table inconsistencies and foreign key conflicts on restore.");
+            if (schemaOnly.Checked)
+                snapshotHint.Text = T("僅匯出結構，不需要一致性快照。", "Structure only: no consistency snapshot is needed.");
+            else if (selected.Count == 0)
+                snapshotHint.Text = T("未選取資料表，不使用資料快照。", "No tables selected; no data snapshot is used.");
+            else if (incompatible.Count > 0)
+            {
+                string examples = string.Join("、", incompatible.Take(3).Select(t =>
+                    (t.Name.Length > 60 ? t.Name.Substring(0, 60) + "…" : t.Name) + " (" + (t.Engine ?? T("無法確認", "unknown")) + ")"));
+                if (incompatible.Count > 3) examples += string.Format(T(" 等 {0} 張", " and {0} tables total"), incompatible.Count);
+                snapshotHint.Text = T("部分引擎不支援或無法確認為 InnoDB，已停用快照並使用一般匯出：", "Some engines are unsupported or unverified; snapshot is disabled and ordinary export will be used: ") + examples + "\n" + ordinaryWarning;
+            }
+            else if (!singleTransaction.Checked) snapshotHint.Text = ordinaryWarning;
+            else snapshotHint.Text = T(
+                "所有選取資料表均為 InnoDB。快照期間仍請避免 ALTER / DROP / TRUNCATE 等結構變更。",
+                "All selected tables are InnoDB. Avoid ALTER / DROP / TRUNCATE and other DDL during the snapshot.");
         }
 
         private void ShowPage()
@@ -550,7 +609,9 @@ namespace mySQLPunk
             };
             stepsLabel.Text = string.Join("   →   ", stepTitles.Select((t, i) => i == step ? $"【{t}】" : t));
 
-            backButton.Enabled = (step > 0 && step < 3 && !busy);
+            UpdateSnapshotAvailability();
+            backButton.Enabled = step > 0 && !busy && (step < 3 || Result == null || !Result.Success);
+            backButton.Text = step == 3 ? T("← 調整設定", "← Adjust settings") : T("← 上一步", "← Back");
             if (step == 0)
             {
                 nextButton.Text = T("下一步 →", "Next →");
@@ -576,6 +637,7 @@ namespace mySQLPunk
 
         private void UpdateConfirmSummary()
         {
+            UpdateSnapshotAvailability();
             var selectedTables = catalog.Where(t => t.IsSelected).ToList();
             confirmSummary.Text =
                 $"● {T("目標資料庫：", "Target Database: ")} {databaseName}\n" +
@@ -583,7 +645,7 @@ namespace mySQLPunk
                 $"● {T("選取資料表：", "Selected Tables: ")} {selectedTables.Count} 張（預估 {selectedTables.Sum(t => t.EstimatedRows):N0} 列）\n" +
                 $"● {T("選取檢視：", "Selected Views: ")} {(includeViews.Checked ? views.Count : 0)} 個\n" +
                 $"● {T("選取常式/觸發器：", "Selected Routines/Triggers: ")} {(includeRoutines.Checked ? routines.Count : 0)} / {(includeTriggers.Checked ? triggers.Count : 0)} 個\n" +
-                $"● {T("一致性快照：", "Consistency Snapshot: ")} {(singleTransaction.Checked ? T("啟用 (--single-transaction，不鎖表)", "Enabled (--single-transaction)") : T("停用", "Disabled"))}\n" +
+                $"● {T("一致性快照：", "Consistency Snapshot: ")} {(singleTransaction.Checked ? T("啟用 (--single-transaction)", "Enabled (--single-transaction)") : T("停用", "Disabled"))}\n{snapshotHint.Text}\n\n" +
                 $"● {T("MySQL 引擎優化：", "MySQL Engine Optimizations: ")} {(disableUnique.Checked ? T("停用唯一檢查 (加速 2~5x)", "Unique Checks Off") : "")} {(disableFk.Checked ? T("・停用外鍵", "・FK Checks Off") : "")} {(noAutoValueOnZero.Checked ? "・NO_AUTO_VALUE_ON_ZERO" : "")}\n" +
                 $"● {T("輸出檔案路徑：", "Target Path: ")} {targetPathBox.Text}\n\n" +
                 $"{T("提示：匯出過程將全串流寫入暫存檔案，完成驗證後原子發布，不污染既有檔案。", "Notice: Streaming to staging file first, published atomically upon completion.")}";
@@ -618,6 +680,14 @@ namespace mySQLPunk
             backButton.Enabled = false;
             cancelButton.Text = T("停止匯出", "Stop Export");
             logList.Items.Clear();
+            Result = null;
+            lastProgress = null;
+            resultText.Text = "";
+            currentObjectLabel.Text = T("正在準備匯出...", "Preparing export...");
+            overallBar.Value = 0;
+            percentLabel.Text = "0%";
+            writtenLabel.Text = speedLabel.Text = elapsedLabel.Text = etaLabel.Text = "";
+            openFileButton.Visible = openFolderButton.Visible = false;
 
             var mode = schemaData.Checked ? MySqlExportMode.SchemaAndData : schemaOnly.Checked ? MySqlExportMode.SchemaOnly : MySqlExportMode.DataOnly;
             var opt = new MySqlExportWizardOptions(mode, targetPathBox.Text.Trim())
@@ -640,8 +710,10 @@ namespace mySQLPunk
                 SelectedTriggers = triggers.Select(tr => tr.Name).ToList()
             };
 
+            var attemptCancellation = cancellation;
             var progress = new Progress<MySqlExportProgress>(p =>
             {
+                if (!exporting || !ReferenceEquals(cancellation, attemptCancellation)) return;
                 lastProgress = p;
                 RenderProgress(p);
             });
@@ -692,7 +764,7 @@ namespace mySQLPunk
                 cancelButton.Enabled = true;
                 cancellation.Dispose();
                 cancellation = null;
-                nextButton.Enabled = true;
+                ShowPage();
                 if (closing) Close();
             }
         }
