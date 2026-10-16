@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.SQLite;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -12,40 +13,14 @@ namespace mySQLPunk.lib.SqliteImport
 {
     public sealed class SqliteImportRunner
     {
-        private const string IdentifierPattern = @"""(?:""""|[^""])+""|`(?:``|[^`])+`|\[[^\]]+\]|'[^']+'|[A-Za-z0-9_$]+";
-
-        private static readonly Regex CreateObjectRegex = new Regex(
-            @"^\s*CREATE\s+(?:(?:TEMP|TEMPORARY|UNIQUE|VIRTUAL)\s+)?(?<type>TABLE|VIEW|INDEX|TRIGGER)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?<name>" + IdentifierPattern + @")(?:\s+USING\s+|\s+ON\s+(?<target>" + IdentifierPattern + @"))?",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        private static readonly Regex DropObjectRegex = new Regex(
-            @"^\s*DROP\s+(?<type>TABLE|VIEW|INDEX|TRIGGER)\s+(?:IF\s+EXISTS\s+)?(?<name>" + IdentifierPattern + @")",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        private static readonly Regex InsertTargetRegex = new Regex(
-            @"^\s*INSERT(?:\s+OR\s+(?:REPLACE|IGNORE|ROLLBACK|ABORT|FAIL))?\s+INTO\s+(?<name>" + IdentifierPattern + @")",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        private static readonly Regex BeginTxRegex = new Regex(
-            @"^\s*BEGIN(?:\s+(?:IMMEDIATE|DEFERRED|EXCLUSIVE))?(?:\s+TRANSACTION)?\s*;?$",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        private static readonly Regex CommitTxRegex = new Regex(
-            @"^\s*(?:COMMIT|END)(?:\s+TRANSACTION)?\s*;?$",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        private static readonly Regex RollbackTxRegex = new Regex(
-            @"^\s*ROLLBACK(?:\s+TRANSACTION)?\s*;?$",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        private static readonly Regex ManifestTableRegex = new Regex(
-            @"^--\s*Manifest-Table:\s*([^\s|]+)\s*\|\s*Rows:\s*(\d+)",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        private static readonly Regex ManifestSha256Regex = new Regex(
-            @"^--\s*Manifest-SHA256:\s*([a-fA-F0-9]{64})",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
+        private const string IdentifierPattern = @"""(?:""""|[^""])+""|`(?:``|[^`])+`|\[[^\]]+\]|'(?:''|[^'])+'|(?:[A-Za-z0-9_$]|[^\x00-\x7F])+";
+        private static readonly Regex CreateObjectRegex = new Regex(@"^CREATE\s+(?:(?:TEMP|TEMPORARY|UNIQUE|VIRTUAL)\s+)?(?<type>TABLE|VIEW|INDEX|TRIGGER)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(?<schema>" + IdentifierPattern + @")\s*\.\s*)?(?<name>" + IdentifierPattern + @")", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex DropObjectRegex = new Regex(@"^DROP\s+(?<type>TABLE|VIEW|INDEX|TRIGGER)\s+(?:IF\s+EXISTS\s+)?(?:(?<schema>" + IdentifierPattern + @")\s*\.\s*)?(?<name>" + IdentifierPattern + @")", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex DataTargetRegex = new Regex(@"^(?:INSERT(?:\s+OR\s+(?:REPLACE|IGNORE|ROLLBACK|ABORT|FAIL))?\s+INTO|REPLACE\s+INTO|UPDATE(?:\s+OR\s+(?:REPLACE|IGNORE|ROLLBACK|ABORT|FAIL))?|DELETE\s+FROM|ALTER\s+TABLE)\s+(?:(?<schema>" + IdentifierPattern + @")\s*\.\s*)?(?<name>" + IdentifierPattern + @")", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex OnTargetRegex = new Regex(@"\bON\s+(?:(?<schema>" + IdentifierPattern + @")\s*\.\s*)?(?<name>" + IdentifierPattern + @")", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex BeginTxRegex = new Regex(@"^BEGIN(?:\s+(?:IMMEDIATE|DEFERRED|EXCLUSIVE))?(?:\s+TRANSACTION)?\s*;?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex CommitTxRegex = new Regex(@"^(?:COMMIT|END)(?:\s+TRANSACTION)?\s*;?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex RollbackTxRegex = new Regex(@"^ROLLBACK(?:\s+TRANSACTION)?\s*;?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private readonly IDatabase db;
         private readonly string databaseName;
 
@@ -54,620 +29,306 @@ namespace mySQLPunk.lib.SqliteImport
             this.db = db ?? throw new ArgumentNullException(nameof(db));
             this.databaseName = !string.IsNullOrWhiteSpace(databaseName) ? databaseName : throw new ArgumentException("Database name is required", nameof(databaseName));
         }
-
-        public Task<SqliteImportResult> RunAsync(
-            SqliteImportRequest request,
-            SqliteImportOptions options,
-            IProgress<SqliteImportProgress> progress,
-            CancellationToken cancellation)
+        public Task<SqliteImportResult> RunAsync(SqliteImportRequest request, SqliteImportOptions options, IProgress<SqliteImportProgress> progress, CancellationToken cancellation)
         {
-            return Task.Run(() => RunInternal(request, options, progress, cancellation), cancellation);
+            return Task.Run(() => RunInternal(request, options, progress, cancellation));
         }
-
-        private SqliteImportResult RunInternal(
-            SqliteImportRequest request,
-            SqliteImportOptions options,
-            IProgress<SqliteImportProgress> progress,
-            CancellationToken cancellation)
+        private SqliteImportResult RunInternal(SqliteImportRequest request, SqliteImportOptions options, IProgress<SqliteImportProgress> progress, CancellationToken cancellation)
         {
             var clock = Stopwatch.StartNew();
-            var log = new SqliteImportLog(request.JobId);
-            long fileBytes = 0;
-            if (File.Exists(request.SourcePath)) fileBytes = new FileInfo(request.SourcePath).Length;
-
-            log.LogInfo($"Target SQLite Database: {databaseName}");
-            log.LogInfo($"Source SQL File: {request.SourcePath} ({fileBytes:N0} bytes)");
-            log.LogInfo($"Options: ContinueOnError={options.ContinueOnError}, Strategy={options.ExistingObjectStrategy}, WrapInTransaction={options.WrapInTransaction}");
-
-            int executed = 0;
-            int failed = 0;
-            int skipped = 0;
-            long totalRowsAffected = 0;
-            var errors = new List<string>();
-            var manifestTables = new List<Tuple<string, long>>();
-            bool readingManifest = false;
-            bool haltedOnError = false;
-
-            var existingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var existingViews = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var skippedTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            bool runnerManagedTx = false;
-
-            try
+            using (var log = new SqliteImportLog(request.JobId))
             {
-                // 1. 若啟用 SpatiaLite 自動加載，嘗試載入模組
-                if (options.AutoLoadSpatiaLite && db is my_sqlite sqliteDb)
-                {
-                    try
-                    {
-                        sqliteDb.RetryLoadSpatiaLite();
-                        if (sqliteDb.SpatiaLiteEnabled)
-                        {
-                            log.LogInfo("SpatiaLite runtime dynamic extension (mod_spatialite) loaded successfully.");
-                        }
-                        else if (!string.IsNullOrWhiteSpace(sqliteDb.SpatiaLiteLoadError))
-                        {
-                            log.LogInfo("SpatiaLite runtime extension note: " + sqliteDb.SpatiaLiteLoadError);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        log.LogInfo("SpatiaLite runtime extension attempt: " + ex.Message);
-                    }
-                }
-
-                // 2. 設定 PRAGMA 環境變數以加快寫入
-                if (options.PragmaForeignKeysOff)
-                {
-                    try { db.ExecSQL("PRAGMA foreign_keys = OFF;"); } catch { }
-                }
-                if (options.PragmaSynchronousOff)
-                {
-                    try { db.ExecSQL("PRAGMA synchronous = OFF;"); } catch { }
-                }
-
-                // 3. 快取目標資料庫中既有物件
+                int executed = 0, failed = 0, skipped = 0;
+                long rows = 0, fileBytes = File.Exists(request.SourcePath) ? new FileInfo(request.SourcePath).Length : 0;
+                bool txOpen = false, managed = false, cancelled = false, manifestVerified = false;
+                int? originalFk = null, originalSync = null;
+                string manifestReport = null;
+                var errors = new List<string>();
+                var manifests = new List<Tuple<string, long>>();
+                var initial = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var current = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var initialTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var owners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                log.LogInfo("Target SQLite Database: " + databaseName);
+                log.LogInfo("Source SQL File: " + request.SourcePath);
                 try
                 {
-                    var tList = db.GetTables(databaseName);
-                    if (tList != null) existingTables.UnionWith(tList);
-                }
-                catch { }
-
-                try
-                {
-                    var vList = db.GetViews(databaseName);
-                    if (vList != null) existingViews.UnionWith(vList);
-                }
-                catch { }
-
-                // 4. 預先檢查腳本是否自帶 BEGIN TRANSACTION
-                bool scriptHasExplicitTx = CheckIfScriptContainsExplicitTx(request.SourcePath);
-                if (options.WrapInTransaction && !scriptHasExplicitTx)
-                {
-                    var beginRes = db.ExecSQL("BEGIN IMMEDIATE;");
-                    if (IsExecutionSuccess(beginRes))
-                    {
-                        runnerManagedTx = true;
-                        log.LogInfo("Transaction started by runner: BEGIN IMMEDIATE;");
-                    }
-                }
-
-                using (var fs = new FileStream(request.SourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536))
-                using (var reader = new StreamReader(fs, Encoding.UTF8, true, 65536))
-                {
-                    var currentBatch = new StringBuilder();
-                    bool inSingleQuote = false;
-                    bool inDoubleQuote = false;
-                    bool inBracket = false;
-                    bool inBlockComment = false;
-                    int batchStartLine = 1;
-                    int currentLine = 0;
-                    string line;
-                    long lastReportMs = 0;
-
-                    while ((line = reader.ReadLine()) != null)
+                    // Retain a read-only file handle through preflight and execution so a
+                    // writer cannot replace the verified bytes on Windows in between.
+                    using (var sourceLock = new FileStream(request.SourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
                     {
                         cancellation.ThrowIfCancellationRequested();
-                        currentLine++;
-
-                        string trimmed = line.Trim();
-
-                        // 檢查 Native Manifest
-                        if (trimmed.StartsWith("--"))
+                        var preflight = SqliteImportPreflightScanner.Scan(request.SourcePath, cancellation);
+                        cancellation.ThrowIfCancellationRequested();
+                        if (!preflight.Passed) throw new InvalidDataException(string.Join("; ", preflight.Issues));
+                        if (db is my_sqlite session && session.MCT != null && !session.MCT.AutoCommit)
+                            throw new InvalidOperationException("Import requires an owned SQLite session with no existing transaction.");
+                        DataTable catalog = SelectChecked("SELECT type, name, tbl_name FROM sqlite_master WHERE type IN ('table','view','index','trigger');");
+                        foreach (DataRow row in catalog.Rows)
                         {
-                            if (trimmed.Contains("mySQLPunk Native Manifest") && !readingManifest)
+                            string type = Convert.ToString(row["type"]).ToUpperInvariant(), name = Convert.ToString(row["name"]);
+                            initial.Add(type + ":" + name); current.Add(type + ":" + name);
+                            owners[type + ":" + name] = Convert.ToString(row["tbl_name"]);
+                            if (type == "TABLE" || type == "VIEW") initialTables.Add(name);
+                        }
+                        bool explicitTx = false;
+                        using (var scan = new SqliteStatementReader(request.SourcePath, cancellation, text =>
+                        {
+                            var pair = SqliteImportPreflightScanner.ParseTableManifest(text);
+                            if (pair != null) manifests.Add(pair);
+                        }))
+                        {
+                            string statement;
+                            while ((statement = scan.Read()) != null)
                             {
-                                readingManifest = true;
-                                log.LogInfo("Detected Native Manifest in SQL script footer.");
-                            }
-
-                            var match = ManifestTableRegex.Match(trimmed);
-                            if (match.Success && long.TryParse(match.Groups[2].Value, out long r))
-                            {
-                                manifestTables.Add(Tuple.Create(match.Groups[1].Value, r));
-                            }
-
-                            if (!inSingleQuote && !inDoubleQuote && !inBlockComment)
-                            {
-                                continue;
+                                string sql = SqliteStatementReader.PolicySql(statement);
+                                if (BeginTxRegex.IsMatch(sql)) explicitTx = true;
+                                if (Regex.IsMatch(sql, @"^(ATTACH|DETACH|SAVEPOINT|RELEASE)\b|^ROLLBACK\s+TO\b", RegexOptions.IgnoreCase))
+                                    throw new NotSupportedException("Attached databases and savepoint scripts are not supported by this import wizard.");
+                                if (options.ExistingObjectStrategy == SqliteExistingObjectStrategy.SkipExisting && initialTables.Count > 0 && Regex.IsMatch(sql, @"^WITH\b", RegexOptions.IgnoreCase))
+                                    throw new NotSupportedException("CTE statements cannot be safely classified under SkipExisting with existing objects.");
+                                var change = CreateObjectRegex.Match(sql);
+                                if (!change.Success) change = DropObjectRegex.Match(sql);
+                                if (Regex.IsMatch(sql, @"^CREATE\s+(TEMP|TEMPORARY)\b", RegexOptions.IgnoreCase))
+                                    throw new NotSupportedException("Temporary schema import is not supported by this wizard.");
+                                var target = change.Success ? change : DataTargetRegex.Match(sql);
+                                if (target.Success && target.Groups["schema"].Success && !Unquote(target.Groups["schema"].Value).Equals("main", StringComparison.OrdinalIgnoreCase))
+                                    throw new NotSupportedException("Import may only modify the main SQLite schema.");
+                                if (change.Success && options.ExistingObjectStrategy == SqliteExistingObjectStrategy.AbortIfExists && IsInitiallyProtected(change, sql, initial, initialTables, owners))
+                                    throw new InvalidOperationException("Object " + Unquote(change.Groups["name"].Value) + " already exists in database (AbortIfExists policy).");
                             }
                         }
-
-                        if (currentBatch.Length == 0) batchStartLine = currentLine;
-
-                        // 逐字元狀態機解析語句結束分號
-                        int len = line.Length;
-                        int lastSegmentStart = 0;
-
-                        for (int i = 0; i < len; i++)
+                        originalFk = ReadPragma("foreign_keys"); originalSync = ReadPragma("synchronous");
+                        if (options.AutoLoadSpatiaLite && db is my_sqlite sqlite) sqlite.RetryLoadSpatiaLite();
+                        if (options.PragmaForeignKeysOff) ExecChecked("PRAGMA foreign_keys = OFF;");
+                        if (options.PragmaSynchronousOff) ExecChecked("PRAGMA synchronous = OFF;");
+                        managed = options.WrapInTransaction && !explicitTx;
+                        using (var reader = new SqliteStatementReader(request.SourcePath, cancellation))
                         {
-                            char c = line[i];
-
-                            if (inBlockComment)
+                            string statement;
+                            while ((statement = reader.Read()) != null)
                             {
-                                if (c == '*' && i + 1 < len && line[i + 1] == '/')
+                                cancellation.ThrowIfCancellationRequested();
+                                string sql = SqliteStatementReader.PolicySql(statement);
+                                if (txOpen && db is my_sqlite nativeState && nativeState.MCT != null && nativeState.MCT.AutoCommit)
                                 {
-                                    inBlockComment = false;
-                                    i++;
+                                    txOpen = false;
+                                    throw new InvalidOperationException("SQLite ended the import transaction unexpectedly; further statements were not executed.");
                                 }
-                                continue;
-                            }
-
-                            if (!inSingleQuote && !inDoubleQuote && !inBracket)
-                            {
-                                if (c == '-' && i + 1 < len && line[i + 1] == '-')
+                                if (ShouldSkip(sql, options.ExistingObjectStrategy, initial, initialTables, owners))
                                 {
-                                    // 遇到單行註解，本行此處後續為註解
-                                    currentBatch.Append(line.Substring(lastSegmentStart, i - lastSegmentStart));
-                                    lastSegmentStart = len;
-                                    break;
+                                    skipped++; log.LogStatement(reader.StatementLine, Preview(sql), true, null, "SKIP_PROTECTED_OBJECT"); continue;
                                 }
-                                if (c == '/' && i + 1 < len && line[i + 1] == '*')
+                                if (managed && !txOpen && !Regex.IsMatch(sql, @"^PRAGMA\b", RegexOptions.IgnoreCase))
                                 {
-                                    inBlockComment = true;
-                                    i++;
+                                    ExecChecked("BEGIN IMMEDIATE;"); txOpen = true;
+                                }
+                                var create = CreateObjectRegex.Match(sql);
+                                if (create.Success && options.ExistingObjectStrategy == SqliteExistingObjectStrategy.DropAndRecreate)
+                                {
+                                    string key = Key(create);
+                                    if (current.Contains(key) && !(key.Equals("TABLE:" + my_sqlite.ColumnCommentTableName, StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(sql, @"^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\b", RegexOptions.IgnoreCase)))
+                                    {
+                                        ExecChecked("DROP " + create.Groups["type"].Value + " IF EXISTS " + QuoteIdentifier(Unquote(create.Groups["name"].Value)) + ";");
+                                        current.Remove(key);
+                                    }
+                                }
+                                if (failed > 0 && CommitTxRegex.IsMatch(sql))
+                                    throw new InvalidOperationException("Transaction contains failed SQL statements; COMMIT was withheld.");
+                                var result = ExecuteSql(statement, cancellation);
+                                cancellation.ThrowIfCancellationRequested();
+                                if (!IsExecutionSuccess(result))
+                                {
+                                    failed++;
+                                    string reason = "Line " + reader.StatementLine + ": " + DatabaseExecutionResultService.GetFailureReason(result);
+                                    errors.Add(reason); log.LogStatement(reader.StatementLine, Preview(sql), false, reason, "FAIL");
+                                    if (txOpen && db is my_sqlite errorState && errorState.MCT != null && errorState.MCT.AutoCommit)
+                                    {
+                                        txOpen = false;
+                                        throw new InvalidOperationException("SQLite rolled back the import transaction after the statement error; further statements were not executed.");
+                                    }
+                                    // A failed transaction command always stops: a failed
+                                    // COMMIT can leave the transaction and locks open.
+                                    if (!options.ContinueOnError || BeginTxRegex.IsMatch(sql) || CommitTxRegex.IsMatch(sql) || RollbackTxRegex.IsMatch(sql)) throw new InvalidOperationException(reason);
                                     continue;
                                 }
-                            }
-
-                            if (c == '\'' && !inDoubleQuote && !inBracket)
-                            {
-                                inSingleQuote = !inSingleQuote;
-                                continue;
-                            }
-
-                            if (c == '"' && !inSingleQuote && !inBracket)
-                            {
-                                inDoubleQuote = !inDoubleQuote;
-                                continue;
-                            }
-
-                            if (c == '[' && !inSingleQuote && !inDoubleQuote)
-                            {
-                                inBracket = true;
-                                continue;
-                            }
-
-                            if (c == ']' && inBracket)
-                            {
-                                inBracket = false;
-                                continue;
-                            }
-
-                            // 偵測到語句結束分號
-                            if (c == ';' && !inSingleQuote && !inDoubleQuote && !inBracket)
-                            {
-                                currentBatch.Append(line.Substring(lastSegmentStart, i - lastSegmentStart + 1));
-                                lastSegmentStart = i + 1;
-
-                                string statementSql = currentBatch.ToString().Trim();
-                                currentBatch.Clear();
-
-                                if (!string.IsNullOrWhiteSpace(statementSql))
-                                {
-                                    bool continueRunning = ExecuteStatement(
-                                        statementSql,
-                                        batchStartLine,
-                                        options,
-                                        log,
-                                        existingTables,
-                                        existingViews,
-                                        skippedTables,
-                                        ref executed,
-                                        ref failed,
-                                        ref skipped,
-                                        ref totalRowsAffected,
-                                        errors);
-
-                                    if (!continueRunning)
-                                    {
-                                        haltedOnError = true;
-                                        break;
-                                    }
-
-                                    // 每 150ms 節流回報進度至 UI
-                                    if (clock.ElapsedMilliseconds - lastReportMs > 150)
-                                    {
-                                        lastReportMs = clock.ElapsedMilliseconds;
-                                        ReportProgress(progress, fs.Position, fileBytes, executed, failed, skipped, totalRowsAffected, clock, statementSql);
-                                    }
-                                }
-
-                                batchStartLine = currentLine;
+                                executed++;
+                                if (result.TryGetValue("rowsAffected", out string affected) && long.TryParse(affected, out long n)) rows += Math.Max(0, n);
+                                if (BeginTxRegex.IsMatch(sql)) txOpen = true;
+                                if (CommitTxRegex.IsMatch(sql) || RollbackTxRegex.IsMatch(sql)) txOpen = false;
+                                if (create.Success) current.Add(Key(create));
+                                var drop = DropObjectRegex.Match(sql);
+                                if (drop.Success) current.Remove(Key(drop));
+                                log.LogStatement(reader.StatementLine, Preview(sql), true, null, "OK"); log.Flush();
+                                ReportProgress(progress, fileBytes, executed, failed, skipped, rows, clock, Preview(sql));
                             }
                         }
-
-                        if (haltedOnError) break;
-
-                        if (lastSegmentStart < len)
+                        cancellation.ThrowIfCancellationRequested();
+                        if (failed > 0) throw new InvalidOperationException("Import contains failed SQL statements; transaction was not committed.");
+                        if (managed && txOpen) { ExecChecked("COMMIT;"); txOpen = false; }
+                        if (txOpen || (db is my_sqlite completedSession && completedSession.MCT != null && !completedSession.MCT.AutoCommit)) throw new InvalidOperationException("Script ended with an active transaction; rolling back instead of reporting completion.");
+                        if (manifests.Count > 0)
                         {
-                            currentBatch.AppendLine(line.Substring(lastSegmentStart));
+                            var report = new StringBuilder(); int matches = 0;
+                            foreach (var pair in manifests)
+                            {
+                                long actual = db.CountRows(databaseName, pair.Item1);
+                                if (actual < 0) throw new InvalidOperationException("Manifest count failed for " + pair.Item1);
+                                bool equal = actual == pair.Item2; if (equal) matches++;
+                                log.LogManifestVerification(pair.Item1, pair.Item2, actual, equal);
+                                report.Append(pair.Item1 + ": " + actual + "/" + pair.Item2 + "; ");
+                            }
+                            manifestVerified = matches == manifests.Count; manifestReport = report.ToString();
+                            // Preserving existing data intentionally changes row counts.
+                            // ManifestVerified is row-count evidence, not data equivalence.
                         }
                     }
-
-                    // 處理檔尾若有未以分號結尾的最後一條語句
-                    if (!haltedOnError && currentBatch.Length > 0)
+                }
+                catch (OperationCanceledException) { cancelled = true; errors.Add("Import cancelled by user."); }
+                catch (Exception ex) { if (!errors.Contains(ex.Message)) errors.Add(ex.Message); failed = Math.Max(1, failed); }
+                finally
+                {
+                    if (txOpen)
                     {
-                        string remainingSql = currentBatch.ToString().Trim();
-                        if (!string.IsNullOrWhiteSpace(remainingSql) && !remainingSql.StartsWith("--"))
+                        try
                         {
-                            ExecuteStatement(
-                                remainingSql,
-                                batchStartLine,
-                                options,
-                                log,
-                                existingTables,
-                                existingViews,
-                                skippedTables,
-                                ref executed,
-                                ref failed,
-                                ref skipped,
-                                ref totalRowsAffected,
-                                errors);
+                            if (!(db is my_sqlite cleanSession) || cleanSession.MCT == null || !cleanSession.MCT.AutoCommit) ExecChecked("ROLLBACK;");
+                            if (db is my_sqlite rolledBack && rolledBack.MCT != null && !rolledBack.MCT.AutoCommit) throw new InvalidOperationException("SQLite transaction is still active.");
+                            txOpen = false; log.LogInfo("Active import transaction rolled back.");
                         }
+                        catch (Exception ex) { errors.Add("ROLLBACK cleanup failed: " + ex.Message); failed++; cancelled = false; }
                     }
-                }
-
-                // 5. 交易提交或回滾
-                if (runnerManagedTx)
-                {
-                    if (haltedOnError && !options.ContinueOnError)
+                    foreach (var pragma in new[] { Tuple.Create("foreign_keys", originalFk), Tuple.Create("synchronous", originalSync) })
                     {
-                        try { db.ExecSQL("ROLLBACK;"); } catch { }
-                        log.LogInfo("Runner managed transaction rolled back due to error: ROLLBACK;");
-                    }
-                    else
-                    {
-                        try { db.ExecSQL("COMMIT;"); } catch { }
-                        log.LogInfo("Runner managed transaction committed successfully: COMMIT;");
+                        if (!pragma.Item2.HasValue) continue;
+                        try
+                        {
+                            ExecChecked("PRAGMA " + pragma.Item1 + " = " + pragma.Item2.Value + ";");
+                            if (ReadPragma(pragma.Item1) != pragma.Item2.Value) throw new InvalidOperationException(pragma.Item1 + " was not restored.");
+                        }
+                        catch (Exception ex) { errors.Add("PRAGMA cleanup failed: " + ex.Message); failed++; cancelled = false; }
                     }
                 }
-
-                // 恢復 foreign_keys
-                if (options.PragmaForeignKeysOff)
-                {
-                    try { db.ExecSQL("PRAGMA foreign_keys = ON;"); } catch { }
-                }
-
                 clock.Stop();
-
-                // 6. Native Manifest 自動比對
-                bool manifestVerified = false;
-                string manifestReport = null;
-                if (manifestTables.Count > 0)
-                {
-                    int matchCount = 0;
-                    var reportBuilder = new StringBuilder();
-                    foreach (var pair in manifestTables)
-                    {
-                        string tName = pair.Item1;
-                        long expected = pair.Item2;
-                        long actual = 0;
-                        try { actual = db.CountRows(databaseName, tName); } catch { }
-                        bool matched = (actual == expected);
-                        if (matched) matchCount++;
-                        log.LogManifestVerification(tName, expected, actual, matched);
-                        reportBuilder.Append($"{tName}: {actual}/{expected} {(matched ? "OK" : "MISMATCH")}; ");
-                    }
-                    manifestVerified = (matchCount == manifestTables.Count);
-                    manifestReport = reportBuilder.ToString().Trim();
-                    log.LogInfo($"Manifest Verification: {matchCount}/{manifestTables.Count} tables matched row counts exactly. Verified={manifestVerified}");
-                }
-
-                var status = haltedOnError
-                    ? SqliteImportStatus.Failed
-                    : (failed > 0 && !options.ContinueOnError ? SqliteImportStatus.Failed : SqliteImportStatus.Completed);
-
-                var finalResult = new SqliteImportResult(
-                    status,
-                    executed,
-                    failed,
-                    skipped,
-                    totalRowsAffected,
-                    log.Path,
-                    clock.Elapsed,
-                    errors,
-                    manifestVerified,
-                    manifestReport);
-
-                log.WriteEnd(finalResult);
-                log.Dispose();
-
-                ReportProgress(progress, fileBytes, fileBytes, executed, failed, skipped, totalRowsAffected, clock, null, true);
-
-                return finalResult;
-            }
-            catch (OperationCanceledException)
-            {
-                clock.Stop();
-                if (runnerManagedTx)
-                {
-                    try { db.ExecSQL("ROLLBACK;"); } catch { }
-                }
-                log.LogInfo("Import cancelled by user. Rolled back any runner-managed transaction.");
-                var cancelResult = new SqliteImportResult(
-                    SqliteImportStatus.Cancelled,
-                    executed,
-                    failed,
-                    skipped,
-                    totalRowsAffected,
-                    log.Path,
-                    clock.Elapsed,
-                    new[] { "Import cancelled by user." });
-                log.WriteEnd(cancelResult);
-                log.Dispose();
-                return cancelResult;
-            }
-            catch (Exception ex)
-            {
-                clock.Stop();
-                if (runnerManagedTx)
-                {
-                    try { db.ExecSQL("ROLLBACK;"); } catch { }
-                }
-                log.LogInfo("Import terminated with unhandled exception: " + ex.Message);
-                errors.Add(ex.Message);
-                var errResult = new SqliteImportResult(
-                    SqliteImportStatus.Failed,
-                    executed,
-                    failed,
-                    skipped,
-                    totalRowsAffected,
-                    log.Path,
-                    clock.Elapsed,
-                    errors);
-                log.WriteEnd(errResult);
-                log.Dispose();
-                return errResult;
+                var status = cancelled ? SqliteImportStatus.Cancelled : failed > 0 ? SqliteImportStatus.Failed : SqliteImportStatus.Completed;
+                var final = new SqliteImportResult(status, executed, failed, skipped, rows, log.Path, clock.Elapsed, errors, manifestVerified, manifestReport);
+                log.WriteEnd(final);
+                return final;
             }
         }
-
-        private bool ExecuteStatement(
-            string sql,
-            int lineNumber,
-            SqliteImportOptions options,
-            SqliteImportLog log,
-            HashSet<string> existingTables,
-            HashSet<string> existingViews,
-            HashSet<string> skippedTables,
-            ref int executed,
-            ref int failed,
-            ref int skipped,
-            ref long totalRowsAffected,
-            List<string> errors)
+        private bool ShouldSkip(string sql, SqliteExistingObjectStrategy strategy, HashSet<string> initial, HashSet<string> tables, Dictionary<string, string> owners)
         {
-            string trimmed = sql.Trim();
-            string preview = MakeStatementPreview(trimmed);
-
-            // 1. 處理 CREATE 物件策略
-            var createMatch = CreateObjectRegex.Match(trimmed);
-            if (createMatch.Success)
+            if (strategy != SqliteExistingObjectStrategy.SkipExisting && strategy != SqliteExistingObjectStrategy.OverwriteKeepExisting) return false;
+            var change = CreateObjectRegex.Match(sql);
+            if (!change.Success) change = DropObjectRegex.Match(sql);
+            if (change.Success) return IsInitiallyProtected(change, sql, initial, tables, owners);
+            var data = DataTargetRegex.Match(sql);
+            if (!data.Success) return false;
+            string name = Unquote(data.Groups["name"].Value);
+            if (strategy == SqliteExistingObjectStrategy.SkipExisting && tables.Contains(name) && !name.Equals(my_sqlite.ColumnCommentTableName, StringComparison.OrdinalIgnoreCase) && !name.Equals("sqlite_sequence", StringComparison.OrdinalIgnoreCase)) return true;
+            if (Regex.IsMatch(sql, @"^ALTER\s+TABLE\b", RegexOptions.IgnoreCase) && tables.Contains(name)) return true;
+            // Comments and sequence records belong to the table named in their
+            // literal, rather than to the sidecar/system table itself.
+            if (name.Equals(my_sqlite.ColumnCommentTableName, StringComparison.OrdinalIgnoreCase) || name.Equals("sqlite_sequence", StringComparison.OrdinalIgnoreCase))
             {
-                string objType = createMatch.Groups["type"].Value.ToUpperInvariant();
-                string objName = Unquote(createMatch.Groups["name"].Value);
-
-                bool isExisting = false;
-                if (objType == "TABLE") isExisting = existingTables.Contains(objName);
-                else if (objType == "VIEW") isExisting = existingViews.Contains(objName);
-
-                if (isExisting)
+                if (tables.Count > 0)
                 {
-                    switch (options.ExistingObjectStrategy)
-                    {
-                        case SqliteExistingObjectStrategy.AbortIfExists:
-                            string abortMsg = $"Object {objType} \"{objName}\" already exists in database (AbortIfExists policy).";
-                            log.LogStatement(lineNumber, preview, false, abortMsg, "ABORT");
-                            failed++;
-                            errors.Add(abortMsg);
-                            return false; // 中斷匯入
-
-                        case SqliteExistingObjectStrategy.SkipExisting:
-                            log.LogStatement(lineNumber, preview, true, null, "SKIP_EXISTING");
-                            skipped++;
-                            if (objType == "TABLE") skippedTables.Add(objName);
-                            return true; // 略過本句，繼續
-
-                        case SqliteExistingObjectStrategy.DropAndRecreate:
-                            string dropSql = $"DROP {objType} IF EXISTS {QuoteIdentifier(objName)};";
-                            db.ExecSQL(dropSql);
-                            log.LogStatement(lineNumber, $"DROP {objType} \"{objName}\" for recreation", true, null, "DROP_EXISTING");
-                            if (objType == "TABLE") existingTables.Remove(objName);
-                            else if (objType == "VIEW") existingViews.Remove(objName);
-                            break;
-
-                        case SqliteExistingObjectStrategy.OverwriteKeepExisting:
-                            log.LogStatement(lineNumber, preview, true, null, "KEEP_STRUCTURE");
-                            skipped++;
-                            return true;
-                    }
+                    string owner;
+                    // A broad DELETE/UPDATE or multi-owner VALUES list cannot be
+                    // applied safely while preserving existing owners. Only the
+                    // native exporter's single-owner forms are permitted here.
+                    if (!TryScopedMetadataOwner(sql, data, name, out owner)) return true;
+                    if (tables.Contains(owner)) return true;
                 }
             }
-
-            // 2. 處理 INSERT 資料策略 (若該表於前面被標記為 SkipExisting，則一併略過 INSERT)
-            var insertMatch = InsertTargetRegex.Match(trimmed);
-            if (insertMatch.Success)
-            {
-                string targetTable = Unquote(insertMatch.Groups["name"].Value);
-                if (skippedTables.Contains(targetTable))
-                {
-                    skipped++;
-                    log.LogStatement(lineNumber, preview, true, null, "SKIP_DATA_FOR_SKIPPED_TABLE");
-                    return true;
-                }
-            }
-
-            // 3. 實際執行 SQL
-            var res = db.ExecSQL(trimmed);
-            bool success = IsExecutionSuccess(res);
-
-            if (success)
-            {
-                executed++;
-                long affected = 0;
-                if (res != null && res.ContainsKey("rowsAffected") && long.TryParse(res["rowsAffected"], out long a))
-                {
-                    affected = a;
-                    totalRowsAffected += a;
-                }
-
-                // 若為 CREATE TABLE / VIEW 成功，更新快取
-                if (createMatch.Success)
-                {
-                    string objType = createMatch.Groups["type"].Value.ToUpperInvariant();
-                    string objName = Unquote(createMatch.Groups["name"].Value);
-                    if (objType == "TABLE") existingTables.Add(objName);
-                    else if (objType == "VIEW") existingViews.Add(objName);
-                }
-
-                log.LogStatement(lineNumber, preview, true, null, affected > 0 ? $"OK (+{affected} rows)" : "OK");
-                return true;
-            }
-            else
-            {
-                failed++;
-                string reason = DatabaseExecutionResultService.GetFailureReason(res);
-                string errText = $"Line {lineNumber}: {reason}";
-                errors.Add(errText);
-                log.LogStatement(lineNumber, preview, false, reason, "FAIL");
-
-                if (!options.ContinueOnError)
-                {
-                    return false; // 停止匯入
-                }
-                return true; // 繼續略過執行
-            }
-        }
-
-        private static bool IsExecutionSuccess(Dictionary<string, string> result)
-        {
-            if (result == null) return false;
-            if (result.TryGetValue("status", out string status))
-            {
-                return string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase);
-            }
-            return true;
-        }
-
-        private static string Unquote(string identifier)
-        {
-            if (string.IsNullOrWhiteSpace(identifier)) return string.Empty;
-            string s = identifier.Trim();
-            if ((s.StartsWith("\"") && s.EndsWith("\"")) ||
-                (s.StartsWith("`") && s.EndsWith("`")) ||
-                (s.StartsWith("'") && s.EndsWith("'")))
-            {
-                return s.Substring(1, s.Length - 2).Replace("\"\"", "\"").Replace("``", "`").Replace("''", "'");
-            }
-            if (s.StartsWith("[") && s.EndsWith("]"))
-            {
-                return s.Substring(1, s.Length - 2);
-            }
-            return s;
-        }
-
-        private static string QuoteIdentifier(string name)
-        {
-            name = name ?? string.Empty;
-            return "\"" + name.Replace("\"", "\"\"") + "\"";
-        }
-
-        private static string MakeStatementPreview(string sql)
-        {
-            if (string.IsNullOrWhiteSpace(sql)) return string.Empty;
-            string singleLine = Regex.Replace(sql, @"\s+", " ").Trim();
-            if (singleLine.Length > 120) return singleLine.Substring(0, 117) + "...";
-            return singleLine;
-        }
-
-        private static bool CheckIfScriptContainsExplicitTx(string filePath)
-        {
-            if (!File.Exists(filePath)) return false;
-            try
-            {
-                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096))
-                using (var reader = new StreamReader(fs, Encoding.UTF8, true, 4096))
-                {
-                    string line;
-                    int count = 0;
-                    while ((line = reader.ReadLine()) != null && count < 200)
-                    {
-                        count++;
-                        string trimmed = line.Trim();
-                        if (BeginTxRegex.IsMatch(trimmed)) return true;
-                    }
-                }
-            }
-            catch { }
             return false;
         }
-
-        private static void ReportProgress(
-            IProgress<SqliteImportProgress> progress,
-            long currentBytes,
-            long totalBytes,
-            int executed,
-            int failed,
-            int skipped,
-            long totalRowsAffected,
-            Stopwatch clock,
-            string currentPreview,
-            bool isComplete = false)
+        private static bool TryScopedMetadataOwner(string sql, Match target, string name, out string owner)
         {
-            if (progress == null) return;
-
-            double elapsedSec = clock.Elapsed.TotalSeconds;
-            double bytesPerSec = elapsedSec > 0.05 ? currentBytes / elapsedSec : 0;
-            TimeSpan? remaining = null;
-            if (bytesPerSec > 0 && totalBytes > currentBytes)
+            owner = null;
+            const string text = @"'(?:''|[^'])*'";
+            string suffix = sql.Substring(target.Length);
+            string pattern;
+            bool insert = Regex.IsMatch(sql, @"^(?:INSERT|REPLACE)\b", RegexOptions.IgnoreCase);
+            if (name.Equals("sqlite_sequence", StringComparison.OrdinalIgnoreCase))
             {
-                double remainingSec = (totalBytes - currentBytes) / bytesPerSec;
-                if (remainingSec < 86400) remaining = TimeSpan.FromSeconds(remainingSec);
-            }
-
-            string msg;
-            if (isComplete)
-            {
-                msg = $"Import execution finished: {executed} executed, {failed} failed, {skipped} skipped, {totalRowsAffected:N0} rows affected.";
+                pattern = insert
+                    ? @"^\s*\(\s*name\s*,\s*seq\s*\)\s*VALUES\s*\(\s*'(?<owner>(?:''|[^'])*)'\s*,\s*[+-]?\d+\s*\)\s*;?\s*$"
+                    : Regex.IsMatch(sql, @"^DELETE\b", RegexOptions.IgnoreCase)
+                        ? @"^\s+WHERE\s+name\s*=\s*'(?<owner>(?:''|[^'])*)'\s*;?\s*$" : null;
             }
             else
             {
-                msg = $"Executing: {executed} executed, {failed} failed, {skipped} skipped...";
+                string comment = @"(?:" + text + @"|CAST\s*\(\s*X'[0-9a-f]*'\s+AS\s+TEXT\s*\))";
+                pattern = insert ? @"^\s*\(\s*table_name\s*,\s*column_name\s*,\s*comment\s*\)\s*VALUES\s*\(\s*'(?<owner>(?:''|[^'])*)'\s*,\s*" + text + @"\s*,\s*" + comment + @"\s*\)\s*;?\s*$" : null;
             }
-
-            progress.Report(new SqliteImportProgress(
-                currentBytes,
-                totalBytes,
-                executed,
-                failed,
-                skipped,
-                totalRowsAffected,
-                bytesPerSec,
-                clock.Elapsed,
-                remaining,
-                msg,
-                currentPreview));
+            if (pattern == null) return false;
+            Match match = Regex.Match(suffix, pattern, RegexOptions.IgnoreCase);
+            if (!match.Success) return false;
+            owner = match.Groups["owner"].Value.Replace("''", "'");
+            return true;
+        }
+        private static bool IsInitiallyProtected(Match change, string sql, HashSet<string> initial, HashSet<string> tables, Dictionary<string, string> owners)
+        {
+            string key = Key(change), type = change.Groups["type"].Value.ToUpperInvariant();
+            if (key.Equals("TABLE:" + my_sqlite.ColumnCommentTableName, StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(sql, @"^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\b", RegexOptions.IgnoreCase)) return false;
+            if (initial.Contains(key)) return true;
+            if (type == "INDEX" || type == "TRIGGER")
+            {
+                if (owners.TryGetValue(key, out string owner) && tables.Contains(owner)) return true;
+                var on = OnTargetRegex.Match(sql.Substring(change.Length));
+                if (on.Success && tables.Contains(Unquote(on.Groups["name"].Value))) return true;
+            }
+            return false;
+        }
+        private DataTable SelectChecked(string sql)
+        {
+            DataTable result = db.SelectSQL(sql, new Dictionary<string, object>());
+            if (result == null || result.ExtendedProperties.ContainsKey("QueryError"))
+                throw new InvalidOperationException("SQLite query failed: " + (result == null ? "no result" : Convert.ToString(result.ExtendedProperties["QueryError"])));
+            return result;
+        }
+        private int ReadPragma(string name)
+        {
+            DataTable result = SelectChecked("PRAGMA " + name + ";");
+            if (result.Rows.Count != 1 || result.Columns.Count == 0) throw new InvalidOperationException("Cannot read PRAGMA " + name);
+            return Convert.ToInt32(result.Rows[0][0]);
+        }
+        private Dictionary<string, string> ExecuteSql(string sql, CancellationToken cancellation)
+        {
+            if (!(db is my_sqlite native) || native.MCT == null) return db.ExecSQL(sql);
+            using (var command = new SQLiteCommand(sql, native.MCT))
+            using (cancellation.Register(() => { try { native.MCT.Cancel(); } catch { } }))
+            {
+                try { return new Dictionary<string, string> { { "status", "OK" }, { "rowsAffected", command.ExecuteNonQuery().ToString(System.Globalization.CultureInfo.InvariantCulture) } }; }
+                catch (SQLiteException ex) { return new Dictionary<string, string> { { "status", "NO" }, { "reason", ex.Message } }; }
+            }
+        }
+        private void ExecChecked(string sql)
+        {
+            var result = db.ExecSQL(sql);
+            if (!IsExecutionSuccess(result)) throw new InvalidOperationException(sql + " " + DatabaseExecutionResultService.GetFailureReason(result));
+        }
+        private static bool IsExecutionSuccess(Dictionary<string, string> result)
+        {
+            return result != null && result.TryGetValue("status", out string status) && string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase);
+        }
+        private static string Key(Match match) { return match.Groups["type"].Value.ToUpperInvariant() + ":" + Unquote(match.Groups["name"].Value); }
+        private static string Unquote(string name)
+        {
+            if (name.Length > 1 && (name[0] == '"' || name[0] == '`' || name[0] == '\'' || name[0] == '['))
+            {
+                char quote = name[0]; name = name.Substring(1, name.Length - 2);
+                if (quote != '[') name = name.Replace(new string(quote, 2), quote.ToString());
+            }
+            return name;
+        }
+        private static string QuoteIdentifier(string name) { return "\"" + name.Replace("\"", "\"\"") + "\""; }
+        private static string Preview(string sql) { return Regex.Replace(sql.Substring(0, Math.Min(120, sql.Length)), @"\s+", " ").Trim(); }
+        private static void ReportProgress(IProgress<SqliteImportProgress> progress, long bytes, int executed, int failed, int skipped, long rows, Stopwatch clock, string preview)
+        {
+            progress?.Report(new SqliteImportProgress(0, bytes, executed, failed, skipped, rows, 0, clock.Elapsed, null,
+                "Executing: " + executed + " executed, " + failed + " failed, " + skipped + " skipped...", preview));
         }
     }
 }

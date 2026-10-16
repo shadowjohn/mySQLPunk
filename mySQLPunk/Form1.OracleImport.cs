@@ -29,7 +29,8 @@ namespace mySQLPunk
                 }
                 else
                 {
-                    using (var wizard = new OracleImportWizardForm(target.Database, target.DatabaseName))
+                    using (var session = WizardOwnedSession.Open(target.ConnectionInfo, target.ProviderName, target.DatabaseName))
+                    using (var wizard = new OracleImportWizardForm(session.Database, target.DatabaseName))
                     {
                         wizard.ShowDialog(this);
                         result = wizard.Result;

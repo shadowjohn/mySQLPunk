@@ -18,6 +18,7 @@ namespace mySQLPunk
         private readonly IDatabase db;
         private readonly string databaseName;
         private readonly MySqlSqlExportService service;
+        private readonly MySqlExportWizardOptions initialOptions;
         private readonly Panel[] pages = new Panel[4];
         private readonly TextBox search = new TextBox(), targetPathBox = new TextBox();
         private readonly DataGridView tableGrid = new DataGridView();
@@ -55,6 +56,7 @@ namespace mySQLPunk
             this.db = db ?? throw new ArgumentNullException(nameof(db));
             this.databaseName = !string.IsNullOrWhiteSpace(databaseName) ? databaseName : throw new ArgumentException("Database name is required", nameof(databaseName));
             this.service = new MySqlSqlExportService(db, databaseName);
+            this.initialOptions = initialOptions;
 
             Name = "mySqlExportWizard";
             Text = T("匯出資料庫 · MySQL / MariaDB", "Export database · MySQL / MariaDB");
@@ -97,6 +99,22 @@ namespace mySQLPunk
             BuildPage1(initialOptions);
             BuildPage2();
             BuildPage3();
+            if (initialOptions != null)
+            {
+                schemaData.Checked = initialOptions.Mode == MySqlExportMode.SchemaAndData;
+                schemaOnly.Checked = initialOptions.Mode == MySqlExportMode.SchemaOnly;
+                dataOnly.Checked = initialOptions.Mode == MySqlExportMode.DataOnly;
+                singleTransaction.Checked = initialOptions.SingleTransaction;
+                disableFk.Checked = initialOptions.DisableForeignKeyChecks;
+                disableUnique.Checked = initialOptions.DisableUniqueChecks;
+                noAutoValueOnZero.Checked = initialOptions.SetNoAutoValueOnZero;
+                includeDrop.Checked = initialOptions.IncludeDropStatements;
+                includeCreateDb.Checked = initialOptions.IncludeCreateDatabase;
+                removeDefiner.Checked = initialOptions.RemoveDefiner;
+                includeViews.Checked = initialOptions.IncludeViews;
+                includeRoutines.Checked = initialOptions.IncludeRoutines;
+                includeTriggers.Checked = initialOptions.IncludeTriggers;
+            }
 
             statusLabel.AutoSize = true;
             statusLabel.Margin = new Padding(0, 8, 0, 6);
@@ -455,20 +473,39 @@ namespace mySQLPunk
 
         private async Task LoadCatalogAsync()
         {
-            statusLabel.Text = T("正在載入資料庫結構中...", "Loading database catalog...");
-            catalog = await Task.Run(() => service.LoadTableCatalog());
-            views = await Task.Run(() => service.LoadViews());
-            routines = await Task.Run(() => service.LoadRoutines());
-            triggers = await Task.Run(() => service.LoadTriggers());
-
-            tableGrid.Rows.Clear();
-            foreach (var item in catalog)
+            busy = true;
+            nextButton.Enabled = false;
+            cancellation = new CancellationTokenSource();
+            try
             {
-                tableGrid.Rows.Add(item.IsSelected, item.Name, item.EstimatedRows.ToString("N0"));
+                statusLabel.Text = T("正在載入資料庫結構中...", "Loading database catalog...");
+                catalog = await Task.Run(() => service.LoadTableCatalog());
+                if (closing || cancellation.IsCancellationRequested) return;
+                views = await Task.Run(() => service.LoadViews());
+                if (closing || cancellation.IsCancellationRequested) return;
+                routines = await Task.Run(() => service.LoadRoutines());
+                if (closing || cancellation.IsCancellationRequested) return;
+                triggers = await Task.Run(() => service.LoadTriggers());
+                if (closing || cancellation.IsCancellationRequested) return;
+                if (initialOptions != null && initialOptions.SelectedTables != null && initialOptions.SelectedTables.Count > 0)
+                {
+                    var selected = new HashSet<string>(initialOptions.SelectedTables, StringComparer.OrdinalIgnoreCase);
+                    foreach (var item in catalog) item.IsSelected = selected.Contains(item.Name);
+                }
+                tableGrid.Rows.Clear();
+                foreach (var item in catalog) tableGrid.Rows.Add(item.IsSelected, item.Name, item.EstimatedRows.ToString("N0"));
+                statusLabel.Text = "";
+                UpdateSelectionSummary();
             }
-
-            statusLabel.Text = "";
-            UpdateSelectionSummary();
+            catch (Exception ex) { statusLabel.Text = ex.Message; }
+            finally
+            {
+                busy = false;
+                cancelButton.Enabled = true;
+                cancellation.Dispose();
+                cancellation = null;
+                if (closing) Close();
+            }
         }
 
         private void ApplySearchFilter()
@@ -591,6 +628,8 @@ namespace mySQLPunk
                 SetNoAutoValueOnZero = noAutoValueOnZero.Checked,
                 IncludeDropStatements = includeDrop.Checked,
                 IncludeCreateDatabase = includeCreateDb.Checked,
+                IncludeUseDatabase = initialOptions?.IncludeUseDatabase ?? true,
+                InsertBatchSize = initialOptions?.InsertBatchSize ?? 1000,
                 RemoveDefiner = removeDefiner.Checked,
                 IncludeViews = includeViews.Checked,
                 IncludeRoutines = includeRoutines.Checked,
@@ -650,6 +689,9 @@ namespace mySQLPunk
                 busy = false;
                 exporting = false;
                 cancelButton.Text = T("關閉", "Close");
+                cancelButton.Enabled = true;
+                cancellation.Dispose();
+                cancellation = null;
                 nextButton.Enabled = true;
                 if (closing) Close();
             }

@@ -465,6 +465,9 @@
     <Compile Include="lib\MySqlImportService.cs" />
     <Compile Include="lib\MySqlUserManagerService.cs" />
     <Compile Include="lib\IDatabase.cs" />
+    <Compile Include="lib\WizardOwnedSession.cs" />
+    <Compile Include="lib\SqlExportPublication.cs" />
+    <Compile Include="lib\MySqlImport\MySqlScriptReader.cs" />
     <Compile Include="lib\my_mongodb.cs" />
     <Compile Include="lib\MongoDocumentEditService.cs" />
     <Compile Include="lib\my_redis.cs" />

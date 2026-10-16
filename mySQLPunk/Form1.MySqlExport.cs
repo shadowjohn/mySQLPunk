@@ -19,7 +19,7 @@ namespace mySQLPunk
             else MySqlExportStatusSink(message);
         }
 
-        private void OpenMySqlExportWizard(TreeDatabaseTarget target, MySqlExportMode mode = MySqlExportMode.SchemaAndData)
+        private void OpenMySqlExportWizard(TreeDatabaseTarget target, MySqlExportMode mode = MySqlExportMode.SchemaAndData, string specificTable = null)
         {
             if (target == null) return;
             try
@@ -27,6 +27,13 @@ namespace mySQLPunk
                 string defaultFileName = target.DatabaseName + "_dump_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".sql";
                 string targetPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), defaultFileName);
                 var options = new MySqlExportWizardOptions(mode, targetPath);
+                if (!string.IsNullOrWhiteSpace(specificTable))
+                {
+                    options.SelectedTables.Add(specificTable);
+                    options.IncludeViews = false;
+                    options.IncludeRoutines = false;
+                    options.IncludeTriggers = false;
+                }
 
                 MySqlExportResult result;
                 if (MySqlExportWizardRunner != null)
@@ -35,7 +42,8 @@ namespace mySQLPunk
                 }
                 else
                 {
-                    using (var wizard = new MySqlExportWizardForm(target.Database, target.DatabaseName, options))
+                    using (var session = WizardOwnedSession.Open(target.ConnectionInfo, target.ProviderName, target.DatabaseName))
+                    using (var wizard = new MySqlExportWizardForm(session.Database, target.DatabaseName, options))
                     {
                         wizard.ShowDialog(this);
                         result = wizard.Result;

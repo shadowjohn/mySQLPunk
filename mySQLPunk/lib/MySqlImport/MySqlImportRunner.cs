@@ -30,10 +30,6 @@ namespace mySQLPunk.lib.MySqlImport
             @"^\s*CREATE\b[\s\S]*?\b(?<type>TABLE|VIEW|FUNCTION|PROCEDURE|TRIGGER)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(?<database>" + IdentifierPattern + @")\s*\.\s*)?(?<name>" + IdentifierPattern + @")",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        private static readonly Regex InsertTargetRegex = new Regex(
-            @"^\s*(?:INSERT|REPLACE)\s+(?:IGNORE\s+)?INTO\s+(?:(?<database>" + IdentifierPattern + @")\s*\.\s*)?(?<name>" + IdentifierPattern + @")",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
         private readonly IDatabase db;
         private readonly string databaseName;
 
@@ -49,7 +45,7 @@ namespace mySQLPunk.lib.MySqlImport
             IProgress<MySqlImportProgress> progress,
             CancellationToken cancellation)
         {
-            return Task.Run(() => RunInternal(request, options, progress, cancellation), cancellation);
+            return Task.Run(() => RunInternal(request, options, progress, cancellation));
         }
 
         private MySqlImportResult RunInternal(
@@ -73,8 +69,10 @@ namespace mySQLPunk.lib.MySqlImport
             long totalRowsAffected = 0;
             var errors = new List<string>();
             var manifestTables = new List<Tuple<string, long>>();
-            bool readingManifest = false;
             bool haltedOnError = false;
+            bool scriptTransaction = false;
+            bool sessionTouched = false;
+            bool sessionCleaned = false;
 
             string safeTargetDb = QuoteIdentifier(databaseName);
             string activeSourceDb = null;
@@ -82,10 +80,17 @@ namespace mySQLPunk.lib.MySqlImport
             var existingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var existingViews = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var skippedTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var initiallyExistingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             try
             {
+                cancellation.ThrowIfCancellationRequested();
+                var preflight = MySqlImportPreflightScanner.Scan(request.SourcePath, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+                if (!preflight.Passed) throw new InvalidDataException(string.Join("; ", preflight.Issues));
+
                 // 1. 切換至目標資料庫並鎖定 Session
+                sessionTouched = true;
                 var useRes = db.ExecSQL($"USE {safeTargetDb};");
                 if (!IsExecutionSuccess(useRes))
                 {
@@ -94,10 +99,10 @@ namespace mySQLPunk.lib.MySqlImport
                 }
 
                 // 2. 初始化 Session 環境變數以加快匯入並確保相容性
-                try { db.ExecSQL("SET NAMES utf8mb4;"); } catch { }
-                try { db.ExecSQL("SET FOREIGN_KEY_CHECKS = 0;"); } catch { }
-                try { db.ExecSQL("SET UNIQUE_CHECKS = 0;"); } catch { }
-                try { db.ExecSQL("SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';"); } catch { }
+                RequireExecution("SET NAMES utf8mb4;");
+                RequireExecution("SET FOREIGN_KEY_CHECKS = 0;");
+                RequireExecution("SET UNIQUE_CHECKS = 0;");
+                RequireExecution("SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';");
 
                 // 3. 快取目標資料庫中既有物件，避免頻繁發送 SHOW TABLES
                 try
@@ -105,7 +110,8 @@ namespace mySQLPunk.lib.MySqlImport
                     var tList = db.GetTables(databaseName);
                     if (tList != null) existingTables.UnionWith(tList);
                 }
-                catch { }
+                catch { throw new InvalidOperationException("Cannot read initial target table catalog safely."); }
+                initiallyExistingTables.UnionWith(existingTables);
 
                 try
                 {
@@ -115,135 +121,39 @@ namespace mySQLPunk.lib.MySqlImport
                 catch { }
 
                 using (var fs = new FileStream(request.SourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536))
-                using (var reader = new StreamReader(fs, Encoding.UTF8, true))
+                using (var reader = new StreamReader(fs, new UTF8Encoding(false, true), true))
                 {
-                    string delimiter = ";";
-                    var currentBatch = new StringBuilder();
-                    int batchStartLine = 1;
-                    int currentLine = 0;
-                    string line;
-                    long lastReportMs = 0;
-
-                    while ((line = reader.ReadLine()) != null)
+                    foreach (var statement in MySqlScriptReader.Read(reader, cancellation, comment =>
+                    {
+                        var match = Regex.Match(comment, @"^--\s*Manifest-Table:\s*([^\s|]+)\s*\|\s*Rows:\s*(\d+)", RegexOptions.IgnoreCase);
+                        if (match.Success && long.TryParse(match.Groups[2].Value, out long rows))
+                            manifestTables.Add(Tuple.Create(match.Groups[1].Value, rows));
+                    }))
                     {
                         cancellation.ThrowIfCancellationRequested();
-                        currentLine++;
-
-                        string trimmed = line.Trim();
-
-                        // 檢查 Native Manifest
-                        if (trimmed.StartsWith("--"))
+                        string headline;
+                        bool ok = ProcessAndExecuteStatement(statement.Sql, statement.Line, options, log,
+                            safeTargetDb, ref activeSourceDb, existingTables, existingViews, skippedTables,
+                            initiallyExistingTables, ref executed, ref failed, ref skipped, ref totalRowsAffected,
+                            errors, out headline);
+                        cancellation.ThrowIfCancellationRequested();
+                        if (ok)
                         {
-                            if (trimmed.Contains("mySQLPunk Native Manifest") && !readingManifest)
-                            {
-                                readingManifest = true;
-                                log.LogInfo("Detected Native Manifest in SQL script footer.");
-                            }
-
-                            var match = Regex.Match(trimmed, @"^--\s*Manifest-Table:\s*([^\s|]+)\s*\|\s*Rows:\s*(\d+)", RegexOptions.IgnoreCase);
-                            if (match.Success && long.TryParse(match.Groups[2].Value, out long r))
-                            {
-                                manifestTables.Add(Tuple.Create(match.Groups[1].Value, r));
-                            }
-                            continue;
+                            var tokens = MySqlScriptReader.Tokens(statement.Sql);
+                            if (Keyword(tokens[0], "BEGIN") || Keyword(tokens[0], "START")) scriptTransaction = true;
+                            if (Keyword(tokens[0], "COMMIT") || Keyword(tokens[0], "ROLLBACK")) scriptTransaction = false;
                         }
-
-                        // DELIMITER 切換
-                        if (trimmed.StartsWith("DELIMITER", StringComparison.OrdinalIgnoreCase))
-                        {
-                            string newDelim = trimmed.Substring(9).Trim();
-                            if (!string.IsNullOrWhiteSpace(newDelim))
-                            {
-                                delimiter = newDelim;
-                                currentBatch.Clear();
-                                batchStartLine = currentLine + 1;
-                                continue;
-                            }
-                        }
-
-                        if (currentBatch.Length == 0) batchStartLine = currentLine;
-                        currentBatch.AppendLine(line);
-
-                        // 判斷是否為批次結尾
-                        if (trimmed.EndsWith(delimiter, StringComparison.Ordinal))
-                        {
-                            string sql = currentBatch.ToString().TrimEnd();
-                            if (sql.EndsWith(delimiter, StringComparison.Ordinal))
-                                sql = sql.Substring(0, sql.Length - delimiter.Length).Trim();
-
-                            if (!string.IsNullOrWhiteSpace(sql))
-                            {
-                                string headline;
-                                bool shouldContinue = ProcessAndExecuteStatement(
-                                    sql,
-                                    batchStartLine,
-                                    options,
-                                    log,
-                                    safeTargetDb,
-                                    ref activeSourceDb,
-                                    existingTables,
-                                    existingViews,
-                                    skippedTables,
-                                    ref executed,
-                                    ref failed,
-                                    ref skipped,
-                                    ref totalRowsAffected,
-                                    errors,
-                                    out headline);
-
-                                if (!shouldContinue && !options.ContinueOnError)
-                                {
-                                    haltedOnError = true;
-                                    log.LogInfo("Execution stopped on error as requested by options.");
-                                    ReportProgress(progress, request.JobId, MySqlImportStage.Executing, fileBytes, fs.Position, executed, failed, skipped, totalRowsAffected, clock, headline);
-                                    break;
-                                }
-
-                                long now = clock.ElapsedMilliseconds;
-                                bool isDdl = IsSignificantStatement(headline);
-                                if (!shouldContinue || isDdl || (now - lastReportMs >= 60))
-                                {
-                                    lastReportMs = now;
-                                    ReportProgress(progress, request.JobId, MySqlImportStage.Executing, fileBytes, fs.Position, executed, failed, skipped, totalRowsAffected, clock, headline);
-                                }
-                            }
-
-                            currentBatch.Clear();
-                            batchStartLine = currentLine + 1;
-                        }
-                    }
-
-                    // 處理尾端剩餘語句
-                    if (currentBatch.Length > 0 && !haltedOnError && (failed == 0 || options.ContinueOnError))
-                    {
-                        string remainingSql = currentBatch.ToString().Trim();
-                        if (!string.IsNullOrWhiteSpace(remainingSql))
-                        {
-                            string headline;
-                            bool ok = ProcessAndExecuteStatement(
-                                remainingSql,
-                                batchStartLine,
-                                options,
-                                log,
-                                safeTargetDb,
-                                ref activeSourceDb,
-                                existingTables,
-                                existingViews,
-                                skippedTables,
-                                ref executed,
-                                ref failed,
-                                ref skipped,
-                                ref totalRowsAffected,
-                                errors,
-                                out headline);
-                            if (!ok && !options.ContinueOnError)
-                            {
-                                haltedOnError = true;
-                            }
-                            ReportProgress(progress, request.JobId, MySqlImportStage.Executing, fileBytes, fs.Position, executed, failed, skipped, totalRowsAffected, clock, headline);
-                        }
+                        ReportProgress(progress, request.JobId, MySqlImportStage.Executing, fileBytes, fs.Position,
+                            executed, failed, skipped, totalRowsAffected, clock, headline);
+                        if (!ok && !options.ContinueOnError) { haltedOnError = true; break; }
                     }
                 }
+                cancellation.ThrowIfCancellationRequested();
+
+                if (scriptTransaction) throw new InvalidDataException("Script ended with an uncommitted transaction; pending rows were rolled back.");
+                sessionCleaned = true;
+                if (!CleanupSession(log, errors)) throw new InvalidOperationException("Import session cleanup failed; completion cannot be confirmed.");
+                cancellation.ThrowIfCancellationRequested();
 
                 // 4. 若有 Native Manifest，自動驗證目標資料庫實際列數
                 bool manifestMismatch = false;
@@ -322,13 +232,13 @@ namespace mySQLPunk.lib.MySqlImport
                     errors);
 
                 log.WriteEnd(finalResult);
-                log.Dispose();
                 ReportProgress(progress, request.JobId, MySqlImportStage.Finished, fileBytes, fileBytes, executed, failed, skipped, totalRowsAffected, clock, summary);
 
                 return finalResult;
             }
             catch (OperationCanceledException)
             {
+                if (sessionTouched && !sessionCleaned) { sessionCleaned = true; CleanupSession(log, errors); }
                 clock.Stop();
                 log.LogInfo("Execution cancelled by user.");
                 var cancelResult = new MySqlImportResult(
@@ -344,11 +254,11 @@ namespace mySQLPunk.lib.MySqlImport
                     "Import was cancelled by user.",
                     errors);
                 log.WriteEnd(cancelResult);
-                log.Dispose();
                 return cancelResult;
             }
             catch (Exception ex)
             {
+                if (sessionTouched && !sessionCleaned) { sessionCleaned = true; CleanupSession(log, errors); }
                 clock.Stop();
                 log.LogInfo("Fatal error: " + ex.Message);
                 errors.Add(ex.Message);
@@ -365,15 +275,20 @@ namespace mySQLPunk.lib.MySqlImport
                     ex.Message,
                     errors);
                 log.WriteEnd(failResult);
-                log.Dispose();
                 return failResult;
             }
-            finally
+            finally { log.Dispose(); }
+        }
+
+        private bool CleanupSession(MySqlImportLog log, List<string> errors)
+        {
+            bool success = true;
+            foreach (string sql in new[] { "ROLLBACK;", "SET FOREIGN_KEY_CHECKS = 1;", "SET UNIQUE_CHECKS = 1;" })
             {
-                // 還原外鍵與唯一性約束檢查
-                try { db.ExecSQL("SET FOREIGN_KEY_CHECKS = 1;"); } catch { }
-                try { db.ExecSQL("SET UNIQUE_CHECKS = 1;"); } catch { }
+                try { RequireExecution(sql); }
+                catch (Exception ex) { success = false; errors.Add("Session cleanup: " + ex.Message); log.LogInfo("Session cleanup failed: " + ex.Message); }
             }
+            return success;
         }
 
         private bool ProcessAndExecuteStatement(
@@ -386,6 +301,7 @@ namespace mySQLPunk.lib.MySqlImport
             HashSet<string> existingTables,
             HashSet<string> existingViews,
             HashSet<string> skippedTables,
+            HashSet<string> initiallyExistingTables,
             ref int executed,
             ref int failed,
             ref int skipped,
@@ -394,9 +310,11 @@ namespace mySQLPunk.lib.MySqlImport
             out string headline)
         {
             string cleanSql = SanitizeSqlHeadline(sql);
+            string code = MySqlScriptReader.CodeOnly(sql);
+            ValidateTargetSyntax(sql);
 
             // A. USE 語句重定向
-            Match useMatch = UseDatabaseRegex.Match(sql);
+            Match useMatch = UseDatabaseRegex.Match(code);
             if (useMatch.Success)
             {
                 string targetInSql = UnquoteIdentifier(useMatch.Groups["database"].Value);
@@ -405,28 +323,26 @@ namespace mySQLPunk.lib.MySqlImport
                     activeSourceDb = targetInSql;
                     log.LogInfo($"Redirected statement from 'USE `{targetInSql}`' to 'USE {safeTargetDb}'");
                 }
-                sql = $"USE {safeTargetDb};";
+                var useTokens = MySqlScriptReader.Tokens(sql);
+                sql = MySqlScriptReader.ReplaceToken(sql, useTokens[1], safeTargetDb);
                 return ExecuteBatchStatement(sql, line, options, log, ref executed, ref failed, ref skipped, ref totalRowsAffected, existingTables, existingViews, errors, out headline);
             }
 
             // B. CREATE DATABASE / SCHEMA 重定向
-            if (CreateDatabaseRegex.IsMatch(sql))
+            if (CreateDatabaseRegex.IsMatch(code))
             {
                 log.LogInfo($"Redirected CREATE DATABASE to ensure target database {safeTargetDb} exists");
                 sql = $"CREATE DATABASE IF NOT EXISTS {safeTargetDb};";
                 return ExecuteBatchStatement(sql, line, options, log, ref executed, ref failed, ref skipped, ref totalRowsAffected, existingTables, existingViews, errors, out headline);
             }
 
-            // 若先前偵測到來源資料庫名稱，且與目標不同，將顯式資料庫限定名稱改寫至目標庫
-            if (!string.IsNullOrEmpty(activeSourceDb) && !string.Equals(activeSourceDb, databaseName, StringComparison.OrdinalIgnoreCase))
-            {
-                sql = RewriteDatabaseQualifier(sql, activeSourceDb, databaseName);
-            }
+            sql = EnforceTargetQualifiers(sql, activeSourceDb, databaseName);
+            code = MySqlScriptReader.CodeOnly(sql);
 
             // C. DROP 語句策略判定
             if ((options.ExistingObjectStrategy == MySqlExistingObjectStrategy.CreateIfMissing ||
                  options.ExistingObjectStrategy == MySqlExistingObjectStrategy.SkipExisting) &&
-                DropObjectRegex.IsMatch(sql))
+                DropObjectRegex.IsMatch(code))
             {
                 skipped++;
                 log.LogStatement(line, cleanSql, true, null, "SKIP_DROP");
@@ -435,7 +351,7 @@ namespace mySQLPunk.lib.MySqlImport
             }
 
             // D. CREATE 物件策略判定
-            Match createMatch = CreateObjectRegex.Match(sql);
+            Match createMatch = CreateObjectRegex.Match(code);
             if (createMatch.Success)
             {
                 string objType = createMatch.Groups["type"].Value.ToUpperInvariant();
@@ -463,7 +379,7 @@ namespace mySQLPunk.lib.MySqlImport
                 if (exists && options.ExistingObjectStrategy == MySqlExistingObjectStrategy.DropAndRecreate)
                 {
                     string dropSql = $"DROP {objType} IF EXISTS {safeTargetDb}.{QuoteIdentifier(objName)};";
-                    db.ExecSQL(dropSql);
+                    if (!ExecuteBatchStatement(dropSql, line, options, log, ref executed, ref failed, ref skipped, ref totalRowsAffected, existingTables, existingViews, errors, out headline)) return false;
                     existingTables.Remove(objName);
                     existingViews.Remove(objName);
                     log.LogStatement(line, $"DROP {objType} IF EXISTS `{objName}`", true, null, "DROP_BEFORE_CREATE");
@@ -473,11 +389,15 @@ namespace mySQLPunk.lib.MySqlImport
             // E. INSERT / REPLACE 資料寫入策略判定
             if (options.ExistingObjectStrategy == MySqlExistingObjectStrategy.SkipExisting)
             {
-                Match insertMatch = InsertTargetRegex.Match(sql);
-                if (insertMatch.Success)
+                var writeTokens = MySqlScriptReader.Tokens(sql);
+                int insertTarget = FindInsertTargetIndex(writeTokens);
+                if (insertTarget == -2) throw new InvalidDataException("Cannot identify INSERT/REPLACE target safely under SkipExisting.");
+                if (insertTarget >= 0)
                 {
-                    string insTable = UnquoteIdentifier(insertMatch.Groups["name"].Value);
-                    if (skippedTables.Contains(insTable) || existingTables.Contains(insTable))
+                    int name = insertTarget;
+                    if (name + 2 < writeTokens.Count && writeTokens[name + 1].Value == ".") name += 2;
+                    string insTable = writeTokens[name].Value;
+                    if (skippedTables.Contains(insTable) || initiallyExistingTables.Contains(insTable))
                     {
                         skipped++;
                         log.LogStatement(line, cleanSql, true, null, "SKIP_DATA");
@@ -577,7 +497,8 @@ namespace mySQLPunk.lib.MySqlImport
         {
             if (string.IsNullOrWhiteSpace(sql)) return;
 
-            Match createMatch = CreateObjectRegex.Match(sql);
+            string code = MySqlScriptReader.CodeOnly(sql);
+            Match createMatch = CreateObjectRegex.Match(code);
             if (createMatch.Success)
             {
                 string objType = createMatch.Groups["type"].Value.ToUpperInvariant();
@@ -593,7 +514,7 @@ namespace mySQLPunk.lib.MySqlImport
                 return;
             }
 
-            Match dropMatch = DropObjectRegex.Match(sql);
+            Match dropMatch = DropObjectRegex.Match(code);
             if (dropMatch.Success)
             {
                 string objType = dropMatch.Groups["type"].Value.ToUpperInvariant();
@@ -672,11 +593,112 @@ namespace mySQLPunk.lib.MySqlImport
             if (string.IsNullOrWhiteSpace(sql) || string.IsNullOrWhiteSpace(fromDb) || string.IsNullOrWhiteSpace(toDb))
                 return sql;
 
-            string unquotedFrom = UnquoteIdentifier(fromDb);
-            string safeTo = QuoteIdentifier(toDb);
+            var tokens = MySqlScriptReader.Tokens(sql);
+            for (int i = tokens.Count - 3; i >= 0; i--)
+                if (tokens[i].Identifier && tokens[i + 1].Value == "." && tokens[i + 2].Identifier &&
+                    string.Equals(tokens[i].Value, UnquoteIdentifier(fromDb), StringComparison.OrdinalIgnoreCase))
+                    sql = MySqlScriptReader.ReplaceToken(sql, tokens[i], QuoteIdentifier(toDb));
+            return sql;
+        }
 
-            string pattern = @"(`?" + Regex.Escape(unquotedFrom) + @"`?)\s*\.\s*(`?" + IdentifierPattern + @"`?)";
-            return Regex.Replace(sql, pattern, safeTo + ".$2", RegexOptions.IgnoreCase);
+        private void RequireExecution(string sql)
+        {
+            var result = db.ExecSQL(sql);
+            if (!IsExecutionSuccess(result)) throw new InvalidOperationException(DatabaseExecutionResultService.GetFailureReason(result));
+        }
+
+        private static bool Keyword(MySqlScriptReader.Token token, string value)
+        { return !token.Quoted && string.Equals(token.Value, value, StringComparison.OrdinalIgnoreCase); }
+
+        private static void ValidateTargetSyntax(string sql)
+        {
+            var tokens = MySqlScriptReader.Tokens(sql);
+            if (tokens.Count > 1 && (Keyword(tokens[0], "COMMIT") || Keyword(tokens[0], "ROLLBACK") || Keyword(tokens[0], "BEGIN")))
+                throw new InvalidDataException("Only plain BEGIN, COMMIT, and ROLLBACK are supported.");
+            for (int i = 0; i < tokens.Count; i++)
+            {
+                if (Keyword(tokens[i], "AUTOCOMMIT")) throw new InvalidDataException("SET AUTOCOMMIT is unsupported; use explicit BEGIN/COMMIT.");
+                if (Keyword(tokens[i], "PREPARE") || Keyword(tokens[i], "EXECUTE") || Keyword(tokens[i], "CALL") ||
+                    Keyword(tokens[i], "SOURCE") || Keyword(tokens[i], "CONNECT"))
+                    throw new InvalidDataException("Dynamic SQL, CALL, and client commands cannot be safely redirected to the selected target.");
+                if (i > 0 && Keyword(tokens[i], "USE"))
+                    throw new InvalidDataException("Nested USE cannot be safely redirected.");
+                if ((Keyword(tokens[i], "DATABASE") || Keyword(tokens[i], "SCHEMA")) &&
+                    (i == 0 || !Keyword(tokens[i - 1], "CREATE")))
+                    throw new InvalidDataException("Only CREATE DATABASE is supported; database-wide destructive commands are rejected.");
+                if (Keyword(tokens[i], "SQL_MODE"))
+                {
+                    if (tokens.Count != 4 || !Keyword(tokens[0], "SET") || i != 1 || tokens[2].Value != "=" ||
+                        sql.Substring(tokens[3].Start, tokens[3].Length) != "'NO_AUTO_VALUE_ON_ZERO'")
+                        throw new InvalidDataException("Changing SQL_MODE is unsupported by the logical import reader.");
+                }
+            }
+        }
+
+        // INSERT accepts priority modifiers, IGNORE and optional INTO; REPLACE
+        // accepts the corresponding priority/optional-INTO forms. Share target
+        // extraction between redirection and the SkipExisting policy.
+        private static int FindInsertTargetIndex(List<MySqlScriptReader.Token> tokens)
+        {
+            if (tokens.Count == 0 || (!Keyword(tokens[0], "INSERT") && !Keyword(tokens[0], "REPLACE"))) return -1;
+            int target = 1;
+            while (target < tokens.Count && (Keyword(tokens[target], "LOW_PRIORITY") || Keyword(tokens[target], "HIGH_PRIORITY") ||
+                Keyword(tokens[target], "DELAYED") || Keyword(tokens[target], "IGNORE"))) target++;
+            if (target < tokens.Count && Keyword(tokens[target], "INTO")) target++;
+            if (target >= tokens.Count || !tokens[target].Identifier) return -2;
+            if (target + 1 < tokens.Count && tokens[target + 1].Value == "." &&
+                (target + 2 >= tokens.Count || !tokens[target + 2].Identifier)) return -2;
+            return target;
+        }
+
+        private static string EnforceTargetQualifiers(string sql, string source, string target)
+        {
+            var tokens = MySqlScriptReader.Tokens(sql);
+            var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var objectPrefixes = new HashSet<int>();
+            Match create = CreateObjectRegex.Match(MySqlScriptReader.CodeOnly(sql));
+            bool triggerDefinition = create.Success && create.Groups["type"].Value.Equals("TRIGGER", StringComparison.OrdinalIgnoreCase);
+            if (triggerDefinition) { aliases.Add("NEW"); aliases.Add("OLD"); }
+            int insertTarget = FindInsertTargetIndex(tokens);
+            if (insertTarget >= 0)
+            {
+                int last = insertTarget;
+                if (last + 2 < tokens.Count && tokens[last + 1].Value == ".") { objectPrefixes.Add(last); last += 2; }
+                aliases.Add(tokens[last].Value);
+            }
+            string[] objectWords = { "INTO", "UPDATE", "TABLE", "VIEW", "FROM", "JOIN", "REFERENCES", "TRIGGER", "PROCEDURE", "FUNCTION", "TRUNCATE", "TO" };
+            for (int i = 0; i < tokens.Count - 1; i++)
+            {
+                bool objectWord = false;
+                foreach (string word in objectWords) if (Keyword(tokens[i], word)) objectWord = true;
+                // ON names a table in a trigger header; it is not a general
+                // object keyword (JOIN predicates use ON for expressions).
+                if (triggerDefinition && Keyword(tokens[i], "ON")) objectWord = true;
+                if (!objectWord) continue;
+                int name = i + 1;
+                while (name < tokens.Count && (Keyword(tokens[name], "IF") || Keyword(tokens[name], "NOT") || Keyword(tokens[name], "EXISTS") || Keyword(tokens[name], "ONLY"))) name++;
+                if (name >= tokens.Count || !tokens[name].Identifier) continue;
+                int last = name;
+                if (name + 2 < tokens.Count && tokens[name + 1].Value == "." && tokens[name + 2].Identifier)
+                { objectPrefixes.Add(name); last = name + 2; }
+                aliases.Add(tokens[last].Value);
+                int alias = last + 1;
+                if (alias < tokens.Count && Keyword(tokens[alias], "AS")) alias++;
+                if (alias < tokens.Count && tokens[alias].Identifier) aliases.Add(tokens[alias].Value);
+            }
+            for (int i = tokens.Count - 3; i >= 0; i--)
+            {
+                if (!tokens[i].Identifier || tokens[i + 1].Value != "." || !tokens[i + 2].Identifier) continue;
+                if (i >= 2 && tokens[i - 1].Value == ".") continue;
+                bool threePart = i + 3 < tokens.Count && tokens[i + 3].Value == ".";
+                bool sourcePrefix = !string.IsNullOrEmpty(source) && string.Equals(tokens[i].Value, source, StringComparison.OrdinalIgnoreCase);
+                bool targetPrefix = string.Equals(tokens[i].Value, target, StringComparison.OrdinalIgnoreCase);
+                if (objectPrefixes.Contains(i) || threePart || ((sourcePrefix || targetPrefix) && !aliases.Contains(tokens[i].Value)))
+                    sql = MySqlScriptReader.ReplaceToken(sql, tokens[i], QuoteIdentifier(target));
+                else if (!aliases.Contains(tokens[i].Value))
+                    throw new InvalidDataException("Ambiguous database qualifier '" + tokens[i].Value + "'; cannot safely redirect SQL.");
+            }
+            return sql;
         }
 
         public static string SanitizeSqlHeadline(string sql, int maxLength = 130)

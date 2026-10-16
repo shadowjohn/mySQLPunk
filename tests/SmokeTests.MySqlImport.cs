@@ -375,6 +375,144 @@ public static partial class SmokeTests
         }
     }
 
+    private static void MySqlImport_Regression_TargetLiteralsAndStrategies()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "mysqlpunk_repair_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string path = Path.Combine(directory, "fixture.sql");
+            string payload = "src.orders\r\n-- keep this literal line\r\n# and this one\r\n/* src.orders */\r\nlast";
+            File.WriteAllText(path, "# restore src\r\nUSE /* choose */ `src`; INSERT INTO src.t VALUES ('" + payload + "'); " +
+                "/* src.t comment */ INSERT INTO `src`.`t` VALUES ('escaped \\' src.t', '{\"name\":\"src.orders\"}');", new UTF8Encoding(false));
+            var db = new MockMySqlImportDatabase();
+            var result = new MySqlImportRunner(db, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions(), null, CancellationToken.None).Result;
+            Assert(result.Status == MySqlImportStatus.Completed, "Inline/comment USE and inserts complete: " + result.Summary);
+            Assert(result.ExecutedStatements == 3, "Inline statements split consistently");
+            Assert(db.ExecutedSql.Exists(sql => sql.Contains("INSERT INTO `target`.t") && sql.Contains(payload)), "Database target changes while multiline payload remains exact");
+            Assert(db.ExecutedSql.Exists(sql => sql.Contains("/* src.t comment */") && sql.Contains("'{\"name\":\"src.orders\"}'")), "Comment and JSON literal remain exact");
+            string rewritten = MySqlImportRunner.RewriteDatabaseQualifier("INSERT INTO src.t VALUES ('src.t', 'xsrc.t') /* src.t */", "src", "target");
+            AssertContains(rewritten, "`target`.t VALUES ('src.t', 'xsrc.t') /* src.t */", "Only identifier token rewritten");
+            AssertEquals("SELECT xsrc.t", MySqlImportRunner.RewriteDatabaseQualifier("SELECT xsrc.t", "src", "target"), "Longer identifiers are not source qualifiers");
+
+            File.WriteAllText(path, "INSERT INTO other.t VALUES (1);", new UTF8Encoding(false));
+            db = new MockMySqlImportDatabase();
+            result = new MySqlImportRunner(db, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions(), null, CancellationToken.None).Result;
+            Assert(result.Status == MySqlImportStatus.Completed && db.ExecutedSql.Exists(sql => sql.Contains("INSERT INTO `target`.t")), "Qualified INSERT without USE cannot write to other database");
+
+            File.WriteAllText(path, "/* preserve */ DROP TABLE IF EXISTS old; CREATE TABLE old (id int); INSERT INTO old VALUES (1); CREATE TABLE fresh (id int); INSERT INTO fresh VALUES (2); INSERT INTO fresh VALUES (3);", new UTF8Encoding(false));
+            db = new MockMySqlImportDatabase { GetTablesHandler = () => new List<string> { "old" }, TableExistsHandler = (database, table) => table == "old" };
+            result = new MySqlImportRunner(db, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions { ExistingObjectStrategy = MySqlExistingObjectStrategy.SkipExisting }, null, CancellationToken.None).Result;
+            Assert(result.Status == MySqlImportStatus.Completed, "Mixed existing/new SkipExisting import completes");
+            Assert(result.ExecutedStatements == 3 && result.SkippedStatements == 3, "Fresh CREATE and both INSERT batches execute; existing object protected");
+            Assert(!db.ExecutedSql.Exists(sql => MySqlScriptReader.CodeOnly(sql).TrimStart().StartsWith("DROP", StringComparison.OrdinalIgnoreCase)), "Comment-prefixed DROP skipped");
+            File.WriteAllText(path, "DROP DATABASE src;", new UTF8Encoding(false));
+            db = new MockMySqlImportDatabase();
+            result = new MySqlImportRunner(db, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions(), null, CancellationToken.None).Result;
+            Assert(result.Status == MySqlImportStatus.Failed && !db.ExecutedSql.Exists(sql => sql.Contains("DROP DATABASE")), "Database-wide DROP rejected");
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    private static void MySqlImport_Regression_CancelTransactionsAndPreflight()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "mysqlpunk_repair_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string path = Path.Combine(directory, "fixture.sql");
+            File.WriteAllText(path, "INSERT INTO t VALUES (1);", new UTF8Encoding(false));
+            using (var cancel = new CancellationTokenSource())
+            {
+                var db = new MockMySqlImportDatabase { ExecSqlHandler = sql => { if (sql.StartsWith("INSERT")) cancel.Cancel(); return new Dictionary<string, string> { { "status", "OK" } }; } };
+                var result = new MySqlImportRunner(db, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions(), null, cancel.Token).Result;
+                Assert(result.Status == MySqlImportStatus.Cancelled, "Cancellation inside last command cannot report Completed");
+                Assert(db.ExecutedSql.Contains("ROLLBACK;"), "Cancelled job attempts owned transaction cleanup");
+            }
+            File.WriteAllText(path, "BEGIN; INSERT INTO t VALUES (1);", new UTF8Encoding(false));
+            var txDb = new MockMySqlImportDatabase();
+            var txResult = new MySqlImportRunner(txDb, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions(), null, CancellationToken.None).Result;
+            Assert(txResult.Status == MySqlImportStatus.Failed, "Uncommitted script cannot report restored rows as complete");
+            File.WriteAllText(path, "BEGIN; INSERT INTO t VALUES (1); COMMIT;", new UTF8Encoding(false));
+            txDb = new MockMySqlImportDatabase { ExecSqlHandler = sql => new Dictionary<string, string> { { "status", sql.StartsWith("COMMIT") ? "NO" : "OK" }, { "reason", "injected commit failure" } } };
+            txResult = new MySqlImportRunner(txDb, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions(), null, CancellationToken.None).Result;
+            Assert(txResult.Status == MySqlImportStatus.Failed, "Real status=NO commit cannot complete");
+            File.WriteAllText(path, "INSERT INTO t VALUES (1);", new UTF8Encoding(false));
+            txDb = new MockMySqlImportDatabase { ExecSqlHandler = sql => new Dictionary<string, string> { { "status", sql.StartsWith("ROLLBACK") ? "NO" : "OK" }, { "reason", "injected cleanup failure" } } };
+            txResult = new MySqlImportRunner(txDb, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions(), null, CancellationToken.None).Result;
+            Assert(txResult.Status == MySqlImportStatus.Failed, "Cleanup status=NO cannot report completion");
+            File.WriteAllText(path, "/*!40101 USE src */;", new UTF8Encoding(false));
+            Assert(!MySqlImportPreflightScanner.Scan(path, CancellationToken.None).Passed, "Executable version comments explicitly unsupported");
+            File.WriteAllText(path, "INSERT INTO t VALUES ('unterminated);", new UTF8Encoding(false));
+            Assert(!MySqlImportPreflightScanner.Scan(path, CancellationToken.None).Passed, "Unterminated literal fails before execution");
+            File.WriteAllText(path, "-- mySQLPunk Native Manifest\r\n-- Manifest-SHA256: " + new string('0', 64) + "\r\n", new UTF8Encoding(false));
+            Assert(!MySqlImportPreflightScanner.Scan(path, CancellationToken.None).Passed, "Native digest is verified instead of displayed only");
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    private static void MySqlImport_Regression_ModifiedInsertProtectionAndTriggerPseudoRows()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "mysqlpunk_review_repair_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string path = Path.Combine(directory, "fixture.sql");
+            string[] forms =
+            {
+                "INSERT LOW_PRIORITY INTO `TABLE`", "INSERT HIGH_PRIORITY `TABLE`",
+                "INSERT DELAYED IGNORE INTO src.`TABLE`", "INSERT IGNORE `src`.`TABLE`",
+                "INSERT `TABLE`", "REPLACE LOW_PRIORITY INTO `TABLE`",
+                "REPLACE DELAYED src.TABLE", "REPLACE `TABLE`"
+            };
+            string sourceLookingValue = "'src.old NEW.id OLD.id'";
+            var script = new StringBuilder("CREATE TABLE fresh (value text);\r\n");
+            foreach (string form in forms)
+            {
+                script.Append(form.Replace("TABLE", "old")).Append(" VALUES (").Append(sourceLookingValue).Append(");\r\n");
+                script.Append(form.Replace("TABLE", "fresh")).Append(" VALUES (").Append(sourceLookingValue).Append(");\r\n");
+            }
+            File.WriteAllText(path, script.ToString(), new UTF8Encoding(false));
+            var db = new MockMySqlImportDatabase { GetTablesHandler = () => new List<string> { "old" }, TableExistsHandler = (database, table) => table == "old" };
+            var options = new MySqlImportOptions { ExistingObjectStrategy = MySqlExistingObjectStrategy.SkipExisting };
+            var result = new MySqlImportRunner(db, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), options, null, CancellationToken.None).Result;
+            Assert(result.Status == MySqlImportStatus.Completed, "Priority/optional-INTO forms restore safely: " + result.Summary);
+            Assert(result.SkippedStatements == forms.Length && result.ExecutedStatements == forms.Length + 1, "All old-table INSERT/REPLACE variants skipped and fresh writes execute");
+            foreach (string sql in db.ExecutedSql)
+            {
+                string code = MySqlScriptReader.CodeOnly(sql).TrimStart();
+                if (!code.StartsWith("INSERT", StringComparison.OrdinalIgnoreCase) && !code.StartsWith("REPLACE", StringComparison.OrdinalIgnoreCase)) continue;
+                Assert(code.IndexOf("old", StringComparison.OrdinalIgnoreCase) < 0, "Protected table never reaches provider for any accepted variant");
+                AssertContains(sql, sourceLookingValue, "Source/pseudo-row-looking literal remains exact in fresh-table writes");
+                Assert(!code.Contains("src." ) && !code.Contains("`src`."), "Qualified optional-INTO source targets redirected without a USE");
+            }
+            script.Clear();
+            foreach (string form in forms) script.Append(form.Replace("TABLE", "old")).Append(" VALUES (1);\r\n");
+            File.WriteAllText(path, script.ToString(), new UTF8Encoding(false));
+            db = new MockMySqlImportDatabase { GetTablesHandler = () => new List<string> { "old" } };
+            result = new MySqlImportRunner(db, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), options, null, CancellationToken.None).Result;
+            Assert(result.Status == MySqlImportStatus.Completed && result.ExecutedStatements == 0 && result.SkippedStatements == forms.Length, "Data-only modifier/optional-INTO forms all preserve initial existing table");
+
+            File.WriteAllText(path, "DELIMITER //\r\n" +
+                "CREATE TRIGGER `tr` BEFORE UPDATE ON `src`.`t` FOR EACH ROW\r\n" +
+                "BEGIN\r\nSET NEW.id = OLD.id;\r\n" +
+                "INSERT LOW_PRIORITY INTO src.audit VALUES (NEW.id, 'src.audit NEW.id OLD.id');\r\nEND//\r\nDELIMITER ;\r\n", new UTF8Encoding(false));
+            db = new MockMySqlImportDatabase();
+            result = new MySqlImportRunner(db, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions(), null, CancellationToken.None).Result;
+            Assert(result.Status == MySqlImportStatus.Completed && result.ExecutedStatements == 1, "Native DELIMITER trigger with NEW/OLD imports as one definition: " + result.Summary);
+            string trigger = db.ExecutedSql.Find(sql => sql.Contains("CREATE TRIGGER"));
+            AssertContains(trigger, "ON `target`.`t`", "Trigger table qualified to selected target without USE");
+            AssertContains(trigger, "INSERT LOW_PRIORITY INTO `target`.audit", "Trigger body real object qualified to selected target");
+            AssertContains(trigger, "SET NEW.id = OLD.id;", "Trigger pseudo-row identifiers remain unchanged");
+            AssertContains(trigger, "'src.audit NEW.id OLD.id'", "Trigger source-looking literal remains unchanged");
+            File.WriteAllText(path, "INSERT INTO t VALUES (NEW.id);", new UTF8Encoding(false));
+            db = new MockMySqlImportDatabase();
+            result = new MySqlImportRunner(db, "target").RunAsync(new MySqlImportRequest(Guid.NewGuid(), path, "target"), new MySqlImportOptions(), null, CancellationToken.None).Result;
+            Assert(result.Status == MySqlImportStatus.Failed, "NEW/OLD exemption is confined to recognized trigger definitions");
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     private sealed class MockMySqlImportDatabase : IDatabase
     {
         public ConnectionState State => ConnectionState.Open;
@@ -382,6 +520,7 @@ public static partial class SmokeTests
         public List<string> ExecutedSql = new List<string>();
         public Func<string, Dictionary<string, string>> ExecSqlHandler = null;
         public Func<string, string, bool> TableExistsHandler = null;
+        public Func<List<string>> GetTablesHandler = null;
         public Func<string, string, long> CountRowsHandler = null;
 
         public void SetConn(string connectionString) { }
@@ -408,7 +547,7 @@ public static partial class SmokeTests
         public Task<Dictionary<string, string>> ExecSQLAsync(string sql, Dictionary<string, object> parameters = null) => Task.FromResult(ExecSQL(sql, parameters));
 
         public List<string> GetDatabases() => new List<string> { "test_db" };
-        public List<string> GetTables(string databaseName) => new List<string> { "test" };
+        public List<string> GetTables(string databaseName) => GetTablesHandler != null ? GetTablesHandler() : new List<string> { "test" };
         public List<string> GetViews(string databaseName) => new List<string>();
         public DataTable GetColumns(string databaseName, string tableName) => new DataTable();
         public DataTable GetIndexes(string databaseName, string tableName) => new DataTable();

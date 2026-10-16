@@ -88,10 +88,71 @@ public static partial class SmokeTests
         }
     }
 
+    private static void MySqlExport_Regression_GeneratedBoundsAndFailures()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "mysqlpunk_export_repair_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string path = Path.Combine(directory, "dump.sql");
+            var options = new MySqlExportWizardOptions(MySqlExportMode.SchemaAndData, path) { SelectedTables = new List<string> { "users" } };
+            var db = new MockMySqlExportDatabase { Generated = true };
+            var result = new MySqlSqlExportService(db, "test_db").ExportAsync(options, null, CancellationToken.None).Result;
+            Assert(result.Success, "Generated column export succeeds by omitting writable generated value: " + result.ErrorMessage);
+            string dump = File.ReadAllText(path);
+            AssertContains(dump, "GENERATED ALWAYS", "Generated DDL retained");
+            AssertContains(dump, "INSERT INTO `users` (`id`, `name`)", "Generated column absent from explicit INSERT column list");
+            Assert(!dump.Contains("`id`, `name`, `computed`"), "Computed values are not inserted");
+            Assert(db.ExecutedSql.Contains("ROLLBACK;") && !db.ExecutedSql.Contains("COMMIT;"), "Read snapshot ends with validated rollback");
+            Assert(result.FileBytes == new FileInfo(path).Length, "Reported final bytes include checksum footer");
+            Assert(mySQLPunk.lib.MySqlImport.MySqlImportPreflightScanner.Scan(path, CancellationToken.None).Passed, "Native generated dump passes its own parser/digest preflight");
+            File.AppendAllText(path, "-- tampered");
+            Assert(!mySQLPunk.lib.MySqlImport.MySqlImportPreflightScanner.Scan(path, CancellationToken.None).Passed, "Tampered native dump rejected");
+
+            foreach (string failure in new[] { "snapshot", "rollback", "engine", "large" })
+            {
+                File.WriteAllText(path, "existing complete backup");
+                db = new MockMySqlExportDatabase { Failure = failure, MaxRowBytes = failure == "large" ? 1048577 : 32 };
+                result = new MySqlSqlExportService(db, "test_db").ExportAsync(options, null, CancellationToken.None).Result;
+                Assert(!result.Success && result.Stage == MySqlExportStage.Failed, failure + " fails explicitly");
+                AssertEquals("existing complete backup", File.ReadAllText(path), failure + " preserves existing backup");
+                if (failure == "large") Assert(db.PageReads == 0, "Oversized row rejected before materializing source page");
+            }
+            db = new MockMySqlExportDatabase();
+            using (var locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                result = new MySqlSqlExportService(db, "test_db").ExportAsync(options, null, CancellationToken.None).Result;
+                Assert(result.Stage == MySqlExportStage.Failed, "Replacement lock failure is reported");
+            }
+            AssertEquals("existing complete backup", File.ReadAllText(path), "Replacement failure preserves previous complete backup");
+            Assert(Directory.GetFiles(directory, "dump.sql.staging.*.tmp").Length == 1, "Completed staging survives publication failure");
+            foreach (string retained in Directory.GetFiles(directory, "dump.sql.staging.*.tmp"))
+                Assert(mySQLPunk.lib.MySqlImport.MySqlImportPreflightScanner.Scan(retained, CancellationToken.None).Passed, "Retained staging is a complete verified dump");
+            db = new MockMySqlExportDatabase { Failure = "page-race" };
+            result = new MySqlSqlExportService(db, "test_db").ExportAsync(options, null, CancellationToken.None).Result;
+            Assert(!result.Success, "Concurrent enlargement marker fails explicitly");
+            AssertEquals("existing complete backup", File.ReadAllText(path), "Concurrent enlargement leaves prior backup intact");
+            using (var cancel = new CancellationTokenSource())
+            {
+                db = new MockMySqlExportDatabase { OnPageRead = () => cancel.Cancel() };
+                result = new MySqlSqlExportService(db, "test_db").ExportAsync(options, null, cancel.Token).Result;
+                Assert(result.Stage == MySqlExportStage.Cancelled, "Cancellation at last source read cannot publish");
+                AssertEquals("existing complete backup", File.ReadAllText(path), "Cancelled export preserves prior backup");
+            }
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     private sealed class MockMySqlExportDatabase : IDatabase
     {
         public ConnectionState State => ConnectionState.Open;
         public string ProviderName => "MySQL";
+        public bool Generated;
+        public string Failure;
+        public long MaxRowBytes = 32;
+        public int PageReads;
+        public Action OnPageRead;
+        public readonly List<string> ExecutedSql = new List<string>();
 
         public void SetConn(string connectionString) { }
         public void Open() { }
@@ -101,6 +162,17 @@ public static partial class SmokeTests
         public DataTable SelectSQL(string sql, Dictionary<string, object> parameters = null)
         {
             var dt = new DataTable();
+            if (sql.Contains("AS MaxRowBytes")) { dt.Columns.Add("MaxRowBytes", typeof(long)); dt.Rows.Add(MaxRowBytes); return dt; }
+            if (sql.Contains("AS __mysqlpunk_row_bytes"))
+            {
+                bool first = sql.Contains("LIMIT 0,");
+                dt = SelectTablePage("test_db", "users", first ? 0 : 16, 16);
+                dt.Columns.Add("__mysqlpunk_row_bytes", typeof(long));
+                foreach (DataRow row in dt.Rows) row["__mysqlpunk_row_bytes"] = Failure == "page-race" ? 1048577L : MaxRowBytes;
+                PageReads++;
+                OnPageRead?.Invoke();
+                return dt;
+            }
             if (sql.Contains("ROUTINES"))
             {
                 dt.Columns.Add("ROUTINE_NAME");
@@ -140,7 +212,9 @@ public static partial class SmokeTests
 
         public Dictionary<string, string> ExecSQL(string sql, Dictionary<string, object> parameters = null)
         {
-            return new Dictionary<string, string>();
+            ExecutedSql.Add(sql);
+            bool fail = Failure == "snapshot" && sql.StartsWith("START TRANSACTION") || Failure == "rollback" && sql.StartsWith("ROLLBACK");
+            return fail ? new Dictionary<string, string> { { "status", "NO" }, { "reason", "injected " + Failure } } : new Dictionary<string, string> { { "status", "OK" } };
         }
 
         public Task<DataTable> SelectSQLAsync(string sql, Dictionary<string, object> parameters = null)
@@ -162,17 +236,24 @@ public static partial class SmokeTests
             var dt = new DataTable();
             dt.Columns.Add("COLUMN_NAME");
             dt.Columns.Add("DATA_TYPE");
-            dt.Rows.Add("id", "int");
-            dt.Rows.Add("name", "varchar");
+            dt.Columns.Add("Extra");
+            dt.Rows.Add("id", "int", "");
+            dt.Rows.Add("name", "varchar", "");
+            if (Generated) dt.Rows.Add("computed", "int", "VIRTUAL GENERATED");
             return dt;
         }
 
         public DataTable GetIndexes(string databaseName, string tableName) => new DataTable();
-        public DataTable GetTableStatus(string databaseName) => new DataTable();
+        public DataTable GetTableStatus(string databaseName)
+        {
+            var dt = new DataTable(); dt.Columns.Add("Name"); dt.Columns.Add("Engine");
+            dt.Rows.Add("users", Failure == "engine" ? "MyISAM" : "InnoDB"); return dt;
+        }
         public Dictionary<string, string> GetDatabaseInfo(string databaseName) => new Dictionary<string, string>();
 
         public string GetTableCreateStatement(string databaseName, string tableName)
         {
+            if (Generated) return "CREATE TABLE `users` (`id` int, `name` varchar(50), `computed` int GENERATED ALWAYS AS (id+1) VIRTUAL) ENGINE=InnoDB;";
             return "CREATE TABLE `users` (`id` int NOT NULL, `name` varchar(50) DEFAULT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
         }
 
@@ -192,11 +273,13 @@ public static partial class SmokeTests
             var dt = new DataTable();
             dt.Columns.Add("id", typeof(int));
             dt.Columns.Add("name", typeof(string));
+            if (Generated) dt.Columns.Add("computed", typeof(int));
             if (offset == 0)
             {
                 dt.Rows.Add(1, "Alice");
                 dt.Rows.Add(2, "Bob");
             }
+            if (Generated) foreach (DataRow row in dt.Rows) row["computed"] = Convert.ToInt32(row["id"]) + 1;
             return dt;
         }
 

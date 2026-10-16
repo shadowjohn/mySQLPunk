@@ -18,6 +18,7 @@ namespace mySQLPunk
         private readonly IDatabase db;
         private readonly string databaseName;
         private readonly SqliteSqlExportService service;
+        private readonly HashSet<string> initialSelection;
         private readonly Panel[] pages = new Panel[4];
         private readonly TextBox search = new TextBox(), targetPathBox = new TextBox();
         private readonly DataGridView tableGrid = new DataGridView();
@@ -53,6 +54,7 @@ namespace mySQLPunk
             this.db = db ?? throw new ArgumentNullException(nameof(db));
             this.databaseName = !string.IsNullOrWhiteSpace(databaseName) ? databaseName : throw new ArgumentException("Database name is required", nameof(databaseName));
             this.service = new SqliteSqlExportService(db, databaseName);
+            initialSelection = initialOptions?.SelectedTables?.Count > 0 ? new HashSet<string>(initialOptions.SelectedTables, StringComparer.OrdinalIgnoreCase) : null;
 
             Name = "sqliteExportWizard";
             Text = T("匯出資料庫 · SQLite (支援 SpatiaLite / GeoPackage GIS)", "Export database · SQLite (with SpatiaLite / GeoPackage GIS)");
@@ -92,6 +94,8 @@ namespace mySQLPunk
             }
 
             BuildPage0();
+            includeViews.Checked = initialOptions?.IncludeViews ?? true;
+            includeTriggers.Checked = initialOptions?.IncludeTriggers ?? true;
             BuildPage1(initialOptions);
             BuildPage2();
             BuildPage3();
@@ -124,11 +128,14 @@ namespace mySQLPunk
             Shown += async (s, e) => await LoadCatalogAsync();
             FormClosing += (s, e) =>
             {
-                if (busy && !closing)
+                if (busy)
                 {
                     e.Cancel = true;
-                    closing = true;
-                    RequestCancel();
+                    if (!closing)
+                    {
+                        closing = true;
+                        RequestCancel();
+                    }
                 }
             };
         }
@@ -500,19 +507,29 @@ namespace mySQLPunk
 
         private async Task LoadCatalogAsync()
         {
-            statusLabel.Text = T("正在載入 SQLite 資料庫目錄與空間中繼資訊...", "Loading SQLite database catalog and spatial metadata...");
-            catalog = await Task.Run(() => service.LoadTableCatalog());
-            views = await Task.Run(() => service.LoadViews());
-            triggers = await Task.Run(() => service.LoadTriggers());
-
-            tableGrid.Rows.Clear();
-            foreach (var item in catalog)
+            busy = true;
+            try
             {
-                tableGrid.Rows.Add(item.IsSelected, item.Name, item.EstimatedRows.ToString("N0"), item.SpatialInfo);
-            }
+                statusLabel.Text = T("正在載入 SQLite 資料庫目錄與空間中繼資訊...", "Loading SQLite database catalog and spatial metadata...");
+                catalog = await Task.Run(() => service.LoadTableCatalog());
+                views = await Task.Run(() => service.LoadViews());
+                triggers = await Task.Run(() => service.LoadTriggers());
 
-            statusLabel.Text = "";
-            UpdateSelectionSummary();
+                tableGrid.Rows.Clear();
+                foreach (var item in catalog)
+                {
+                    if (initialSelection != null) item.IsSelected = initialSelection.Contains(item.Name);
+                    tableGrid.Rows.Add(item.IsSelected, item.Name, item.EstimatedRows.ToString("N0"), item.SpatialInfo);
+                }
+
+                statusLabel.Text = "";
+                UpdateSelectionSummary();
+            }
+            finally
+            {
+                busy = false;
+                if (closing) Close();
+            }
         }
 
         private void ApplySearchFilter()
@@ -618,18 +635,10 @@ namespace mySQLPunk
             }
         }
 
-        private async Task StartExportAsync()
+        private SqliteExportWizardOptions BuildExportOptions()
         {
-            busy = true;
-            exporting = true;
-            cancellation = new CancellationTokenSource();
-            nextButton.Enabled = false;
-            backButton.Enabled = false;
-            cancelButton.Text = T("停止匯出", "Stop Export");
-            logList.Items.Clear();
-
             var mode = schemaData.Checked ? SqliteExportMode.SchemaAndData : schemaOnly.Checked ? SqliteExportMode.SchemaOnly : SqliteExportMode.DataOnly;
-            var opt = new SqliteExportWizardOptions(mode, targetPathBox.Text.Trim())
+            return new SqliteExportWizardOptions(mode, targetPathBox.Text.Trim())
             {
                 SingleTransaction = singleTransaction.Checked,
                 PragmaForeignKeysOff = pragmaFk.Checked,
@@ -641,9 +650,22 @@ namespace mySQLPunk
                 IncludeComments = includeComments.Checked,
                 ExcludeSpatialMetadata = excludeSpatialMetadata.Checked,
                 SelectedTables = catalog.Where(t => t.IsSelected).Select(t => t.Name).ToList(),
-                SelectedViews = views,
+                SelectedViews = catalog.All(t => t.IsSelected) ? views : new List<string>(),
                 SelectedTriggers = triggers
             };
+        }
+
+        private async Task StartExportAsync()
+        {
+            busy = true;
+            exporting = true;
+            cancellation = new CancellationTokenSource();
+            nextButton.Enabled = false;
+            backButton.Enabled = false;
+            cancelButton.Text = T("停止匯出", "Stop Export");
+            logList.Items.Clear();
+
+            var opt = BuildExportOptions();
 
             var progress = new Progress<SqliteExportProgress>(p =>
             {

@@ -32,6 +32,8 @@ namespace mySQLPunk
                 if (!string.IsNullOrWhiteSpace(specificTable))
                 {
                     options.SelectedTables.Add(specificTable);
+                    options.IncludeViews = false;
+                    options.IncludeTriggers = false;
                 }
 
                 SqliteExportResult result;
@@ -41,7 +43,8 @@ namespace mySQLPunk
                 }
                 else
                 {
-                    using (var wizard = new SqliteExportWizardForm(target.Database, target.DatabaseName, options))
+                    using (var session = WizardOwnedSession.Open(target.ConnectionInfo, target.ProviderName, target.DatabaseName))
+                    using (var wizard = new SqliteExportWizardForm(session.Database, target.DatabaseName, options))
                     {
                         wizard.ShowDialog(this);
                         result = wizard.Result;

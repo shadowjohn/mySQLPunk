@@ -32,10 +32,10 @@
 
 | 資料庫 Provider | SQL 傾印 (匯出) 現況 | SQL 檔案匯入現況 | 主要缺口與風險 |
 | :--- | :--- | :--- | :--- |
-| **MySQL / MariaDB** | ✅ 已具備完整四步精靈 (`MySqlExportWizardForm`)，支援選表/View/Routine/Trigger、一致性快照、Native Manifest。 | ✅ 已具備完整四步精靈 (`MySqlImportWizardForm`)，支援串流預檢、4種衝突策略、Session鎖定、終端機滑動視窗日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格）。 |
-| **SQLite** | ✅ 已具備完整四步精靈 (`SqliteExportWizardForm`)，支援選表、SpatiaLite/GeoPackage 空間幾何無損 Hex 傾印、排除虛擬表影子表、原子替換與 Native Manifest。 | ✅ 已具備完整四步精靈 (`SqliteImportWizardForm`)，支援串流狀態機預檢、SpatiaLite 動態模組自動加載、4種衝突策略、滑動視窗終端機日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS 空間特性）。 |
+| **MySQL / MariaDB** | 四步精靈、選表／模式、獨立連線、InnoDB 快照、generated 欄位投影與原子發布已補強。 | 共用預檢／執行 lexer、識別字限定的目標處理、衝突策略、交易／清理結果與錯誤日誌已補強。 | 本機回歸後仍需實機往返；來源單列目前限 1 MiB、INSERT 限 8 MiB。更大 LOB 分段與主動中斷執行中命令尚待擴充。 |
+| **SQLite** | 原生逐列 reader、來源快照、generated 欄位投影、rowid／序號、文字／BLOB bytes 與原子發布已補強。 | 策略值綁定、DROP 保護、trigger 解析、嚴格 UTF-8、交易／PRAGMA 清理與日誌已補強。 | 私有 SQLite 往返驗收；單列目前限 8 MiB。SpatiaLite／GeoPackage 擴充模組與多 GiB、實體 UI 仍需另外驗收，不能只靠筆數宣稱無損。 |
 | **PostgreSQL** | ✅ 已具備完整四步精靈 (`PostgreSqlExportWizardForm`)，支援選表/View、PostGIS 空間幾何無損 Hex EWKB 傾印、排除 spatial_ref_sys、REPEATABLE READ 快照與 Native Manifest。 | ✅ 已具備完整四步精靈 (`PostgreSqlImportWizardForm`)，支援狀態機 Lexer (精準解析 Dollar Quotes 與巢狀註解)、PostGIS 自動安裝開關、4種衝突策略、2,000行滑動視窗日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS PostGIS 空間特性）。 |
-| **Oracle** | ✅ 已具備完整四步精靈 (`OracleExportWizardForm`)，支援選表/View、Oracle Spatial (`SDO_GEOMETRY`) 無損 WKB 傾印、排除 R-Tree 內部影子表 (`MDRT_*`)、`USER_SDO_GEOM_METADATA` 註冊、`SET TRANSACTION READ ONLY;` 快照與 Native Manifest。 | ✅ 已具備完整四步精靈 (`OracleImportWizardForm`)，支援串流狀態機預檢 (精準解析 PL/SQL 區塊與獨立斜線 `/`)、4種衝突策略、2,000行滑動視窗終端機日誌與列數核對。 | 已達標（完全對齊 MSSQL 標竿規格，並深度整合崩琦 GIS Oracle Spatial 與 PL/SQL 特長）。 |
+| **Oracle** | 獨立連線、來源 READ ONLY、原生逐列 reader、Spatial 原始 metadata／SRID、bounded LOB 與原子發布修整。 | 檢查 provider 結果、目標 owner、交易、共用 lexer、日誌與進度 bytes 修整。 | 仍待 Oracle／Spatial 實機往返；大型值、identity、LRS／曲線及跨 owner 腳本有明確支援邊界，詳見修整驗證文件。尚未宣稱完全對齊 MSSQL。 |
 
 ---
 

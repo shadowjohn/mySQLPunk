@@ -20,6 +20,21 @@ namespace mySQLPunk.lib.SqliteImport
         OverwriteKeepExisting
     }
 
+    public static class SqliteExistingObjectSelection
+    {
+        public static SqliteExistingObjectStrategy FromIndex(int index)
+        {
+            switch (index)
+            {
+                case 0: return SqliteExistingObjectStrategy.SkipExisting;
+                case 1: return SqliteExistingObjectStrategy.DropAndRecreate;
+                case 2: return SqliteExistingObjectStrategy.OverwriteKeepExisting;
+                case 3: return SqliteExistingObjectStrategy.AbortIfExists;
+                default: throw new ArgumentOutOfRangeException(nameof(index));
+            }
+        }
+    }
+
     public sealed class SqliteImportRequest
     {
         public Guid JobId { get; }
@@ -41,7 +56,7 @@ namespace mySQLPunk.lib.SqliteImport
         public bool AutoLoadSpatiaLite { get; set; } = true;
         public bool WrapInTransaction { get; set; } = true;
         public bool PragmaForeignKeysOff { get; set; } = true;
-        public bool PragmaSynchronousOff { get; set; } = true;
+        public bool PragmaSynchronousOff { get; set; } = false;
     }
 
     public sealed class SqliteImportPreflight

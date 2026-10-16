@@ -4,6 +4,8 @@ using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Globalization;
+using mySQLPunk.lib.MySqlImport;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -59,7 +61,7 @@ namespace mySQLPunk.lib.MySqlExport
             IProgress<MySqlExportProgress> progress,
             CancellationToken cancellation)
         {
-            return Task.Run(() => ExportInternal(options, progress, cancellation), cancellation);
+            return Task.Run(() => ExportInternal(options, progress, cancellation));
         }
 
         private MySqlExportResult ExportInternal(
@@ -90,35 +92,21 @@ namespace mySQLPunk.lib.MySqlExport
             var selectedRoutines = options.IncludeRoutines ? (options.SelectedRoutines?.ToList() ?? new List<string>()) : new List<string>();
             var selectedTriggers = options.IncludeTriggers ? (options.SelectedTriggers?.ToList() ?? new List<string>()) : new List<string>();
 
-            // 預估總列數
-            if (options.Mode != MySqlExportMode.SchemaOnly)
-            {
-                foreach (var table in selectedTables)
-                {
-                    try { estimatedTotalRows += db.CountRows(databaseName, table); } catch { }
-                }
-            }
-
             bool inTransaction = false;
+            bool publicationAttempted = false;
             try
             {
                 cancellation.ThrowIfCancellationRequested();
-
-                // 啟動可選一致性快照 (single-transaction)
+                RequireExecution("SET TIME_ZONE = '+00:00';");
                 if (options.SingleTransaction && options.Mode != MySqlExportMode.SchemaOnly)
                 {
-                    try
-                    {
-                        db.ExecSQL("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;");
-                        db.ExecSQL("START TRANSACTION WITH CONSISTENT SNAPSHOT;");
-                        inTransaction = true;
-                    }
-                    catch
-                    {
-                        // 若無足夠權限或引擎不支援一致性快照，安全降級為普通讀取
-                        inTransaction = false;
-                    }
+                    RequireTransactionalTables(selectedTables);
+                    RequireExecution("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;");
+                    RequireExecution("START TRANSACTION WITH CONSISTENT SNAPSHOT;");
+                    inTransaction = true;
                 }
+                if (options.Mode != MySqlExportMode.SchemaOnly)
+                    foreach (var table in selectedTables) estimatedTotalRows += db.CountRows(databaseName, table);
 
                 using (var fileStream = new FileStream(stagingPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 65536))
                 using (var writer = new StreamWriter(fileStream, new UTF8Encoding(false)))
@@ -132,6 +120,7 @@ namespace mySQLPunk.lib.MySqlExport
                     writer.WriteLine("-- ========================================================");
                     writer.WriteLine();
                     writer.WriteLine("SET NAMES utf8mb4;");
+                    writer.WriteLine("SET TIME_ZONE = '+00:00';");
                     if (options.SetNoAutoValueOnZero)
                         writer.WriteLine("SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';");
                     if (options.DisableForeignKeyChecks)
@@ -143,24 +132,24 @@ namespace mySQLPunk.lib.MySqlExport
                         var info = db.GetDatabaseInfo(databaseName) ?? new Dictionary<string, string>();
                         string charset = info.ContainsKey("character_set") ? info["character_set"] : "utf8mb4";
                         string collation = info.ContainsKey("collation") ? info["collation"] : "utf8mb4_general_ci";
-                        writer.WriteLine($"CREATE DATABASE IF NOT EXISTS `{databaseName}` DEFAULT CHARACTER SET {charset} COLLATE {collation};");
+                        writer.WriteLine($"CREATE DATABASE IF NOT EXISTS {MySqlImportRunner.QuoteIdentifier(databaseName)} DEFAULT CHARACTER SET {charset} COLLATE {collation};");
                     }
                     if (options.IncludeUseDatabase)
-                        writer.WriteLine($"USE `{databaseName}`;");
+                        writer.WriteLine($"USE {MySqlImportRunner.QuoteIdentifier(databaseName)};");
                     writer.WriteLine();
 
                     // 1. DROP 語句
                     if (options.IncludeDropStatements && options.Mode != MySqlExportMode.DataOnly)
                     {
-                        foreach (var tr in selectedTriggers) writer.WriteLine($"DROP TRIGGER IF EXISTS `{tr}`;");
+                        foreach (var tr in selectedTriggers) writer.WriteLine($"DROP TRIGGER IF EXISTS {MySqlImportRunner.QuoteIdentifier(tr)};");
                         foreach (var r in selectedRoutines)
                         {
                             string type = r.StartsWith("PROCEDURE:", StringComparison.OrdinalIgnoreCase) ? "PROCEDURE" : "FUNCTION";
                             string name = r.Contains(":") ? r.Substring(r.IndexOf(':') + 1) : r;
-                            writer.WriteLine($"DROP {type} IF EXISTS `{name}`;");
+                            writer.WriteLine($"DROP {type} IF EXISTS {MySqlImportRunner.QuoteIdentifier(name)};");
                         }
-                        foreach (var v in selectedViews) writer.WriteLine($"DROP VIEW IF EXISTS `{v}`;");
-                        foreach (var t in selectedTables) writer.WriteLine($"DROP TABLE IF EXISTS `{t}`;");
+                        foreach (var v in selectedViews) writer.WriteLine($"DROP VIEW IF EXISTS {MySqlImportRunner.QuoteIdentifier(v)};");
+                        foreach (var t in selectedTables) writer.WriteLine($"DROP TABLE IF EXISTS {MySqlImportRunner.QuoteIdentifier(t)};");
                         writer.WriteLine();
                     }
 
@@ -173,6 +162,7 @@ namespace mySQLPunk.lib.MySqlExport
                         {
                             cancellation.ThrowIfCancellationRequested();
                             string ddl = db.GetTableCreateStatement(databaseName, table);
+                            if (string.IsNullOrWhiteSpace(ddl)) throw new InvalidOperationException("Missing table DDL: " + table);
                             if (!string.IsNullOrWhiteSpace(ddl))
                             {
                                 writer.WriteLine(ddl.TrimEnd().TrimEnd(';') + ";");
@@ -184,52 +174,62 @@ namespace mySQLPunk.lib.MySqlExport
                     // 3. 資料列 (Data)
                     if (options.Mode != MySqlExportMode.SchemaOnly)
                     {
-                        int batchSize = options.InsertBatchSize > 0 ? options.InsertBatchSize : 1000;
+                        // IDatabase materializes a page; bound bytes before fetching.
+                        int batchSize = Math.Min(options.InsertBatchSize > 0 ? options.InsertBatchSize : 16, 16);
                         for (int i = 0; i < selectedTables.Count; i++)
                         {
                             cancellation.ThrowIfCancellationRequested();
                             string table = selectedTables[i];
                             long tableRows = 0;
-                            long totalTableRows = 0;
-                            try { totalTableRows = db.CountRows(databaseName, table); } catch { }
+                            long totalTableRows = db.CountRows(databaseName, table);
+                            var shape = LoadGeneratedColumnsAndCheckRowBound(table, cancellation);
 
                             ReportProgress(progress, MySqlExportStage.WritingData, table, i, selectedTables.Count, totalProcessedRows, estimatedTotalRows, fileStream.Position, clock);
 
                             while (tableRows < totalTableRows || totalTableRows == 0)
                             {
                                 cancellation.ThrowIfCancellationRequested();
-                                DataTable page = db.SelectTablePage(databaseName, table, tableRows, batchSize);
-                                if (page == null || page.Rows.Count == 0) break;
+                                DataTable page = ReadBoundedPage(table, shape, tableRows, batchSize);
+                                if (page == null) throw new InvalidOperationException("Source row query returned no result: " + table);
+                                cancellation.ThrowIfCancellationRequested();
+                                if (page.Rows.Count == 0) break;
 
-                                writer.Write("INSERT INTO `");
-                                writer.Write(table.Replace("`", "``"));
-                                writer.Write("` (");
-                                for (int c = 0; c < page.Columns.Count; c++)
+                                var writableColumns = page.Columns.Cast<DataColumn>().Where(c => !shape.Generated.Contains(c.ColumnName)).ToList();
+                                if (writableColumns.Count == 0) throw new NotSupportedException("Tables containing only generated columns require a native client: " + table);
+                                string prefix = "INSERT INTO " + MySqlImportRunner.QuoteIdentifier(table) + " (" +
+                                    string.Join(", ", writableColumns.Select(c => MySqlImportRunner.QuoteIdentifier(c.ColumnName))) + ") VALUES\r\n";
+                                var insert = new StringBuilder(prefix);
+                                foreach (DataRow row in page.Rows)
                                 {
-                                    if (c > 0) writer.Write(", ");
-                                    writer.Write("`");
-                                    writer.Write(page.Columns[c].ColumnName.Replace("`", "``"));
-                                    writer.Write("`");
-                                }
-                                writer.WriteLine(") VALUES");
-
-                                for (int r = 0; r < page.Rows.Count; r++)
-                                {
-                                    writer.Write("(");
-                                    for (int c = 0; c < page.Columns.Count; c++)
+                                    cancellation.ThrowIfCancellationRequested();
+                                    var rowText = new StringBuilder("(");
+                                    for (int c = 0; c < writableColumns.Count; c++)
                                     {
-                                        if (c > 0) writer.Write(", ");
-                                        writer.Write(MySqlExportService.ToMySqlLiteral(page.Rows[r][c]));
+                                        if (c > 0) rowText.Append(", ");
+                                        rowText.Append(ToBoundedLiteral(row[writableColumns[c]]));
+                                        if (rowText.Length > MaxInsertBytes) throw new NotSupportedException("Single row exceeds safe logical-export limit: " + table);
                                     }
-                                    writer.Write(r == page.Rows.Count - 1 ? ");" : "),");
-                                    writer.WriteLine();
+                                    rowText.Append(")");
+                                    string rowSql = rowText.ToString();
+                                    if (Encoding.UTF8.GetByteCount(prefix) + Encoding.UTF8.GetByteCount(rowSql) + 4 > MaxInsertBytes)
+                                        throw new NotSupportedException("Single row exceeds 8 MiB SQL limit: " + table);
+                                    if (Encoding.UTF8.GetByteCount(insert.ToString()) + Encoding.UTF8.GetByteCount(rowSql) + 4 > MaxInsertBytes)
+                                    {
+                                        writer.Write(insert.ToString());
+                                        writer.WriteLine(";");
+                                        insert.Clear().Append(prefix);
+                                    }
+                                    if (insert.Length > prefix.Length) insert.Append(",\r\n");
+                                    insert.Append(rowSql);
                                 }
+                                if (insert.Length > prefix.Length) { writer.Write(insert.ToString()); writer.WriteLine(";"); }
 
                                 tableRows += page.Rows.Count;
                                 totalProcessedRows += page.Rows.Count;
                                 ReportProgress(progress, MySqlExportStage.WritingData, table, i, selectedTables.Count, totalProcessedRows, estimatedTotalRows, fileStream.Position, clock);
                             }
 
+                            if (tableRows != totalTableRows) throw new InvalidOperationException("Source row count changed or a page was lost: " + table);
                             if (tableRows > 0) writer.WriteLine();
                             tableCount++;
                             tableManifest.Add(Tuple.Create(table, tableRows));
@@ -250,7 +250,7 @@ namespace mySQLPunk.lib.MySqlExport
                             string ddl = db.GetViewCreateStatement(databaseName, view);
                             if (!string.IsNullOrWhiteSpace(ddl))
                             {
-                                ddl = MySqlExportService.NormalizeObjectCreateSql(ddl, options.RemoveDefiner);
+                                ddl = NormalizeCreateSql(ddl, options.RemoveDefiner);
                                 writer.WriteLine(ddl.TrimEnd().TrimEnd(';') + ";");
                                 writer.WriteLine();
                             }
@@ -270,7 +270,7 @@ namespace mySQLPunk.lib.MySqlExport
                                 (r.Type + ":" + r.Name).Equals(rName, StringComparison.OrdinalIgnoreCase));
                             if (routine != null)
                             {
-                                string sql = $"SHOW CREATE {routine.Type} `{databaseName}`.`{routine.Name}`;";
+                                string sql = $"SHOW CREATE {routine.Type} {MySqlImportRunner.QuoteIdentifier(databaseName)}.{MySqlImportRunner.QuoteIdentifier(routine.Name)};";
                                 var dt = db.SelectSQL(sql, new Dictionary<string, object>());
                                 if (dt != null && dt.Rows.Count > 0)
                                 {
@@ -278,7 +278,7 @@ namespace mySQLPunk.lib.MySqlExport
                                     string ddl = dt.Columns.Contains(createKey) ? dt.Rows[0][createKey]?.ToString() : dt.Rows[0][2]?.ToString();
                                     if (!string.IsNullOrWhiteSpace(ddl))
                                     {
-                                        ddl = MySqlExportService.NormalizeObjectCreateSql(ddl, options.RemoveDefiner);
+                                        ddl = NormalizeCreateSql(ddl, options.RemoveDefiner);
                                         writer.WriteLine("DELIMITER ;;");
                                         writer.WriteLine(ddl.TrimEnd().TrimEnd(';'));
                                         writer.WriteLine(";;");
@@ -298,14 +298,14 @@ namespace mySQLPunk.lib.MySqlExport
                         foreach (var triggerName in selectedTriggers)
                         {
                             cancellation.ThrowIfCancellationRequested();
-                            string sql = $"SHOW CREATE TRIGGER `{databaseName}`.`{triggerName}`;";
+                            string sql = $"SHOW CREATE TRIGGER {MySqlImportRunner.QuoteIdentifier(databaseName)}.{MySqlImportRunner.QuoteIdentifier(triggerName)};";
                             var dt = db.SelectSQL(sql, new Dictionary<string, object>());
                             if (dt != null && dt.Rows.Count > 0)
                             {
                                 string ddl = dt.Columns.Contains("SQL Original Statement") ? dt.Rows[0]["SQL Original Statement"]?.ToString() : dt.Rows[0][2]?.ToString();
                                 if (!string.IsNullOrWhiteSpace(ddl))
                                 {
-                                    ddl = MySqlExportService.NormalizeObjectCreateSql(ddl, options.RemoveDefiner);
+                                    ddl = NormalizeCreateSql(ddl, options.RemoveDefiner);
                                     writer.WriteLine("DELIMITER ;;");
                                     writer.WriteLine(ddl.TrimEnd().TrimEnd(';'));
                                     writer.WriteLine(";;");
@@ -338,6 +338,13 @@ namespace mySQLPunk.lib.MySqlExport
                     writer.Flush();
                 }
 
+                cancellation.ThrowIfCancellationRequested();
+                if (inTransaction)
+                {
+                    RequireExecution("ROLLBACK;");
+                    inTransaction = false;
+                }
+
                 // 計算產出檔案的 SHA-256
                 string sha256Hex;
                 long finalLength;
@@ -346,8 +353,15 @@ namespace mySQLPunk.lib.MySqlExport
                     finalLength = fs.Length;
                     using (var sha = SHA256.Create())
                     {
-                        byte[] hash = sha.ComputeHash(fs);
-                        sha256Hex = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                        var buffer = new byte[65536];
+                        int read;
+                        while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            cancellation.ThrowIfCancellationRequested();
+                            sha.TransformBlock(buffer, 0, read, buffer, 0);
+                        }
+                        sha.TransformFinalBlock(new byte[0], 0, 0);
+                        sha256Hex = BitConverter.ToString(sha.Hash).Replace("-", "").ToLowerInvariant();
                     }
                 }
 
@@ -355,8 +369,10 @@ namespace mySQLPunk.lib.MySqlExport
                 File.AppendAllText(stagingPath, $"-- Manifest-SHA256: {sha256Hex}{Environment.NewLine}", Encoding.UTF8);
 
                 // 原子替換到目標檔案
-                if (File.Exists(targetPath)) File.Delete(targetPath);
-                File.Move(stagingPath, targetPath);
+                cancellation.ThrowIfCancellationRequested();
+                finalLength = new FileInfo(stagingPath).Length;
+                publicationAttempted = true;
+                SqlExportPublication.Publish(stagingPath, targetPath);
 
                 clock.Stop();
                 ReportProgress(progress, MySqlExportStage.Completed, "", tableCount, selectedTables.Count, totalProcessedRows, estimatedTotalRows, finalLength, clock);
@@ -375,7 +391,7 @@ namespace mySQLPunk.lib.MySqlExport
             }
             catch (OperationCanceledException)
             {
-                CleanStaging(stagingPath);
+                if (!publicationAttempted) CleanStaging(stagingPath);
                 clock.Stop();
                 return new MySqlExportResult(
                     MySqlExportStage.Cancelled,
@@ -392,7 +408,7 @@ namespace mySQLPunk.lib.MySqlExport
             }
             catch (Exception ex)
             {
-                CleanStaging(stagingPath);
+                if (!publicationAttempted) CleanStaging(stagingPath);
                 clock.Stop();
                 return new MySqlExportResult(
                     MySqlExportStage.Failed,
@@ -405,15 +421,155 @@ namespace mySQLPunk.lib.MySqlExport
                     0,
                     null,
                     clock.Elapsed,
-                    ex.Message);
+                    ex.Message + (publicationAttempted ? " Completed staging file retained at: " + stagingPath : ""));
             }
             finally
             {
                 if (inTransaction)
                 {
-                    try { db.ExecSQL("COMMIT;"); } catch { }
+                    try { db.ExecSQL("ROLLBACK;"); } catch { }
                 }
             }
+        }
+
+        private static string NormalizeCreateSql(string sql, bool removeDefiner)
+        {
+            if (!removeDefiner) return sql;
+            var tokens = MySqlScriptReader.Tokens(sql);
+            // DEFINER is only a CREATE header clause. Never run replacement on
+            // string constants or on the body of a stored routine.
+            for (int i = 1; i < tokens.Count; i++)
+            {
+                string value = tokens[i].Value.ToUpperInvariant();
+                if (!tokens[i].Quoted && (value == "VIEW" || value == "TRIGGER" || value == "PROCEDURE" || value == "FUNCTION")) break;
+                if (!tokens[i].Quoted && value == "DEFINER" && i + 4 < tokens.Count && tokens[i + 1].Value == "=")
+                {
+                    int end = i + 3;
+                    if (tokens[end].Value == "@" && end + 1 < tokens.Count) end += 2;
+                    if (end < tokens.Count) sql = sql.Remove(tokens[i].Start, tokens[end].Start - tokens[i].Start);
+                    break;
+                }
+            }
+            tokens = MySqlScriptReader.Tokens(sql);
+            for (int i = tokens.Count - 3; i >= 0; i--)
+                if (!tokens[i].Quoted && !tokens[i + 1].Quoted && !tokens[i + 2].Quoted &&
+                    tokens[i].Value.Equals("SQL", StringComparison.OrdinalIgnoreCase) &&
+                    tokens[i + 1].Value.Equals("SECURITY", StringComparison.OrdinalIgnoreCase) &&
+                    tokens[i + 2].Value.Equals("DEFINER", StringComparison.OrdinalIgnoreCase))
+                    sql = MySqlScriptReader.ReplaceToken(sql, tokens[i + 2], "INVOKER");
+            return sql;
+        }
+
+        private void RequireTransactionalTables(List<string> selectedTables)
+        {
+            DataTable status = db.GetTableStatus(databaseName);
+            if (status == null || !status.Columns.Contains("Name") || !status.Columns.Contains("Engine"))
+                throw new InvalidOperationException("Cannot verify table engines for a consistent snapshot.");
+            foreach (string table in selectedTables)
+            {
+                DataRow entry = status.Rows.Cast<DataRow>().FirstOrDefault(r => string.Equals(Convert.ToString(r["Name"]), table, StringComparison.OrdinalIgnoreCase));
+                if (entry == null || !string.Equals(Convert.ToString(entry["Engine"]), "InnoDB", StringComparison.OrdinalIgnoreCase))
+                    throw new NotSupportedException("Consistent snapshot requires verified InnoDB tables: " + table);
+            }
+        }
+
+        private const int MaxSourceRowBytes = 1024 * 1024;
+        private const int MaxInsertBytes = 8 * 1024 * 1024;
+
+        private void RequireExecution(string sql)
+        {
+            var result = db.ExecSQL(sql);
+            if (!MySqlImportRunner.IsExecutionSuccess(result))
+                throw new InvalidOperationException(DatabaseExecutionResultService.GetFailureReason(result));
+        }
+
+        private TableShape LoadGeneratedColumnsAndCheckRowBound(string table, CancellationToken cancellation)
+        {
+            DataTable columns = db.GetColumns(databaseName, table);
+            if (columns == null || columns.Rows.Count == 0) throw new InvalidOperationException("Missing column metadata: " + table);
+            string nameColumn = columns.Columns.Contains("Field") ? "Field" : "COLUMN_NAME";
+            string extraColumn = columns.Columns.Contains("Extra") ? "Extra" : "EXTRA";
+            if (!columns.Columns.Contains(nameColumn) || !columns.Columns.Contains(extraColumn))
+                throw new NotSupportedException("Generated-column metadata unavailable: " + table);
+            var shape = new TableShape();
+            var generated = shape.Generated;
+            var sizes = new List<string>();
+            foreach (DataRow column in columns.Rows)
+            {
+                string name = Convert.ToString(column[nameColumn]);
+                string extra = Convert.ToString(column[extraColumn]);
+                string expression = columns.Columns.Contains("GenerationExpression") ? Convert.ToString(column["GenerationExpression"]) : "";
+                if (extra.IndexOf("VIRTUAL", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    extra.IndexOf("STORED", StringComparison.OrdinalIgnoreCase) >= 0 || !string.IsNullOrWhiteSpace(expression)) generated.Add(name);
+                string type = columns.Columns.Contains("Type") ? Convert.ToString(column["Type"]) :
+                    columns.Columns.Contains("DATA_TYPE") ? Convert.ToString(column["DATA_TYPE"]) : "";
+                if (type.IndexOf("geometry", StringComparison.OrdinalIgnoreCase) >= 0 || type.IndexOf("point", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    type.IndexOf("polygon", StringComparison.OrdinalIgnoreCase) >= 0 || type.IndexOf("linestring", StringComparison.OrdinalIgnoreCase) >= 0)
+                    throw new NotSupportedException("Spatial column values require a native MySQL export: " + table + "." + name);
+                shape.Names.Add(name);
+                sizes.Add("COALESCE(OCTET_LENGTH(" + MySqlImportRunner.QuoteIdentifier(name) + "),0)");
+            }
+            cancellation.ThrowIfCancellationRequested();
+            string sql = "SELECT COALESCE(MAX(" + string.Join(" + ", sizes) + "),0) AS MaxRowBytes FROM " +
+                MySqlImportRunner.QuoteIdentifier(databaseName) + "." + MySqlImportRunner.QuoteIdentifier(table) + ";";
+            DataTable bounds = db.SelectSQL(sql);
+            if (bounds == null || bounds.Rows.Count != 1 || !bounds.Columns.Contains("MaxRowBytes") || bounds.Rows[0]["MaxRowBytes"] == DBNull.Value)
+                throw new InvalidOperationException("Cannot establish a safe source row-size bound: " + table);
+            long maxBytes = Convert.ToInt64(bounds.Rows[0]["MaxRowBytes"], CultureInfo.InvariantCulture);
+            if (maxBytes < 0 || maxBytes > MaxSourceRowBytes)
+                throw new NotSupportedException("Source row exceeds 1 MiB materialization limit; use a native MySQL export: " + table);
+            shape.ByteExpression = string.Join(" + ", sizes);
+            return shape;
+        }
+
+        private sealed class TableShape
+        {
+            public readonly List<string> Names = new List<string>();
+            public readonly HashSet<string> Generated = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            public string ByteExpression;
+        }
+
+        private DataTable ReadBoundedPage(string table, TableShape shape, long offset, int limit)
+        {
+            string marker = "__mysqlpunk_row_bytes";
+            while (shape.Names.Contains(marker)) marker += "_";
+            // Server-side CASE prevents a concurrently enlarged LOB from being
+            // materialized even when the user disabled the snapshot option.
+            string predicate = "(" + shape.ByteExpression + ") <= " + MaxSourceRowBytes;
+            string projection = string.Join(", ", shape.Names.Select(name => "CASE WHEN " + predicate + " THEN " +
+                MySqlImportRunner.QuoteIdentifier(name) + " ELSE NULL END AS " + MySqlImportRunner.QuoteIdentifier(name)));
+            DataTable page = db.SelectSQL("SELECT " + projection + ", (" + shape.ByteExpression + ") AS " + marker +
+                " FROM " + MySqlImportRunner.QuoteIdentifier(databaseName) + "." + MySqlImportRunner.QuoteIdentifier(table) +
+                " LIMIT " + offset.ToString(CultureInfo.InvariantCulture) + ", " + limit.ToString(CultureInfo.InvariantCulture) + ";");
+            if (page == null || !page.Columns.Contains(marker)) throw new InvalidOperationException("Bounded source page query failed: " + table);
+            foreach (DataRow row in page.Rows)
+                if (row[marker] == DBNull.Value || Convert.ToInt64(row[marker], CultureInfo.InvariantCulture) > MaxSourceRowBytes)
+                    throw new NotSupportedException("Source row exceeds 1 MiB materialization limit: " + table);
+            page.Columns.Remove(marker);
+            return page;
+        }
+
+        private static string ToBoundedLiteral(object value)
+        {
+            if (value is byte[] && ((byte[])value).Length > MaxSourceRowBytes ||
+                value is string && Encoding.UTF8.GetByteCount((string)value) > MaxSourceRowBytes)
+                throw new NotSupportedException("Source value exceeds 1 MiB logical-export limit.");
+            if (value is TimeSpan)
+            {
+                TimeSpan span = (TimeSpan)value;
+                if (span.Ticks % 10 != 0) throw new NotSupportedException("TIME precision exceeds MySQL microseconds.");
+                bool negative = span < TimeSpan.Zero;
+                TimeSpan abs = span.Duration();
+                return "'" + (negative ? "-" : "") + ((long)abs.TotalHours).ToString("00", CultureInfo.InvariantCulture) +
+                    ":" + abs.Minutes.ToString("00") + ":" + abs.Seconds.ToString("00") +
+                    "." + ((abs.Ticks % TimeSpan.TicksPerSecond) / 10).ToString("000000") + "'";
+            }
+            if (value != null && value != DBNull.Value && !(value is string) && !(value is char) && !(value is byte[]) &&
+                !(value is bool) && !(value is DateTime) && !(value is decimal) && !(value is double) && !(value is float) &&
+                !(value is byte) && !(value is sbyte) && !(value is short) && !(value is ushort) && !(value is int) && !(value is uint) &&
+                !(value is long) && !(value is ulong) && value.GetType().FullName != "MySqlConnector.MySqlDateTime")
+                throw new NotSupportedException("Unsupported MySQL value type: " + value.GetType().FullName);
+            return MySqlExportService.ToMySqlLiteral(value);
         }
 
         private static void CleanStaging(string path)

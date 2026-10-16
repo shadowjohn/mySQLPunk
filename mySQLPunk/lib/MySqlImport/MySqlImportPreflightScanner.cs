@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading;
 
@@ -33,97 +34,21 @@ namespace mySQLPunk.lib.MySqlImport
             try
             {
                 using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536))
-                using (var reader = new StreamReader(fs, Encoding.UTF8, true))
+                using (var reader = new StreamReader(fs, new UTF8Encoding(false, true), true))
                 {
-                    string delimiter = ";";
-                    var currentBatch = new StringBuilder();
-                    int lineIndex = 0;
-                    string line;
-
-                    while ((line = reader.ReadLine()) != null)
+                    foreach (var statement in MySqlScriptReader.Read(reader, cancellation, comment =>
                     {
-                        cancellation.ThrowIfCancellationRequested();
-                        lineIndex++;
-
-                        // 檢查 embedded NUL (非法字元或編碼錯誤)
-                        if (line.IndexOf('\0') >= 0)
-                        {
-                            issues.Add($"Line {lineIndex}: Contains Embedded NUL character (possible malformed encoding or binary data).");
-                            break;
-                        }
-
-                        string trimmed = line.Trim();
-
-                        // 檢查 Manifest
-                        if (trimmed.StartsWith("--"))
-                        {
-                            if (trimmed.Contains("mySQLPunk Native Manifest"))
-                            {
-                                hasManifest = true;
-                            }
-                            else if (hasManifest)
-                            {
-                                var mTables = ManifestTablesRegex.Match(trimmed);
-                                if (mTables.Success && int.TryParse(mTables.Groups[1].Value, out int mt))
-                                {
-                                    manifestTables = mt;
-                                    continue;
-                                }
-                                var mRows = ManifestRowsRegex.Match(trimmed);
-                                if (mRows.Success && long.TryParse(mRows.Groups[1].Value, out long mr))
-                                {
-                                    manifestRows = mr;
-                                    continue;
-                                }
-                                var mTable = ManifestTableRegex.Match(trimmed);
-                                if (mTable.Success)
-                                {
-                                    if (manifestTables == 0) manifestTables++;
-                                    if (long.TryParse(mTable.Groups[2].Value, out long r) && manifestRows == 0) manifestRows += r;
-                                    continue;
-                                }
-                                var mSha = ManifestSha256Regex.Match(trimmed);
-                                if (mSha.Success)
-                                {
-                                    manifestSha = mSha.Groups[1].Value;
-                                }
-                            }
-                            continue;
-                        }
-
-                        // DELIMITER 宣告
-                        if (trimmed.StartsWith("DELIMITER", StringComparison.OrdinalIgnoreCase))
-                        {
-                            string newDelim = trimmed.Substring(9).Trim();
-                            if (!string.IsNullOrWhiteSpace(newDelim))
-                            {
-                                delimiter = newDelim;
-                                currentBatch.Clear();
-                                continue;
-                            }
-                        }
-
-                        currentBatch.AppendLine(line);
-
-                        // 單批次大小檢查 (32 MiB)
-                        if (currentBatch.Length > MaxBatchBytes)
-                        {
-                            issues.Add($"Line {lineIndex}: Single SQL batch exceeds safe limit of 32 MiB.");
-                            break;
-                        }
-
-                        // 檢查批次終止
-                        if (trimmed.EndsWith(delimiter, StringComparison.Ordinal))
-                        {
-                            statementCount++;
-                            currentBatch.Clear();
-                        }
-                    }
-
-                    if (currentBatch.Length > 0 && !string.IsNullOrWhiteSpace(currentBatch.ToString()))
-                    {
-                        statementCount++;
-                    }
+                        if (comment.Contains("mySQLPunk Native Manifest")) hasManifest = true;
+                        if (!hasManifest) return;
+                        var tables = ManifestTablesRegex.Match(comment);
+                        if (tables.Success && int.TryParse(tables.Groups[1].Value, out int mt)) manifestTables = mt;
+                        var rows = ManifestRowsRegex.Match(comment);
+                        if (rows.Success && long.TryParse(rows.Groups[1].Value, out long mr)) manifestRows = mr;
+                        var sha = ManifestSha256Regex.Match(comment);
+                        if (sha.Success) manifestSha = sha.Groups[1].Value;
+                    })) statementCount++;
+                    if (manifestSha != null && !VerifyHash(filePath, manifestSha, cancellation))
+                        issues.Add("Native manifest SHA-256 does not match the SQL file contents.");
                 }
             }
             catch (OperationCanceledException)
@@ -146,5 +71,42 @@ namespace mySQLPunk.lib.MySqlImport
                 manifestSha,
                 issues);
         }
+        private static bool VerifyHash(string path, string expected, CancellationToken cancellation)
+        {
+            using (var stream = File.OpenRead(path))
+            using (var sha = SHA256.Create())
+            {
+                int tailSize = (int)Math.Min(1024, stream.Length);
+                stream.Position = stream.Length - tailSize;
+                var tail = new byte[tailSize];
+                int read = stream.Read(tail, 0, tail.Length);
+                byte[] marker = Encoding.ASCII.GetBytes("-- Manifest-SHA256: " + expected);
+                int index = -1;
+                for (int i = read - marker.Length; i >= 0; i--)
+                {
+                    bool match = true;
+                    for (int j = 0; j < marker.Length; j++)
+                        if (char.ToUpperInvariant((char)tail[i + j]) != char.ToUpperInvariant((char)marker[j])) { match = false; break; }
+                    if (match) { index = i; break; }
+                }
+                if (index < 0 || (index > 0 && tail[index - 1] != 10 && tail[index - 1] != 13)) return false;
+                for (int i = index + marker.Length; i < read; i++)
+                    if (tail[i] != 10 && tail[i] != 13 && tail[i] != 32 && tail[i] != 9) return false;
+                long remaining = stream.Length - tailSize + index;
+                stream.Position = 0;
+                var buffer = new byte[65536];
+                while (remaining > 0)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    int count = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+                    if (count == 0) return false;
+                    sha.TransformBlock(buffer, 0, count, buffer, 0);
+                    remaining -= count;
+                }
+                sha.TransformFinalBlock(new byte[0], 0, 0);
+                return string.Equals(BitConverter.ToString(sha.Hash).Replace("-", ""), expected, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
     }
 }

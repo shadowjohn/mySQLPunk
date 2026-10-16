@@ -6677,7 +6677,7 @@ namespace mySQLPunk
             }
             if (IsMySqlTarget(target))
             {
-                OpenMySqlExportWizard(target, dataOnly ? lib.MySqlExport.MySqlExportMode.DataOnly : lib.MySqlExport.MySqlExportMode.SchemaAndData);
+                OpenMySqlExportWizard(target, dataOnly ? lib.MySqlExport.MySqlExportMode.DataOnly : lib.MySqlExport.MySqlExportMode.SchemaAndData, tableName);
                 return;
             }
             if (IsSqliteTarget(target))
@@ -6952,7 +6952,7 @@ namespace mySQLPunk
             if (IsMySqlTarget(target) && (selection == null || selection.GroupName == "Tables"))
             {
                 bool tableDataOnly = selection != null && dataOnlyForTable;
-                OpenMySqlExportWizard(target, tableDataOnly ? lib.MySqlExport.MySqlExportMode.DataOnly : lib.MySqlExport.MySqlExportMode.SchemaAndData);
+                OpenMySqlExportWizard(target, tableDataOnly ? lib.MySqlExport.MySqlExportMode.DataOnly : lib.MySqlExport.MySqlExportMode.SchemaAndData, selection == null ? null : selection.ObjectName);
                 return;
             }
             if (IsSqliteTarget(target) && (selection == null || selection.GroupName == "Tables"))

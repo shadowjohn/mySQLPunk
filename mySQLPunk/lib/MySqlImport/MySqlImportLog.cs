@@ -28,7 +28,7 @@ namespace mySQLPunk.lib.MySqlImport
             Path = System.IO.Path.Combine(directory, stem + ".log");
 
             stream = new FileStream(Path, FileMode.Create, FileAccess.Write, FileShare.Read);
-            writer = new StreamWriter(stream, Encoding.UTF8);
+            writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
             WriteHeader(jobId);
         }
 

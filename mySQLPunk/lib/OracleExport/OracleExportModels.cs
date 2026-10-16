@@ -26,7 +26,7 @@ namespace mySQLPunk.lib.OracleExport
     {
         public string Owner { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
-        public string FullQualifiedName => "\"" + (string.IsNullOrWhiteSpace(Owner) ? "SYSTEM" : Owner) + "\".\"" + Name + "\"";
+        public string FullQualifiedName => "\"" + Owner.Replace("\"", "\"\"") + "\".\"" + Name.Replace("\"", "\"\"") + "\"";
         public string DisplayName => string.IsNullOrWhiteSpace(Owner) ? Name : Owner + "." + Name;
         public long RowCount { get; set; }
         public long EstimatedBytes { get; set; }

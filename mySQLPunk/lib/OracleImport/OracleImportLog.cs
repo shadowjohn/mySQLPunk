@@ -22,10 +22,11 @@ namespace mySQLPunk.lib.OracleImport
             }
 
             string dbSanitized = string.IsNullOrWhiteSpace(targetDatabase) ? "default" : targetDatabase.Replace(':', '_').Replace('/', '_').Replace('\\', '_');
-            string fileName = string.Format("import-oracle-{0}-{1:yyyyMMdd_HHmmss}.log", dbSanitized, DateTime.Now);
+            foreach (char invalid in Path.GetInvalidFileNameChars()) dbSanitized = dbSanitized.Replace(invalid, '_');
+            string fileName = string.Format("import-oracle-{0}-{1:yyyyMMdd_HHmmss}.log", dbSanitized, DateTime.Now).Replace(".log", "-" + Guid.NewGuid().ToString("N") + ".log");
             logPath = Path.Combine(logDir, fileName);
 
-            writer = new StreamWriter(new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.Read), Encoding.UTF8);
+            writer = new StreamWriter(new FileStream(logPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read), Encoding.UTF8) { AutoFlush = true };
             writer.WriteLine("====================================================================");
             writer.WriteLine(" mySQLPunk Oracle Import Execution Log");
             writer.WriteLine(string.Format(" Target Schema/Owner : {0}", targetDatabase));

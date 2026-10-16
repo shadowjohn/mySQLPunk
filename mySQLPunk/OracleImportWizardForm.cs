@@ -116,8 +116,10 @@ namespace mySQLPunk
             timer.Tick += (s, e) => UpdateLiveTicker();
             FormClosing += (s, e) =>
             {
-                if (executing && !closing)
+                if (executing)
                 {
+                    e.Cancel = true;
+                    if (closing) return;
                     if (MessageBox.Show(T("正在匯入 Oracle SQL 腳本中，確定要中途停止嗎？", "Import is currently executing. Cancel it?"), T("確認", "Confirm"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                     {
                         e.Cancel = true;
@@ -125,6 +127,7 @@ namespace mySQLPunk
                     }
                     closing = true;
                     cancellation?.Cancel();
+                    return; // Wait for worker reader/transaction cleanup.
                 }
                 timer.Stop();
                 clock.Stop();
@@ -225,7 +228,7 @@ namespace mySQLPunk
             var optBox = new GroupBox { Text = T("執行保護與 Oracle Spatial 選項", "Execution protection & Spatial settings"), AutoSize = true, Padding = new Padding(12), Margin = new Padding(0, 0, 0, 8) };
             var optFlow = Stack();
 
-            autoRegisterSpatial.Text = T("自動補全 USER_SDO_GEOM_METADATA 空間中繼字典 (若腳本內未包含)", "Auto-register USER_SDO_GEOM_METADATA if missing");
+            autoRegisterSpatial.Text = T("執行腳本內的 USER_SDO_GEOM_METADATA 註冊 (不推測缺少的 metadata)", "Execute script spatial metadata registration (never infer missing metadata)");
             autoRegisterSpatial.Checked = true;
             autoRegisterSpatial.AutoSize = true;
 
@@ -398,6 +401,7 @@ namespace mySQLPunk
 
         private async Task OnNextAsync()
         {
+            if (executing || closing) return;
             if (step == 0)
             {
                 string path = filePathBox.Text.Trim();
@@ -408,7 +412,8 @@ namespace mySQLPunk
                 }
 
                 await RunPreflightAsync(path);
-                if (preflight.CanProceed)
+                if (closing || IsDisposed) return;
+                if (preflight != null && preflight.CanProceed)
                 {
                     MoveStep(1);
                 }
@@ -430,10 +435,15 @@ namespace mySQLPunk
 
         private async Task RunPreflightAsync(string path)
         {
+            executing = true;
+            cancellation = new CancellationTokenSource();
+            try
+            {
             statusLabel.Text = T("正在對 SQL 檔案進行狀態機預檢分析...", "Scanning SQL file with preflight lexer...");
             var scanner = new OracleImportPreflightScanner();
-            preflight = await Task.Run(() => scanner.Scan(path)).ConfigureAwait(true);
+            preflight = await Task.Run(() => scanner.Scan(path, cancellation.Token)).ConfigureAwait(true);
 
+            if (closing || IsDisposed) return;
             if (!preflight.CanProceed)
             {
                 MessageBox.Show(string.Join("\n", preflight.Issues.ToArray()), T("預檢未通過", "Preflight Failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -459,10 +469,18 @@ namespace mySQLPunk
             }
             else
             {
-                issuesList.Items.Add(T("無任何阻擋性異常，腳本結構完整且符合 Oracle 語法標準。", "No issues found. Script is ready for execution."));
+                issuesList.Items.Add(T("文字預檢通過；尚未驗證 Oracle 語法／權限。一般預存 PL/SQL 不支援；DDL 會隱含提交，rollback 僅保護尚未提交的 DML。", "Text preflight passed; Oracle syntax/permissions remain unverified. Stored PL/SQL is unsupported. DDL implicitly commits; rollback protects pending DML only."));
             }
 
             statusLabel.Text = T("預檢完成，請確認設定。", "Preflight complete.");
+            }
+            finally
+            {
+                executing = false;
+                cancellation?.Dispose();
+                cancellation = null;
+                if (closing && !IsDisposed) BeginInvoke(new Action(Close));
+            }
         }
 
         private async Task StartImportAsync()
@@ -548,6 +566,9 @@ namespace mySQLPunk
             finally
             {
                 executing = false;
+                cancellation?.Dispose();
+                cancellation = null;
+                if (closing && !IsDisposed) BeginInvoke(new Action(Close));
             }
         }
 

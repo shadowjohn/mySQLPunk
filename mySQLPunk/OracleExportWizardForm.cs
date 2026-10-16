@@ -19,6 +19,7 @@ namespace mySQLPunk
         private readonly IDatabase db;
         private readonly string databaseName; // Owner / Schema
         private readonly OracleSqlExportService service;
+        private readonly List<string> initialSelection = new List<string>();
         private readonly Panel[] pages = new Panel[4];
         private readonly TextBox search = new TextBox(), targetPathBox = new TextBox();
         private readonly DataGridView tableGrid = new DataGridView();
@@ -52,9 +53,10 @@ namespace mySQLPunk
             this.db = db ?? throw new ArgumentNullException(nameof(db));
             this.databaseName = !string.IsNullOrWhiteSpace(databaseName) ? databaseName : "USER";
             this.service = new OracleSqlExportService(db, databaseName);
+            if (initialOptions != null) initialSelection.AddRange(initialOptions.SelectedTables);
 
             Name = "oracleExportWizard";
-            Text = T("匯出資料庫 · Oracle (支援 SDO_GEOMETRY 空間幾何無損備份)", "Export database · Oracle (with SDO_GEOMETRY spatial support)");
+            Text = T("匯出資料庫 · Oracle (支援有界 SDO_GEOMETRY 備份)", "Export database · Oracle (with SDO_GEOMETRY spatial support)");
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = UiKit.Body;
             ClientSize = new Size(1120, 740);
@@ -116,8 +118,10 @@ namespace mySQLPunk
             timer.Tick += (s, e) => UpdateLiveTicker();
             FormClosing += (s, e) =>
             {
-                if (exporting && !closing)
+                if (exporting || busy)
                 {
+                    e.Cancel = true;
+                    if (closing) return;
                     if (MessageBox.Show(T("正在匯出 Oracle 資料庫中，確定要中止嗎？", "Export is currently running. Cancel it?"), T("確認", "Confirm"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                     {
                         e.Cancel = true;
@@ -125,6 +129,7 @@ namespace mySQLPunk
                     }
                     closing = true;
                     cancellation?.Cancel();
+                    return; // Wait for worker reader/transaction cleanup.
                 }
                 timer.Stop();
                 clock.Stop();
@@ -172,6 +177,18 @@ namespace mySQLPunk
             tableGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "rows", HeaderText = T("列數預估", "Rows (est.)"), Width = 110, ReadOnly = true });
             tableGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "bytes", HeaderText = T("大小 (Bytes)", "Bytes"), Width = 110, ReadOnly = true });
 
+            tableGrid.CurrentCellDirtyStateChanged += (s, e) =>
+            {
+                if (tableGrid.IsCurrentCellDirty) tableGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            };
+            tableGrid.CellValueChanged += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.ColumnIndex != 0) return;
+                var row = tableGrid.Rows[e.RowIndex];
+                var item = row.Tag as OracleTableExportItem;
+                if (item != null) item.Selected = Convert.ToBoolean(row.Cells[0].Value ?? false);
+                UpdateSelectionSummary();
+            };
             tableGrid.CellContentClick += (s, e) =>
             {
                 if (e.RowIndex >= 0 && e.ColumnIndex == 0)
@@ -293,6 +310,16 @@ namespace mySQLPunk
                 if (opt.Mode == OracleExportMode.DataOnly) dataOnly.Checked = true;
                 else if (opt.Mode == OracleExportMode.SchemaOnly) schemaOnly.Checked = true;
                 if (!string.IsNullOrWhiteSpace(opt.TargetPath)) targetPathBox.Text = opt.TargetPath;
+                readOnlySnapshot.Checked = opt.UseTransactionSnapshot;
+                excludeShadowTables.Checked = opt.ExcludeSpatialIndexInternalTables;
+                includeSpatialMetadata.Checked = opt.IncludeSpatialMetadata;
+                includeSpatialIndexes.Checked = opt.IncludeSpatialIndexes;
+                includeDrop.Checked = opt.DropTableIfExists;
+                truncateBefore.Checked = opt.TruncateBeforeInsert;
+                includeViews.Checked = opt.IncludeViews;
+                includeIndexes.Checked = opt.IncludeIndexes;
+                includeComments.Checked = opt.IncludeComments;
+                includeManifest.Checked = opt.IncludeManifest;
             }
             if (string.IsNullOrWhiteSpace(targetPathBox.Text))
             {
@@ -300,6 +327,7 @@ namespace mySQLPunk
                     string.Format("oracle_{0}_dump_{1:yyyyMMdd_HHmmss}.sql", databaseName, DateTime.Now));
             }
 
+            host.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(900, 0), Text = T("支援 AL32UTF8；每列值最多 8 MiB／SQL 區塊 28 MiB。BLOB／CLOB 分段；identity、NCLOB、LRS／曲線／複合幾何等明確拒絕。唯讀快照需非 SYS 帳號；空間 metadata 還原帳號須等於 owner。FK 父表必須一併選取，循環 FK／外部 sequence、function 等相依尚不支援。", "AL32UTF8 only; row values <=8 MiB / SQL block <=28 MiB. BLOB/CLOB chunks supported; identity, NCLOB, LRS/curves/compound geometry rejected. Non-SYS snapshot; metadata restore session user must equal owner. Include all FK parents; cyclic FKs/external sequences/functions are unsupported.") });
             p.Controls.Add(host);
         }
 
@@ -403,10 +431,16 @@ namespace mySQLPunk
         {
             if (busy) return;
             busy = true;
+            cancellation = new CancellationTokenSource();
             statusLabel.Text = T("正在探測 Oracle 資料庫物件與空間幾何欄位...", "Discovering Oracle tables and spatial features...");
             try
             {
-                catalog = await service.GetTableCatalogAsync().ConfigureAwait(true);
+                catalog = await service.GetTableCatalogAsync(cancellation.Token).ConfigureAwait(true);
+                if (initialSelection.Count > 0)
+                {
+                    var selected = new HashSet<string>(initialSelection.Select(name => mySQLPunk.lib.OracleImport.OracleImportRunner.ResolveManifestTarget(name, databaseName)), StringComparer.Ordinal);
+                    foreach (var item in catalog) item.Selected = selected.Contains(item.FullQualifiedName);
+                }
                 ApplyFilter();
                 statusLabel.Text = string.Format(T("探測完成：共找到 {0} 個資料表與檢視。", "Catalog loaded: {0} tables/views found."), catalog.Count);
             }
@@ -417,6 +451,9 @@ namespace mySQLPunk
             finally
             {
                 busy = false;
+                cancellation?.Dispose();
+                cancellation = null;
+                if (closing && !IsDisposed) BeginInvoke(new Action(Close));
             }
         }
 
@@ -605,7 +642,7 @@ namespace mySQLPunk
 
             foreach (var it in catalog)
             {
-                if (it.Selected) opt.SelectedTables.Add(it.Name);
+                if (it.Selected) opt.SelectedTables.Add(it.FullQualifiedName);
             }
 
             cancellation = new CancellationTokenSource();
@@ -653,6 +690,9 @@ namespace mySQLPunk
             finally
             {
                 exporting = false;
+                cancellation?.Dispose();
+                cancellation = null;
+                if (closing && !IsDisposed) BeginInvoke(new Action(Close));
             }
         }
 

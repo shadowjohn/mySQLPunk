@@ -128,11 +128,14 @@ namespace mySQLPunk
 
             FormClosing += (s, e) =>
             {
-                if (busy && !closing)
+                if (busy)
                 {
                     e.Cancel = true;
-                    closing = true;
-                    RequestCancel();
+                    if (!closing)
+                    {
+                        closing = true;
+                        RequestCancel();
+                    }
                 }
             };
         }
@@ -570,12 +573,13 @@ namespace mySQLPunk
                 recheckButton.Enabled = true;
                 backButton.Enabled = true;
                 nextButton.Enabled = (preflight != null && preflight.Passed);
+                if (closing) Close();
             }
         }
 
         private void UpdateConfirmSummary()
         {
-            var strat = (SqliteExistingObjectStrategy)strategyCombo.SelectedIndex;
+            var strat = SqliteExistingObjectSelection.FromIndex(strategyCombo.SelectedIndex);
             confirmSummary.Text =
                 $"● {T("目標 SQLite 資料庫：", "Target Database: ")} {databaseName}\n" +
                 $"● {T("來源 SQL 檔案：", "Source SQL: ")} {request.SourcePath} ({new FileInfo(request.SourcePath).Length / 1024.0 / 1024.0:N2} MB)\n" +
@@ -631,7 +635,7 @@ namespace mySQLPunk
             var opt = new SqliteImportOptions
             {
                 ContinueOnError = continueOnError.Checked,
-                ExistingObjectStrategy = (SqliteExistingObjectStrategy)strategyCombo.SelectedIndex,
+                ExistingObjectStrategy = SqliteExistingObjectSelection.FromIndex(strategyCombo.SelectedIndex),
                 WrapInTransaction = wrapInTransaction.Checked,
                 AutoLoadSpatiaLite = autoLoadSpatiaLite.Checked
             };

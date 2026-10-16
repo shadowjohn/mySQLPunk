@@ -504,7 +504,19 @@ namespace mySQLPunk
 
             string path = sourcePathBox.Text.Trim();
             cancellation = new CancellationTokenSource();
-            preflight = await Task.Run(() => MySqlImportPreflightScanner.Scan(path, cancellation.Token));
+            try
+            {
+                preflight = await Task.Run(() => MySqlImportPreflightScanner.Scan(path, cancellation.Token));
+            }
+            finally
+            {
+                busy = false;
+                cancelButton.Enabled = true;
+                cancellation.Dispose();
+                cancellation = null;
+                if (closing) Close();
+            }
+            if (closing || IsDisposed) return;
 
             scanBar.Style = ProgressBarStyle.Blocks;
             scanBar.Value = preflight.Passed ? 100 : 0;
@@ -604,6 +616,9 @@ namespace mySQLPunk
                 busy = false;
                 executing = false;
                 cancelButton.Text = T("關閉", "Close");
+                cancelButton.Enabled = true;
+                cancellation.Dispose();
+                cancellation = null;
                 nextButton.Enabled = true;
                 if (closing) Close();
             }

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using mySQLPunk.lib;
 using mySQLPunk.lib.SqliteExport;
+using mySQLPunk.lib.SqliteImport;
 
 public static partial class SmokeTests
 {
@@ -33,81 +34,146 @@ public static partial class SmokeTests
         AssertContains(item.SpatialInfo, "GIS", "SpatialInfo match");
     }
 
+    private static mySQLPunk.lib.SqliteExport.SqliteExportResult SqliteExportFixture(SqliteFixtureDatabase database,string directory, params string[] tables)
+    {
+        var options=new SqliteExportWizardOptions(SqliteExportMode.SchemaAndData,Path.Combine(directory,Guid.NewGuid().ToString("N")+".sql"))
+        {
+            SelectedTables=new List<string>(tables), IncludeViews=false, IncludeTriggers=false, IncludeComments=true,
+            IncludeDropStatements=true, PragmaForeignKeysOff=false, PragmaSynchronousOff=false
+        };
+        return new SqliteSqlExportService(database,"main").ExportAsync(options,null,CancellationToken.None).GetAwaiter().GetResult();
+    }
     private static void SqliteExport_ServiceAndManifest_StreamingAndHexBlob()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "mysqlpunk_sqlite_export_test_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        string targetFile = Path.Combine(tempDir, "sqlite_export_test.sql");
-
+        string directory=Path.Combine(Path.GetTempPath(),"mysqlpunk_sqlite_export_native_"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
         try
         {
-            var mockDb = new MockSqliteExportDatabase();
-            var service = new SqliteSqlExportService(mockDb, "gis_demo.sqlite");
-
-            // 1. 驗證 LoadTableCatalog 正確辨識空間圖層並過濾影子表
-            var catalog = service.LoadTableCatalog();
-            Assert(catalog.Count == 1, "Catalog should filter out shadow tables like idx_roads_geom_node, expected 1 table but got " + catalog.Count);
-            Assert(catalog[0].Name == "spatial_roads", "Export item table name match");
-            Assert(catalog[0].IsSpatial, "spatial_roads should be recognized as spatial layer");
-            AssertContains(catalog[0].SpatialInfo, "SpatiaLite", "Spatial info contains provider note");
-
-            var options = new SqliteExportWizardOptions(SqliteExportMode.SchemaAndData, targetFile)
+            using(var source=new SqliteFixtureDatabase()) using(var target=new SqliteFixtureDatabase())
             {
-                SingleTransaction = true,
-                PragmaForeignKeysOff = true,
-                PragmaSynchronousOff = true,
-                IncludeDropStatements = true,
-                IncludeIndexes = true,
-                IncludeViews = true,
-                IncludeTriggers = true
-            };
-            options.SelectedTables.Add("spatial_roads");
-            options.SelectedViews.Add("v_roads");
-            options.SelectedTriggers.Add("trg_roads_audit");
-
-            SqliteExportProgress lastProgress = null;
-            var progress = new Progress<SqliteExportProgress>(p => lastProgress = p);
-
-            var task = service.ExportAsync(options, progress, CancellationToken.None);
-            task.Wait();
-            var result = task.Result;
-
-            Assert(result.Success, "Export should succeed");
-            Assert(File.Exists(targetFile), "Target file must exist after atomic move");
-            Assert(result.TableCount == 1, "Exported table count should be 1");
-            Assert(result.ViewCount == 1, "Exported view count should be 1");
-            Assert(result.TriggerCount == 1, "Exported trigger count should be 1");
-            Assert(result.IndexCount == 1, "Exported index count should be 1");
-            Assert(result.TotalRows == 2, "Exported row count should be 2");
-
-            string content = File.ReadAllText(targetFile);
-            AssertContains(content, "-- mySQLPunk SQLite Logical Dump", "Header comment present");
-            AssertContains(content, "PRAGMA foreign_keys = OFF;", "Pragma foreign_keys OFF present");
-            AssertContains(content, "PRAGMA synchronous = OFF;", "Pragma synchronous OFF present");
-            AssertContains(content, "BEGIN TRANSACTION;", "BEGIN TRANSACTION present");
-            AssertContains(content, "DROP TABLE IF EXISTS \"spatial_roads\";", "DROP TABLE statement present");
-            AssertContains(content, "CREATE TABLE \"spatial_roads\"", "CREATE TABLE DDL present");
-            AssertNotContains(content, "CREATE TABLE \"idx_roads_geom_node\"", "Shadow table should NEVER be exported as CREATE TABLE");
-
-            // 驗證 BLOB 幾何二進位輸出為 X'...' 格式，無損精度
-            AssertContains(content, "X'00010000007C0101000000'", "GIS binary geometry must be exported as X'...' hex literal");
-            AssertContains(content, "COMMIT;", "COMMIT transaction present");
-            AssertContains(content, "PRAGMA foreign_keys = ON;", "Restore foreign_keys ON present");
-
-            // 驗證 Native Manifest
-            AssertContains(content, "-- mySQLPunk Native Manifest", "Native Manifest header present");
-            AssertContains(content, "-- Tables: 1", "Manifest total tables count present");
-            AssertContains(content, "-- TotalRows: 2", "Manifest total rows count present");
-            AssertContains(content, "-- Manifest-Table: spatial_roads | Rows: 2", "Manifest table row entry present");
-            AssertContains(content, "-- Manifest-SHA256:", "Manifest SHA-256 present");
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                try { Directory.Delete(tempDir, true); } catch { }
+                source.Must("CREATE TABLE roads(id INTEGER PRIMARY KEY,name TEXT,geom BLOB); INSERT INTO roads VALUES(1,'Main Street',X'00010000007C0101000000'); INSERT INTO roads VALUES(2,'Broadway',X''); CREATE VIEW v_roads AS SELECT id,name FROM roads; CREATE TRIGGER tr_roads AFTER INSERT ON roads BEGIN SELECT CASE WHEN new.id>0 THEN 'END;' ELSE 'x' END; END; CREATE INDEX idx_roads_name ON roads(name);");
+                var service=new SqliteSqlExportService(source,"main");
+                Assert(service.LoadTableCatalog().Count==1,"Catalog has ordinary table only");
+                string file=Path.Combine(directory,"roads.sql");
+                var options=new SqliteExportWizardOptions(SqliteExportMode.SchemaAndData,file) { SelectedTables=new List<string>{"roads"}, SelectedViews=service.LoadViews(),SelectedTriggers=service.LoadTriggers() };
+                var result=service.ExportAsync(options,null,CancellationToken.None).GetAwaiter().GetResult();
+                Assert(result.Success,"Actual native SQLite export succeeds: "+result.ErrorMessage);
+                Assert(result.TableCount==1 && result.TotalRows==2 && result.ViewCount==1 && result.TriggerCount==1 && result.IndexCount==1,"Native object and row counts match");
+                string content=File.ReadAllText(file);
+                AssertContains(content,"X'00010000007C0101000000'","Binary geometry bytes use hex without conversion");
+                AssertContains(content,"-- Manifest-Payload-SHA256:","Payload checksum scope is explicit");
+                Assert(result.FileBytes==new FileInfo(file).Length,"FileBytes describe delivered bytes including footer");
+                using(var sha=System.Security.Cryptography.SHA256.Create())
+                    AssertEquals(BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(file))).Replace("-","").ToLowerInvariant(),result.Sha256Hash,"Result hash matches external full-file checksum");
+                Assert(SqliteImportPreflightScanner.Scan(file,CancellationToken.None).Passed,"Own native dump checksum validates before writes");
+                var restored=SqliteRunFixture(target,directory,content);
+                Assert(restored.Status==SqliteImportStatus.Completed && restored.ManifestVerified,"Native export imports and row manifest verifies: "+string.Join(";",restored.Errors));
+                AssertEquals("00010000007C0101000000",Convert.ToString(target.Scalar("SELECT hex(geom) FROM roads WHERE id=1;")),"Blob bytes restored");
+                Assert(target.Exists("trigger","tr_roads") && target.Exists("view","v_roads") && target.Exists("index","idx_roads_name"),"Native DDL restored");
             }
         }
+        finally { Directory.Delete(directory,true); }
+    }
+    private static void SqliteExport_NativeRoundtrip_GeneratedRowidSequenceTextComments()
+    {
+        string directory=Path.Combine(Path.GetTempPath(),"mysqlpunk_sqlite_roundtrip_"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
+        try
+        {
+            using(var source=new SqliteFixtureDatabase()) using(var target=new SqliteFixtureDatabase())
+            {
+                source.Must("CREATE TABLE g(a INT,b INT GENERATED ALWAYS AS(a*2),c TEXT,d INT GENERATED ALWAYS AS(a+3) STORED); INSERT INTO g(a,c) VALUES(5,'c'); CREATE TABLE t(x TEXT,y BLOB); INSERT INTO t(rowid,x,y) VALUES(-7,'a'||char(10)||'b'||char(13)||'c'||char(13)||char(10)||'中'||char(0)||char(39),X'00FF01'); INSERT INTO t(rowid,x,y) VALUES(9223372036854775806,'large rowid',X''); CREATE TABLE ai(id INTEGER PRIMARY KEY AUTOINCREMENT,x); INSERT INTO ai VALUES(1,'one'); INSERT INTO ai VALUES(100,'removed'); DELETE FROM ai WHERE id=100; CREATE TABLE empty_ai(id INTEGER PRIMARY KEY AUTOINCREMENT); INSERT INTO empty_ai VALUES(200); DELETE FROM empty_ai; CREATE TABLE wr(k TEXT PRIMARY KEY,v) WITHOUT ROWID /* trailing clause comment */; INSERT INTO wr VALUES('k','v'); CREATE TABLE \"space | name\"(x); INSERT INTO \"space | name\" VALUES(1); CREATE TABLE other(x); CREATE TRIGGER other_tr AFTER INSERT ON other BEGIN SELECT 1; END; CREATE TABLE __mysqlpunk_column_comments(table_name TEXT NOT NULL,column_name TEXT NOT NULL,comment TEXT NOT NULL,PRIMARY KEY(table_name,column_name)); INSERT INTO __mysqlpunk_column_comments VALUES('t','x','line'||char(0)||'note'); INSERT INTO __mysqlpunk_column_comments VALUES('other','x','excluded');");
+                var service=new SqliteSqlExportService(source,"main");
+                Assert(!service.LoadTableCatalog().Exists(i=>i.Name=="__mysqlpunk_column_comments"),"Sidecar excluded from ordinary table selection");
+                string file=Path.Combine(directory,"roundtrip.sql");
+                var options=new SqliteExportWizardOptions(SqliteExportMode.SchemaAndData,file) { SelectedTables=new List<string>{"g","t","ai","empty_ai","wr","space | name","__mysqlpunk_column_comments"}, IncludeViews=false,SelectedTriggers=service.LoadTriggers(),PragmaForeignKeysOff=false,PragmaSynchronousOff=false };
+                var exported=service.ExportAsync(options,null,CancellationToken.None).GetAwaiter().GetResult();
+                Assert(exported.Success,"Generated/rowid/sequence/text/comments export succeeds: "+exported.ErrorMessage);
+                string content=File.ReadAllText(file);
+                AssertNotContains(content,"CREATE TRIGGER other_tr","Unselected table trigger is excluded");
+                Assert(content.IndexOf('\0')<0,"Text NUL uses lossless SQL representation");
+                var restored=SqliteRunFixture(target,directory,content);
+                Assert(restored.Status==SqliteImportStatus.Completed && restored.ManifestVerified,"Generated/rowid/sequence/comments dump imports: "+string.Join(";",restored.Errors));
+                Assert(Convert.ToInt64(target.Scalar("SELECT b+d FROM g;"))==18,"Virtual/stored generated columns recompute");
+                AssertEquals(Convert.ToString(source.Scalar("SELECT hex(x)||':'||hex(y) FROM t WHERE rowid=-7;")),Convert.ToString(target.Scalar("SELECT hex(x)||':'||hex(y) FROM t WHERE rowid=-7;")),"Mixed newline/Unicode/quote/NUL/text and BLOB bytes exact");
+                Assert(Convert.ToInt64(target.Scalar("SELECT max(rowid) FROM t;"))==9223372036854775806L,"Sparse negative/large implicit rowids survive");
+                target.Must("INSERT INTO ai(x) VALUES('next'); INSERT INTO empty_ai DEFAULT VALUES;");
+                Assert(Convert.ToInt64(target.Scalar("SELECT max(id) FROM ai;"))==101 && Convert.ToInt64(target.Scalar("SELECT id FROM empty_ai;"))==201,"Deleted and empty AUTOINCREMENT history survives");
+                AssertEquals("v",Convert.ToString(target.Scalar("SELECT v FROM wr WHERE k='k';")),"WITHOUT ROWID keys survive");
+                Assert(Convert.ToInt64(target.Scalar("SELECT count(*) FROM __mysqlpunk_column_comments;"))==1,"Selected comments exported exactly once");
+                AssertEquals(Convert.ToString(source.Scalar("SELECT hex(comment) FROM __mysqlpunk_column_comments WHERE table_name='t';")),Convert.ToString(target.Scalar("SELECT hex(comment) FROM __mysqlpunk_column_comments WHERE table_name='t';")),"Comment NUL bytes survive");
+            }
+        }
+        finally { Directory.Delete(directory,true); }
+    }
+    private static void SqliteExport_Failures_PreserveOutputAndRejectTamper()
+    {
+        string directory=Path.Combine(Path.GetTempPath(),"mysqlpunk_sqlite_export_fail_"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
+        try
+        {
+            using(var source=new SqliteFixtureDatabase())
+            {
+                source.Must("CREATE TABLE t(x); INSERT INTO t VALUES('old');");
+                foreach(string table in new[]{"missing","t"})
+                {
+                    string file=Path.Combine(directory,"old.sql"); File.WriteAllText(file,"previous good dump");
+                    var options=new SqliteExportWizardOptions(SqliteExportMode.SchemaAndData,file) { SelectedTables=new List<string>{table},IncludeViews=false,IncludeTriggers=false };
+                    source.FailQueryContains=table=="t" ? "PRAGMA table_xinfo" : null;
+                    var result=new SqliteSqlExportService(source,"main").ExportAsync(options,null,CancellationToken.None).GetAwaiter().GetResult();
+                    Assert(result.Stage==SqliteExportStage.Failed,"Missing object and QueryError cannot report Completed");
+                    AssertEquals("previous good dump",File.ReadAllText(file),"Failed source preserves previous dump");
+                    Assert(source.MCT.AutoCommit,"Failed export releases source snapshot");
+                }
+                source.FailQueryContains=null;
+                var good=SqliteExportFixture(source,directory,"t"); Assert(good.Success,"Checksum fixture export succeeds");
+                byte[] data=File.ReadAllBytes(good.TargetPath); data[5]^=1; File.WriteAllBytes(good.TargetPath,data);
+                Assert(!SqliteImportPreflightScanner.Scan(good.TargetPath,CancellationToken.None).Passed,"One-byte alteration is detected before writes");
+                using(var target=new SqliteFixtureDatabase())
+                {
+                    var result=SqliteRunFixture(target,directory,File.ReadAllText(good.TargetPath));
+                    Assert(result.Status==SqliteImportStatus.Failed && !target.TableExists("main","t"),"Tampered dump cannot mutate target");
+                }
+                source.Must("CREATE TABLE oversized(x BLOB); INSERT INTO oversized VALUES(zeroblob(8388609));");
+                var large=SqliteExportFixture(source,directory,"oversized");
+                Assert(large.Stage==SqliteExportStage.Failed && !File.Exists(large.TargetPath),"Oversize native row explicitly rejected before publication");
+                source.Must("CREATE TABLE shadow(rowid,_rowid_,oid); INSERT INTO shadow VALUES(1,2,3);");
+                var shadow=SqliteExportFixture(source,directory,"shadow");
+                Assert(shadow.Stage==SqliteExportStage.Failed,"Inaccessible implicit rowid explicitly rejected");
+                source.Must("CREATE VIRTUAL TABLE virtual_fixture USING rtree(id,minx,maxx,miny,maxy);");
+                var virtualTable=SqliteExportFixture(source,directory,"virtual_fixture");
+                Assert(virtualTable.Stage==SqliteExportStage.Failed,"Untested virtual module backup explicitly rejected");
+            }
+        }
+        finally { Directory.Delete(directory,true); }
+    }
+
+    private static void SqliteExport_ReviewRegression_RepeatedCloseAndInitialOptions()
+    {
+        string directory=Path.Combine(Path.GetTempPath(),"mysqlpunk_sqlite_review_options_"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
+        try
+        {
+            using(var source=new SqliteFixtureDatabase())
+            {
+                source.Must("CREATE TABLE t(x); INSERT INTO t VALUES(1); CREATE VIEW v_t AS SELECT x FROM t; CREATE TRIGGER t_external AFTER INSERT ON t BEGIN INSERT INTO missing_dependency VALUES(new.x); END;");
+                var initial=new SqliteExportWizardOptions(SqliteExportMode.SchemaAndData,Path.Combine(directory,"one.sql")) { SelectedTables=new List<string>{"t"},IncludeViews=false,IncludeTriggers=false };
+                using(var form=SqliteCreateWizard("SqliteExportWizardForm",source,"main",initial))
+                {
+                    Assert(!((System.Windows.Forms.CheckBox)SqliteWizardField(form,"includeViews").GetValue(form)).Checked && !((System.Windows.Forms.CheckBox)SqliteWizardField(form,"includeTriggers").GetValue(form)).Checked,"Single-table flags seed the actual wizard controls");
+                    var load=(Task)form.GetType().GetMethod("LoadCatalogAsync",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(form,null); SqliteWaitWizardTask(load);
+                    var options=(SqliteExportWizardOptions)form.GetType().GetMethod("BuildExportOptions",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(form,null);
+                    Assert(!options.IncludeViews && !options.IncludeTriggers && options.SelectedTables.Count==1 && options.SelectedTables[0]=="t","Options rebuilt from the actual controls retain the single-table scope");
+                    var result=new SqliteSqlExportService(source,"main").ExportAsync(options,null,CancellationToken.None).GetAwaiter().GetResult();
+                    Assert(result.Success && result.ViewCount==0 && result.TriggerCount==0,"Actual wizard options omit views and dependency-bearing triggers even in a one-table database");
+                    string output=File.ReadAllText(result.TargetPath); AssertNotContains(output,"CREATE VIEW","No implicit view DDL"); AssertNotContains(output,"CREATE TRIGGER","No implicit trigger DDL");
+                    SqliteAssertRepeatedCloseBlocked(form,source);
+                }
+                using(var form=SqliteCreateWizard("SqliteExportWizardForm",source,"main",initial))
+                {
+                    SqliteWizardField(form,"closing").SetValue(form,true);
+                    var task=(Task)form.GetType().GetMethod("LoadCatalogAsync",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(form,null); SqliteWaitWizardTask(task);
+                    Assert(form.IsDisposed,"Pending close is honored after export catalog worker cleanup");
+                }
+            }
+        }
+        finally { Directory.Delete(directory,true); }
     }
 
     private sealed class MockSqliteExportDatabase : IDatabase

@@ -30,6 +30,7 @@ namespace mySQLPunk
                 if (!string.IsNullOrWhiteSpace(specificTable))
                 {
                     options.SelectedTables.Add(specificTable);
+                    options.IncludeViews = false;
                 }
 
                 OracleExportResult result;
@@ -39,7 +40,8 @@ namespace mySQLPunk
                 }
                 else
                 {
-                    using (var wizard = new OracleExportWizardForm(target.Database, target.DatabaseName, options))
+                    using (var session = WizardOwnedSession.Open(target.ConnectionInfo, target.ProviderName, target.DatabaseName))
+                    using (var wizard = new OracleExportWizardForm(session.Database, target.DatabaseName, options))
                     {
                         wizard.ShowDialog(this);
                         result = wizard.Result;

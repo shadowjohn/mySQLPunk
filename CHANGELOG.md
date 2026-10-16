@@ -3,13 +3,14 @@
 ## [Unreleased]
 
 ### 🚀 新增功能
-- **MySQL / MariaDB 四步 SQL 備份（傾印）與匯入精靈（對齊 MSSQL 標竿規格）**：
-  - **四步匯出精靈 (`MySqlExportWizardForm`)**：提供「模式與目標」、「物件選取（資料表／檢視／常式／觸發器）」、「選項確認（單一交易快照 `REPEATABLE READ`、外鍵約束開關、DROP 語句、移除 DEFINER）」與「即時進度與看板娘 Punky 動畫」完整四步體驗。底層改採串流直接寫入暫存檔 (`.staging.xxx.tmp`)，完成後原子移動，杜絕大型資料庫傾印時的 OOM 記憶體溢位問題。
-  - **Native Manifest 元數據校驗**：傾印檔末端自動附加原生 Manifest 區塊與 SHA-256 數位簽章，包含資料庫名稱、資料表清單、列數統計與校驗碼。
+- **MySQL / MariaDB 四步 SQL 備份（傾印）與匯入精靈**：
+  - **四步匯出精靈 (`MySqlExportWizardForm`)**：提供「模式與目標」、「物件選取（資料表／檢視／常式／觸發器）」、「選項確認（單一交易快照 `REPEATABLE READ`、外鍵約束開關、DROP 語句、移除 DEFINER）」與「即時進度與看板娘 Punky 動畫」完整四步體驗。底層改採串流直接寫入暫存檔 (`.staging.xxx.tmp`)，完成後原子替換。來源頁面與輸出批次有明確大小限制；較大 LOB 與實機效能邊界見修整驗證文件。
+  - **Native Manifest 元數據校驗**：傾印檔末端自動附加原生 Manifest 區塊與 SHA-256 校驗碼，包含資料庫名稱、資料表清單、列數統計與校驗碼。
   - **四步匯入精靈 (`MySqlImportWizardForm`)**：提供「檔案選取與目標」、「Preflight 串流預檢（編碼判定、DELIMITER 切分、單批次 32 MiB 上限、Manifest 讀取）」、「執行選項（錯誤繼續／遇錯即停、物件存在處理策略）」與「執行回報與日誌檢視」。
-  - **獨立日誌與即時審計**：所有匯入執行步驟與錯誤皆獨立記錄至 `%LOCALAPPDATA%\mySQLPunk\ImportLogs`，並於匯入完成後自動比對 Native Manifest 目標列數，確認還原完整性。
+  - **獨立日誌與即時審計**：所有匯入執行步驟與錯誤皆獨立記錄至 `%LOCALAPPDATA%\mySQLPunk\ImportLogs`，並於匯入完成後自動比對 Native Manifest 目標列數；筆數符合不代表全部資料值與結構已驗收。
 
 ### 🛠️ 問題修正與優化
+- **MySQL／SQLite／Oracle 匯出匯入修整**：修正衝突策略誤刪／漏匯、SQL 字串誤改、provider 失敗被當成功、交易與取消清理；改用獨立工作連線與保留舊檔的原子發布。SQLite 補上 trigger、generated 欄位、rowid／序號及文字 bytes 往返；Oracle 補來源快照、逐列 reader、SRID／metadata 與 bounded LOB 分段。單表入口預設不包含不相關物件。支援上限與尚未驗收項目見 [驗證文件](docs/design/db-wizard-repairs/verification.md)。
 - **MySQL 匯出與匯入精靈版面與體驗優化**：
   - **修復版面跑版坍塌**：修正步驟 2 與步驟 3 之設定 GroupBox 在 FlowLayoutPanel 內因 AutoSize 導致寬度坍塌至邊框寬度 (~15px) 造成文字嚴重擠壓折疊之跑版問題，改採標準固定寬度 (740px) 與適應性內部流式排版。
   - **新增 MySQL 專屬高速還原與約束優化選項**：新增「匯入時關閉唯一性檢查 (`SET UNIQUE_CHECKS = 0`)，啟用 Insert Buffer 提升大量匯入速度 2~5 倍」與「防止主鍵 0 被 AUTO_INCREMENT 覆蓋 (`SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO'`)」開關，兼顧高速傾印與匯入資料正確性。

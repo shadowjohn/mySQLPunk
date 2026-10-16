@@ -147,6 +147,7 @@ if (!(Test-Path -LiteralPath $mysqlConnector)) {
     (Join-Path $PSScriptRoot "SqlServerRestoreCompatibilityTests.cs") `
     (Join-Path $PSScriptRoot "SqlServerMigrationTests.cs") `
     (Join-Path $PSScriptRoot "SqlServerMigrationCatalogTests.cs") `
+    (Join-Path $PSScriptRoot "SmokeTests.WizardRepairs.cs") `
     (Join-Path $PSScriptRoot "SmokeTests.MySqlExport.cs") `
     (Join-Path $PSScriptRoot "SmokeTests.MySqlImport.cs") `
     (Join-Path $PSScriptRoot "SmokeTests.SqliteExport.cs") `
